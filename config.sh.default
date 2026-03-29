@@ -1,0 +1,26 @@
+#!/bin/bash
+# ─────────────────────────────────────────────
+# 🥭 MangoLove — User Configuration
+# ─────────────────────────────────────────────
+# Copy this file to ~/.mangolove/config.sh and customize.
+# Values here override defaults.
+# ─────────────────────────────────────────────
+
+# GitHub work log repository (default: auto-detected as {gh-username}/mangolove-work-logs)
+# Set to "disabled" to turn off work logging entirely
+MANGOLOVE_LOG_REPO=""
+
+# Auto-log sessions to GitHub (true / false)
+MANGOLOVE_AUTO_LOG=true
+
+# Show banner on startup (true / false)
+MANGOLOVE_SHOW_BANNER=true
+
+# Extra text appended to system prompt (for personal preferences)
+MANGOLOVE_EXTRA_PROMPT=""
+
+# Default Claude model (leave empty to use Claude Code default)
+MANGOLOVE_MODEL=""
+
+# Default effort level (low / medium / high / max / auto)
+MANGOLOVE_EFFORT=""

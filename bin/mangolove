@@ -1,0 +1,317 @@
+#!/bin/bash
+# ─────────────────────────────────────────────
+# 🥭 MangoLove — Autonomous Development Agent
+# Powered by Claude Code
+# https://github.com/SongJunSub/mangolove
+# ─────────────────────────────────────────────
+
+set -e
+
+MANGOLOVE_VERSION="0.1.0"
+MANGOLOVE_DIR="${MANGOLOVE_DIR:-$HOME/.mangolove}"
+SYSTEM_PROMPT_FILE="$MANGOLOVE_DIR/prompts/system-prompt.md"
+WORK_LOGGER="$MANGOLOVE_DIR/lib/work-logger.sh"
+PROFILE_MANAGER="$MANGOLOVE_DIR/lib/profile-manager.sh"
+BANNER_SCRIPT="$MANGOLOVE_DIR/lib/banner.sh"
+
+# ─────────────────────────────────────────────
+# Load user configuration
+# ─────────────────────────────────────────────
+MANGOLOVE_AUTO_LOG=true
+MANGOLOVE_SHOW_BANNER=true
+MANGOLOVE_EXTRA_PROMPT=""
+MANGOLOVE_MODEL=""
+MANGOLOVE_EFFORT=""
+
+[ -f "$MANGOLOVE_DIR/config.sh" ] && source "$MANGOLOVE_DIR/config.sh"
+
+# ─────────────────────────────────────────────
+# Preflight check
+# ─────────────────────────────────────────────
+check_dependencies() {
+    if ! command -v claude &> /dev/null; then
+        echo ""
+        echo -e "\033[38;5;203m✗ Claude Code is not installed.\033[0m"
+        echo ""
+        echo "  MangoLove requires Claude Code to run."
+        echo "  Install it from: https://claude.ai/claude-code"
+        echo ""
+        exit 1
+    fi
+}
+
+# ─────────────────────────────────────────────
+# Build the full system prompt
+# ─────────────────────────────────────────────
+build_system_prompt() {
+    local base_prompt=""
+    if [ -f "$SYSTEM_PROMPT_FILE" ]; then
+        base_prompt=$(cat "$SYSTEM_PROMPT_FILE")
+    else
+        base_prompt="You are MangoLove, an autonomous development agent. Analyze, plan, execute, and verify tasks autonomously."
+    fi
+
+    # Load project profile
+    local project_context=""
+    project_context=$(bash "$PROFILE_MANAGER" load 2>/dev/null) || true
+
+    # Build work log instruction
+    local log_instruction=""
+    if [ "$MANGOLOVE_AUTO_LOG" = "true" ]; then
+        log_instruction="
+
+## Work Logging
+After completing significant tasks, update the daily work log at:
+\`~/.mangolove/logs/repo/logs/$(date '+%Y/%m')/$(date '+%Y-%m-%d').md\`
+with a brief summary of what was accomplished."
+    fi
+
+    # Combine
+    local full_prompt="${base_prompt}"
+
+    if [ -n "$project_context" ]; then
+        full_prompt="${full_prompt}
+
+---
+
+## Active Project Profile
+${project_context}"
+    else
+        full_prompt="${full_prompt}
+
+---
+
+## No Project Profile Found
+The current directory does not match any known project profile.
+On your first response, briefly analyze the project structure and offer to create a profile at:
+\`~/.mangolove/projects/{name}.md\`"
+    fi
+
+    full_prompt="${full_prompt}${log_instruction}"
+
+    if [ -n "$MANGOLOVE_EXTRA_PROMPT" ]; then
+        full_prompt="${full_prompt}
+
+---
+
+## User Custom Instructions
+${MANGOLOVE_EXTRA_PROMPT}"
+    fi
+
+    echo "$full_prompt"
+}
+
+# ─────────────────────────────────────────────
+# Subcommands
+# ─────────────────────────────────────────────
+show_version() {
+    echo "🥭 MangoLove v${MANGOLOVE_VERSION}"
+}
+
+show_help() {
+    echo ""
+    echo -e "\033[38;5;208m\033[1m🥭 MangoLove\033[0m v${MANGOLOVE_VERSION} — Autonomous Development Agent"
+    echo ""
+    echo "Usage:"
+    echo "  mangolove                     Start interactive session"
+    echo "  mangolove [prompt]            Start with a specific task"
+    echo "  mangolove -p [prompt]         Print mode (non-interactive)"
+    echo ""
+    echo "Commands:"
+    echo "  mangolove projects            List project profiles"
+    echo "  mangolove profile add         Add a new project profile"
+    echo "  mangolove profile remove <n>  Remove a project profile"
+    echo "  mangolove log init            Initialize work log repository"
+    echo "  mangolove log view            Open work logs in browser"
+    echo "  mangolove update              Update MangoLove to latest version"
+    echo "  mangolove doctor              Check installation health"
+    echo "  mangolove help                Show this help"
+    echo "  mangolove --version           Show version"
+    echo ""
+    echo "Options (passed through to Claude Code):"
+    echo "  -c, --continue                Continue last conversation"
+    echo "  -r, --resume                  Resume a session"
+    echo "  --model [model]               Select model"
+    echo "  --effort [level]              Set effort level"
+    echo ""
+    echo "Examples:"
+    echo "  mangolove"
+    echo "  mangolove \"예약 API 리팩토링해줘\""
+    echo "  mangolove -c"
+    echo "  mangolove --model opus --effort max \"시스템 전체 분석해줘\""
+    echo ""
+    echo "Config: ~/.mangolove/config.sh"
+    echo "Docs:   https://github.com/SongJunSub/mangolove"
+    echo ""
+}
+
+do_update() {
+    echo "🔄 Updating MangoLove..."
+    if [ -d "$MANGOLOVE_DIR/.git" ]; then
+        cd "$MANGOLOVE_DIR"
+        git pull origin main
+        echo "✅ Updated to latest version."
+    else
+        echo "⚠️  MangoLove was not installed via git."
+        echo "   Re-install: curl -fsSL https://raw.githubusercontent.com/SongJunSub/mangolove/main/install.sh | bash"
+    fi
+}
+
+do_doctor() {
+    echo ""
+    echo -e "\033[38;5;208m\033[1m🥭 MangoLove Doctor\033[0m"
+    echo -e "\033[2m──────────────────────────────────────\033[0m"
+
+    # Check Claude Code
+    if command -v claude &> /dev/null; then
+        local cv=$(claude --version 2>/dev/null)
+        echo -e "  \033[38;5;113m✓\033[0m Claude Code: ${cv}"
+    else
+        echo -e "  \033[38;5;203m✗\033[0m Claude Code: not found"
+    fi
+
+    # Check GitHub CLI
+    if command -v gh &> /dev/null; then
+        local gv=$(gh --version 2>/dev/null | head -1)
+        echo -e "  \033[38;5;113m✓\033[0m GitHub CLI: ${gv}"
+
+        if gh auth status &> /dev/null; then
+            echo -e "  \033[38;5;113m✓\033[0m GitHub Auth: authenticated"
+        else
+            echo -e "  \033[38;5;203m✗\033[0m GitHub Auth: not authenticated"
+        fi
+    else
+        echo -e "  \033[38;5;220m△\033[0m GitHub CLI: not found (optional, for work logging)"
+    fi
+
+    # Check Git
+    if command -v git &> /dev/null; then
+        echo -e "  \033[38;5;113m✓\033[0m Git: $(git --version)"
+    else
+        echo -e "  \033[38;5;203m✗\033[0m Git: not found"
+    fi
+
+    # Check MangoLove files
+    echo ""
+    echo -e "  \033[2mInstallation:\033[0m"
+    [ -f "$SYSTEM_PROMPT_FILE" ] && echo -e "  \033[38;5;113m✓\033[0m System prompt" || echo -e "  \033[38;5;203m✗\033[0m System prompt missing"
+    [ -f "$BANNER_SCRIPT" ] && echo -e "  \033[38;5;113m✓\033[0m Banner" || echo -e "  \033[38;5;203m✗\033[0m Banner missing"
+    [ -f "$WORK_LOGGER" ] && echo -e "  \033[38;5;113m✓\033[0m Work logger" || echo -e "  \033[38;5;203m✗\033[0m Work logger missing"
+    [ -f "$PROFILE_MANAGER" ] && echo -e "  \033[38;5;113m✓\033[0m Profile manager" || echo -e "  \033[38;5;203m✗\033[0m Profile manager missing"
+
+    # Count profiles
+    local profile_count=0
+    for p in "$MANGOLOVE_DIR/projects"/*.md; do
+        [ "$(basename "$p")" = "README.md" ] && continue
+        [ -f "$p" ] && profile_count=$((profile_count + 1))
+    done
+    echo -e "  \033[38;5;113m✓\033[0m Project profiles: ${profile_count}"
+
+    echo ""
+    echo -e "\033[2m──────────────────────────────────────\033[0m"
+    echo ""
+}
+
+handle_log() {
+    case "${1:-}" in
+        init)
+            bash "$WORK_LOGGER" init
+            ;;
+        view)
+            local repo_full=""
+            if [ -n "$MANGOLOVE_LOG_REPO" ] && [ "$MANGOLOVE_LOG_REPO" != "disabled" ]; then
+                repo_full="$MANGOLOVE_LOG_REPO"
+            else
+                local gh_user=$(gh api user --jq '.login' 2>/dev/null)
+                repo_full="${gh_user}/mangolove-work-logs"
+            fi
+            open "https://github.com/${repo_full}" 2>/dev/null || \
+            echo "https://github.com/${repo_full}"
+            ;;
+        *)
+            echo "Usage: mangolove log [init|view]"
+            ;;
+    esac
+}
+
+handle_profile() {
+    case "${1:-}" in
+        add)    bash "$PROFILE_MANAGER" add ;;
+        remove) bash "$PROFILE_MANAGER" remove "$2" ;;
+        *)      bash "$PROFILE_MANAGER" list ;;
+    esac
+}
+
+# ─────────────────────────────────────────────
+# Main
+# ─────────────────────────────────────────────
+main() {
+    export MANGOLOVE_DIR
+
+    case "${1:-}" in
+        help|--help|-h)
+            show_help
+            exit 0
+            ;;
+        --version|-v)
+            show_version
+            exit 0
+            ;;
+        projects)
+            bash "$PROFILE_MANAGER" list
+            exit 0
+            ;;
+        profile)
+            shift
+            handle_profile "$@"
+            exit 0
+            ;;
+        log)
+            shift
+            handle_log "$@"
+            exit 0
+            ;;
+        update)
+            do_update
+            exit 0
+            ;;
+        doctor)
+            do_doctor
+            exit 0
+            ;;
+    esac
+
+    # Preflight
+    check_dependencies
+
+    # Show banner
+    if [ "$MANGOLOVE_SHOW_BANNER" = "true" ]; then
+        bash "$BANNER_SCRIPT"
+    fi
+
+    # Log session start (background, non-blocking)
+    if [ "$MANGOLOVE_AUTO_LOG" = "true" ]; then
+        bash "$WORK_LOGGER" start &>/dev/null &
+    fi
+
+    # Build system prompt
+    SYSTEM_PROMPT=$(build_system_prompt)
+
+    # Trap exit to log session end
+    if [ "$MANGOLOVE_AUTO_LOG" = "true" ]; then
+        trap 'bash "$WORK_LOGGER" end &>/dev/null &' EXIT
+    fi
+
+    # Build Claude args
+    CLAUDE_ARGS=()
+    CLAUDE_ARGS+=(--append-system-prompt "$SYSTEM_PROMPT")
+    CLAUDE_ARGS+=(--name "🥭 MangoLove")
+
+    [ -n "$MANGOLOVE_MODEL" ] && CLAUDE_ARGS+=(--model "$MANGOLOVE_MODEL")
+    [ -n "$MANGOLOVE_EFFORT" ] && CLAUDE_ARGS+=(--effort "$MANGOLOVE_EFFORT")
+
+    # Launch Claude Code
+    claude "${CLAUDE_ARGS[@]}" "$@"
+}
+
+main "$@"

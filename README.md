@@ -4,9 +4,12 @@
 
 MangoLove는 Claude Code 위에 구축된 자율형 개발 에이전트입니다. 프로젝트별 컨텍스트를 기억하고, 분석부터 코딩까지 알아서 처리합니다.
 
-<p align="center">
-  <img src="docs/banner-preview.png" alt="MangoLove Banner" width="600">
-</p>
+> **Why "MangoLove"?**
+> 두 마리 진돗개의 이름에서 영감을 받았습니다.
+> - 🥭 **Mango (망고)** — 하얀 털에 군데군데 누런 반점이 있는 진돗개
+> - 🤍 **Sarang (사랑)** — 새하얀 털의 진돗개
+>
+> 망고(Mango) + 사랑(Love) = **MangoLove** 🐕🐕
 
 ## ✨ Features
 

@@ -1,6 +1,9 @@
 #!/bin/bash
 # ─────────────────────────────────────────────
 # 🥭 MangoLove — Banner Display
+# Named after two Jindo dogs:
+#   🥭 Mango  — white with yellowish patches
+#   🤍 Sarang — pure white
 # ─────────────────────────────────────────────
 
 MANGOLOVE_DIR="${MANGOLOVE_DIR:-$HOME/.mangolove}"
@@ -9,12 +12,14 @@ MANGOLOVE_DIR="${MANGOLOVE_DIR:-$HOME/.mangolove}"
 R='\033[0m'
 B='\033[1m'
 DIM='\033[2m'
-Y='\033[38;5;220m'
-O='\033[38;5;208m'
-G='\033[38;5;113m'
-P='\033[38;5;205m'
-W='\033[38;5;255m'
-C='\033[38;5;117m'
+Y='\033[38;5;220m'    # Yellow (mango patches)
+O='\033[38;5;208m'    # Orange
+G='\033[38;5;113m'    # Green
+P='\033[38;5;205m'    # Pink (love/heart)
+W='\033[38;5;255m'    # White (sarang)
+C='\033[38;5;117m'    # Cyan
+BW='\033[97m'         # Bright white (sarang fur)
+YB='\033[38;5;178m'   # Darker yellow (mango spots)
 
 clear
 
@@ -41,13 +46,27 @@ cat << 'BANNER'
 BANNER
 echo -e "${R}"
 
+# ─── Mango & Sarang (two Jindo dogs) ───
+echo -e "${DIM}          🥭 Mango                          🤍 Sarang${R}"
+echo -e "        ${Y}╱▔▔╲${R}  ${Y}╱▔▔╲${R}                      ${BW}╱▔▔╲${R}  ${BW}╱▔▔╲${R}"
+echo -e "       ${Y}╱${R}${YB}◆${R}${Y}▔▔${R}${YB}◆${R}${Y}▔▔╲${R}                    ${BW}╱${R}${W}◇${R}${BW}▔▔${R}${W}◇${R}${BW}▔▔╲${R}"
+echo -e "      ${Y}│${R}  ${YB}●${R}  ${YB}●${R}  ${Y}│${R}      ${P}${B}♥${R}          ${BW}│${R}  ${C}●${R}  ${C}●${R}  ${BW}│${R}"
+echo -e "      ${Y}│${R}   ${O}▽${R}    ${Y}│${R}    ${P}${B}♥${R} ${P}${B}♥${R}         ${BW}│${R}   ${P}▽${R}    ${BW}│${R}"
+echo -e "       ${Y}╲▁${R}${YB}◠${R}${Y}▁▁╱${R}       ${P}${B}♥${R}            ${BW}╲▁${R}${W}◠${R}${BW}▁▁╱${R}"
+echo -e "     ${Y}╱▔▔${R}${YB}░░${R}${Y}▔▔▔▔╲${R}                  ${BW}╱▔▔▔▔▔▔▔▔╲${R}"
+echo -e "    ${Y}│${R} ${YB}░${R}${Y}│${R}        ${Y}│${R}                 ${BW}│${R}          ${BW}│${R}"
+echo -e "    ${Y}╱  ╲${R}      ${Y}╱  ╲${R}                ${BW}╱  ╲${R}      ${BW}╱  ╲${R}"
+echo -e "   ${Y}╱▔╲╱▔╲${R}    ${Y}╱▔╲╱▔╲${R}              ${BW}╱▔╲╱▔╲${R}    ${BW}╱▔╲╱▔╲${R}"
+echo ""
+
 # Version
 VERSION="0.1.0"
 if [ -f "$MANGOLOVE_DIR/.version" ]; then
     VERSION=$(cat "$MANGOLOVE_DIR/.version")
 fi
 
-echo -e "    ${P}${B}♥${R}  ${Y}${B}MangoLove${R} ${DIM}v${VERSION} — Your Autonomous Dev Agent${R}  ${P}${B}♥${R}"
+echo -e "    ${P}${B}♥${R}  ${Y}${B}MangoLove${R} ${DIM}v${VERSION}${R}  ${P}${B}♥${R}"
+echo -e "    ${DIM}Named after two Jindo dogs: ${Y}Mango${R}${DIM} & ${BW}Sarang${R}"
 echo -e "    ${DIM}────────────────────────────────────────────${R}"
 echo ""
 

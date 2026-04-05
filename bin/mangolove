@@ -13,6 +13,7 @@ SYSTEM_PROMPT_FILE="$MANGOLOVE_DIR/prompts/system-prompt.md"
 WORK_LOGGER="$MANGOLOVE_DIR/lib/work-logger.sh"
 PROFILE_MANAGER="$MANGOLOVE_DIR/lib/profile-manager.sh"
 PLUGIN_MANAGER="$MANGOLOVE_DIR/lib/plugin-manager.sh"
+SKILL_MANAGER="$MANGOLOVE_DIR/lib/skill-manager.sh"
 BANNER_SCRIPT="$MANGOLOVE_DIR/lib/banner.sh"
 
 # ─────────────────────────────────────────────
@@ -116,6 +117,18 @@ On your first response, briefly analyze the project structure and offer to creat
 
     full_prompt="${full_prompt}${log_instruction}"
 
+    # Load skill prompt additions
+    local skill_additions=""
+    skill_additions=$(bash "$SKILL_MANAGER" prompts 2>/dev/null) || true
+    if [ -n "$skill_additions" ]; then
+        full_prompt="${full_prompt}
+
+---
+
+## Skill Instructions
+${skill_additions}"
+    fi
+
     # Load plugin prompt additions
     local plugin_additions=""
     plugin_additions=$(bash "$PLUGIN_MANAGER" prompts 2>/dev/null) || true
@@ -163,6 +176,11 @@ show_help() {
     echo "  mangolove profile export <n>  Export profile as .mangolove.md for team"
     echo "  mangolove profile import [f]  Import .mangolove.md to personal profiles"
     echo "  mangolove profile remove <n>  Remove a project profile"
+    echo "  mangolove skill               List installed skills"
+    echo "  mangolove skill install <url> Install a skill pack from git URL"
+    echo "  mangolove skill create <name> Create a new skill pack template"
+    echo "  mangolove skill remove <name> Remove a skill pack"
+    echo "  mangolove skill update [name] Update skill pack(s)"
     echo "  mangolove plugin              List installed plugins"
     echo "  mangolove plugin create <n>   Create a new plugin from template"
     echo "  mangolove plugin enable <n>   Enable a plugin"
@@ -282,6 +300,13 @@ do_doctor() {
     done
     echo -e "  \033[38;5;113m✓\033[0m Modes: ${mode_count}"
 
+    # Count skills
+    local skill_count=0
+    for sd in "$MANGOLOVE_DIR/skills"/*/; do
+        [ -f "${sd}skill.yaml" ] || [ -f "${sd}skill.md" ] && skill_count=$((skill_count + 1))
+    done
+    echo -e "  \033[38;5;113m✓\033[0m Skills: ${skill_count}"
+
     echo ""
     echo -e "\033[2m──────────────────────────────────────\033[0m"
     echo ""
@@ -313,6 +338,16 @@ handle_log() {
         *)
             echo "Usage: mangolove log [init|view|search|recent]"
             ;;
+    esac
+}
+
+handle_skill() {
+    case "${1:-}" in
+        install) bash "$SKILL_MANAGER" install "$2" ;;
+        remove)  bash "$SKILL_MANAGER" remove "$2" ;;
+        update)  bash "$SKILL_MANAGER" update "${2:-}" ;;
+        create)  bash "$SKILL_MANAGER" create "$2" ;;
+        *)       bash "$SKILL_MANAGER" list ;;
     esac
 }
 
@@ -358,6 +393,11 @@ main() {
         profile)
             shift
             handle_profile "$@"
+            exit 0
+            ;;
+        skill|skills)
+            shift
+            handle_skill "$@"
             exit 0
             ;;
         plugin|plugins)

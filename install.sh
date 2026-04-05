@@ -100,8 +100,7 @@ mkdir -p "$MANGOLOVE_DIR/logs"
 
 # ─── Create default config if not exists ───
 if [ ! -f "$MANGOLOVE_DIR/config.sh" ]; then
-    cp "$MANGOLOVE_DIR/config.sh.default" "$MANGOLOVE_DIR/config.sh" 2>/dev/null || \
-    cp "$MANGOLOVE_DIR/config.sh" "$MANGOLOVE_DIR/config.sh" 2>/dev/null || true
+    cp "$MANGOLOVE_DIR/config.sh.default" "$MANGOLOVE_DIR/config.sh" 2>/dev/null || true
 fi
 
 # ─── Make scripts executable ───

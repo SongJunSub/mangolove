@@ -227,7 +227,7 @@ show_recent() {
     echo -e "\033[2m──────────────────────────────────────\033[0m"
 
     local count=0
-    for logfile in $(find "$LOCAL_REPO/logs" -name "*.md" -type f | sort -r | head -7); do
+    find "$LOCAL_REPO/logs" -name "*.md" -type f 2>/dev/null | sort -r | head -7 | while IFS= read -r logfile; do
         local date_str=$(basename "$logfile" .md)
         local sessions=$(grep -c "^## 🕐 Session:" "$logfile" 2>/dev/null || echo "0")
         local commits=$(grep -c "^\- \*\*[a-f0-9]" "$logfile" 2>/dev/null || echo "0")
@@ -235,7 +235,9 @@ show_recent() {
         count=$((count + 1))
     done
 
-    [ $count -eq 0 ] && echo -e "  \033[2mNo logs found.\033[0m"
+    # Check if any output was produced (count is in subshell, re-check)
+    local total=$(find "$LOCAL_REPO/logs" -name "*.md" -type f 2>/dev/null | head -1)
+    [ -z "$total" ] && echo -e "  \033[2mNo logs found.\033[0m"
     echo ""
 }
 

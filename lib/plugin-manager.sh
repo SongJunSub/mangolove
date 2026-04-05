@@ -16,6 +16,15 @@ G='\033[38;5;113m'
 C='\033[38;5;117m'
 RED='\033[38;5;203m'
 
+# Cross-platform sed -i (macOS BSD vs GNU Linux)
+_sed_i() {
+    if sed --version &>/dev/null 2>&1; then
+        sed -i "$@"
+    else
+        sed -i '' "$@"
+    fi
+}
+
 # ─────────────────────────────────────────────
 # Hook System
 # Supported hooks:
@@ -161,16 +170,15 @@ toggle_plugin() {
     case "$action" in
         enable)
             if [ -f "$config_file" ]; then
-                sed -i '' 's/^enabled=false/enabled=true/' "$config_file" 2>/dev/null || \
-                    sed -i 's/^enabled=false/enabled=true/' "$config_file" 2>/dev/null
+                _sed_i 's/^enabled=false/enabled=true/' "$config_file"
+            else
+                echo "enabled=true" > "$config_file"
             fi
             echo -e "  ${G}✅ Plugin enabled:${R} ${plugin_name}"
             ;;
         disable)
-            mkdir -p "$plugin_dir"
             if [ -f "$config_file" ]; then
-                sed -i '' 's/^enabled=true/enabled=false/' "$config_file" 2>/dev/null || \
-                    sed -i 's/^enabled=true/enabled=false/' "$config_file" 2>/dev/null
+                _sed_i 's/^enabled=true/enabled=false/' "$config_file"
             else
                 echo "enabled=false" > "$config_file"
             fi

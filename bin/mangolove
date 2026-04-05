@@ -418,12 +418,21 @@ main() {
     SYSTEM_PROMPT=$(build_system_prompt)
 
     # Trap exit to log session end and run plugin hooks
+    # Use timeout to prevent hanging on network issues
     trap '{
         bash "$PLUGIN_MANAGER" hook on_session_end 2>/dev/null &
+        local _plugin_pid=$!
         if [ "$MANGOLOVE_AUTO_LOG" = "true" ]; then
-            bash "$WORK_LOGGER" end &>/dev/null &
+            bash "$WORK_LOGGER" end 2>/dev/null &
+            local _logger_pid=$!
         fi
-        wait 2>/dev/null
+        # Wait up to 10 seconds for cleanup, then proceed
+        local _wait_count=0
+        while [ $_wait_count -lt 10 ]; do
+            kill -0 $_plugin_pid 2>/dev/null || kill -0 ${_logger_pid:-0} 2>/dev/null || break
+            sleep 1
+            _wait_count=$((_wait_count + 1))
+        done
     }' EXIT
 
     # Build Claude args

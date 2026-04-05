@@ -6,9 +6,26 @@
 
 MANGOLOVE_DIR="${MANGOLOVE_DIR:-$HOME/.mangolove}"
 LOG_DIR="$MANGOLOVE_DIR/logs"
+ERROR_LOG="$LOG_DIR/.error.log"
 
 # Load user config
 [ -f "$MANGOLOVE_DIR/config.sh" ] && source "$MANGOLOVE_DIR/config.sh"
+
+# Log errors to file instead of silencing them
+log_error() {
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[${timestamp}] $*" >> "$ERROR_LOG" 2>/dev/null
+}
+
+# Safe git operation with error logging
+safe_git() {
+    local operation="$1"
+    shift
+    if ! git "$operation" "$@" 2>>"$ERROR_LOG"; then
+        log_error "git ${operation} failed in $(pwd)"
+        return 1
+    fi
+}
 
 # Determine repo name
 get_repo_info() {
@@ -121,9 +138,9 @@ EOF
 EOF
 
     cd "$LOCAL_REPO"
-    git add . 2>/dev/null
-    git commit -m "docs: session start — ${project_name} (${now})" 2>/dev/null
-    git push origin main 2>/dev/null
+    safe_git add . || true
+    safe_git commit -m "docs: session start — ${project_name} (${now})" || true
+    safe_git push origin main || log_error "Failed to push session start log"
     cd - > /dev/null
 }
 
@@ -154,9 +171,9 @@ log_session_end() {
         echo "---" >> "$file"
 
         cd "$LOCAL_REPO"
-        git add . 2>/dev/null
-        git commit -m "docs: session end (${now})" 2>/dev/null
-        git push origin main 2>/dev/null
+        safe_git add . || true
+        safe_git commit -m "docs: session end (${now})" || true
+        safe_git push origin main || log_error "Failed to push session end log"
         cd - > /dev/null
     fi
 }

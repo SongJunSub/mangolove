@@ -22,6 +22,7 @@ MANGOLOVE_SHOW_BANNER=true
 MANGOLOVE_EXTRA_PROMPT=""
 MANGOLOVE_MODEL=""
 MANGOLOVE_EFFORT=""
+MANGOLOVE_MODE=""
 
 [ -f "$MANGOLOVE_DIR/config.sh" ] && source "$MANGOLOVE_DIR/config.sh"
 
@@ -66,8 +67,25 @@ After completing significant tasks, update the daily work log at:
 with a brief summary of what was accomplished."
     fi
 
+    # Load mode-specific prompt
+    local mode_prompt=""
+    if [ -n "$MANGOLOVE_MODE" ]; then
+        local mode_file="$MANGOLOVE_DIR/prompts/modes/${MANGOLOVE_MODE}.md"
+        if [ -f "$mode_file" ]; then
+            mode_prompt=$(cat "$mode_file")
+        fi
+    fi
+
     # Combine
     local full_prompt="${base_prompt}"
+
+    if [ -n "$mode_prompt" ]; then
+        full_prompt="${full_prompt}
+
+---
+
+${mode_prompt}"
+    fi
 
     if [ -n "$project_context" ]; then
         full_prompt="${full_prompt}
@@ -128,6 +146,13 @@ show_help() {
     echo "  mangolove doctor              Check installation health"
     echo "  mangolove help                Show this help"
     echo "  mangolove --version           Show version"
+    echo ""
+    echo "Modes:"
+    echo "  mangolove --mode review       Code review mode"
+    echo "  mangolove --mode debug        Debug & root-cause analysis mode"
+    echo "  mangolove --mode refactor     Refactoring mode"
+    echo "  mangolove --mode security     Security audit mode"
+    echo "  mangolove --mode plan         Planning mode"
     echo ""
     echo "Options (passed through to Claude Code):"
     echo "  -c, --continue                Continue last conversation"
@@ -283,6 +308,38 @@ main() {
             ;;
     esac
 
+    # Parse --mode flag before passing to claude
+    local remaining_args=()
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --mode|-m)
+                if [ -n "${2:-}" ]; then
+                    MANGOLOVE_MODE="$2"
+                    local mode_file="$MANGOLOVE_DIR/prompts/modes/${MANGOLOVE_MODE}.md"
+                    if [ ! -f "$mode_file" ]; then
+                        echo -e "\033[38;5;203m✗ Unknown mode: ${MANGOLOVE_MODE}\033[0m"
+                        echo ""
+                        echo "  Available modes:"
+                        for mf in "$MANGOLOVE_DIR/prompts/modes"/*.md; do
+                            [ -f "$mf" ] && echo "    - $(basename "$mf" .md)"
+                        done
+                        echo ""
+                        exit 1
+                    fi
+                    shift 2
+                else
+                    echo "Usage: mangolove --mode <mode> [prompt]"
+                    exit 1
+                fi
+                ;;
+            *)
+                remaining_args+=("$1")
+                shift
+                ;;
+        esac
+    done
+    set -- "${remaining_args[@]}"
+
     # Preflight
     check_dependencies
 
@@ -307,7 +364,11 @@ main() {
     # Build Claude args
     CLAUDE_ARGS=()
     CLAUDE_ARGS+=(--append-system-prompt "$SYSTEM_PROMPT")
-    CLAUDE_ARGS+=(--name "🥭 MangoLove")
+    if [ -n "$MANGOLOVE_MODE" ]; then
+        CLAUDE_ARGS+=(--name "🥭 MangoLove [${MANGOLOVE_MODE}]")
+    else
+        CLAUDE_ARGS+=(--name "🥭 MangoLove")
+    fi
 
     [ -n "$MANGOLOVE_MODEL" ] && CLAUDE_ARGS+=(--model "$MANGOLOVE_MODEL")
     [ -n "$MANGOLOVE_EFFORT" ] && CLAUDE_ARGS+=(--effort "$MANGOLOVE_EFFORT")

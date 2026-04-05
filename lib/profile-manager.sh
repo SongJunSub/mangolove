@@ -392,7 +392,7 @@ load_project_context() {
                 [ "$(basename "$profile")" = "README.md" ] && continue
                 [ ! -f "$profile" ] && continue
                 local profile_path=$(grep "^path:" "$profile" 2>/dev/null | sed 's/^path: *//')
-                if [ -n "$profile_path" ] && [[ "$current_dir" == "$profile_path"* ]]; then
+                if [ -n "$profile_path" ] && [[ "$current_dir" == "$profile_path" || "$current_dir" == "$profile_path"/* ]]; then
                     echo ""
                     echo "---"
                     echo "## Personal Profile Additions"
@@ -411,7 +411,7 @@ load_project_context() {
         [ ! -f "$profile" ] && continue
 
         local profile_path=$(grep "^path:" "$profile" 2>/dev/null | sed 's/^path: *//')
-        if [ -n "$profile_path" ] && [[ "$current_dir" == "$profile_path"* ]]; then
+        if [ -n "$profile_path" ] && [[ "$current_dir" == "$profile_path" || "$current_dir" == "$profile_path"/* ]]; then
             cat "$profile"
             return 0
         fi

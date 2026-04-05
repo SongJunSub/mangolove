@@ -173,7 +173,7 @@ for profile in "$MANGOLOVE_DIR/projects"/*.md; do
     [ "$(basename "$profile")" = "README.md" ] && continue
     [ ! -f "$profile" ] && continue
     PROFILE_PATH=$(grep "^path:" "$profile" 2>/dev/null | sed 's/^path: *//')
-    if [ -n "$PROFILE_PATH" ] && [[ "$CURRENT_DIR" == "$PROFILE_PATH"* ]]; then
+    if [ -n "$PROFILE_PATH" ] && [[ "$CURRENT_DIR" == "$PROFILE_PATH" || "$CURRENT_DIR" == "$PROFILE_PATH"/* ]]; then
         PROJECT_NAME=$(grep "^name:" "$profile" 2>/dev/null | sed 's/^name: *//')
         break
     fi

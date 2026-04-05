@@ -112,6 +112,25 @@ chmod +x "$MANGOLOVE_DIR/lib/"*.sh
 mkdir -p "$BIN_DIR"
 ln -sf "$MANGOLOVE_DIR/bin/mangolove" "$BIN_DIR/mangolove"
 
+# ─── Install shell completions ───
+SHELL_NAME=$(basename "$SHELL")
+case "$SHELL_NAME" in
+    zsh)
+        # Zsh completions
+        ZSH_COMP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions"
+        mkdir -p "$ZSH_COMP_DIR"
+        ln -sf "$MANGOLOVE_DIR/completions/_mangolove" "$ZSH_COMP_DIR/_mangolove"
+        echo -e "  ${G}✓${R} Zsh completions installed"
+        ;;
+    bash)
+        # Bash completions
+        BASH_COMP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions"
+        mkdir -p "$BASH_COMP_DIR"
+        ln -sf "$MANGOLOVE_DIR/completions/mangolove.bash" "$BASH_COMP_DIR/mangolove"
+        echo -e "  ${G}✓${R} Bash completions installed"
+        ;;
+esac
+
 # ─── Check PATH ───
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
     echo ""

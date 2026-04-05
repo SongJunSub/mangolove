@@ -1,0 +1,119 @@
+#compdef mangolove
+
+# ─────────────────────────────────────────────
+# 🥭 MangoLove — Zsh Completion
+# ─────────────────────────────────────────────
+
+_mangolove_modes() {
+    local modes_dir="${MANGOLOVE_DIR:-$HOME/.mangolove}/prompts/modes"
+    local modes=()
+    if [ -d "$modes_dir" ]; then
+        for f in "$modes_dir"/*.md; do
+            [ -f "$f" ] && modes+=($(basename "$f" .md))
+        done
+    fi
+    _describe 'mode' modes
+}
+
+_mangolove_profiles() {
+    local projects_dir="${MANGOLOVE_DIR:-$HOME/.mangolove}/projects"
+    local profiles=()
+    if [ -d "$projects_dir" ]; then
+        for f in "$projects_dir"/*.md; do
+            [ "$(basename "$f")" = "README.md" ] && continue
+            [ -f "$f" ] && profiles+=($(basename "$f" .md))
+        done
+    fi
+    _describe 'profile' profiles
+}
+
+_mangolove() {
+    local -a commands
+    commands=(
+        'help:Show help information'
+        'projects:List project profiles'
+        'profile:Manage project profiles'
+        'log:Work log management'
+        'update:Update MangoLove to latest version'
+        'doctor:Check installation health'
+    )
+
+    local -a options
+    options=(
+        '--version:Show version'
+        '-v:Show version'
+        '--help:Show help'
+        '-h:Show help'
+        '--mode:Set agent mode'
+        '-m:Set agent mode'
+        '--model:Select Claude model'
+        '--effort:Set effort level'
+        '-c:Continue last conversation'
+        '--continue:Continue last conversation'
+        '-r:Resume a session'
+        '--resume:Resume a session'
+        '-p:Print mode (non-interactive)'
+    )
+
+    if (( CURRENT == 2 )); then
+        _describe 'command' commands
+        _describe 'option' options
+        return
+    fi
+
+    case "${words[2]}" in
+        profile)
+            if (( CURRENT == 3 )); then
+                local -a profile_cmds
+                profile_cmds=(
+                    'add:Add a new project profile'
+                    'auto:Auto-generate profile from project scan'
+                    'remove:Remove a project profile'
+                )
+                _describe 'profile command' profile_cmds
+            elif (( CURRENT == 4 )); then
+                case "${words[3]}" in
+                    remove)
+                        _mangolove_profiles
+                        ;;
+                    auto)
+                        _path_files -/
+                        ;;
+                esac
+            fi
+            ;;
+        log)
+            if (( CURRENT == 3 )); then
+                local -a log_cmds
+                log_cmds=(
+                    'init:Initialize work log repository'
+                    'view:Open work logs in browser'
+                    'search:Search work logs'
+                    'recent:Show recent sessions'
+                )
+                _describe 'log command' log_cmds
+            fi
+            ;;
+        --mode|-m)
+            if (( CURRENT == 3 )); then
+                _mangolove_modes
+            fi
+            ;;
+        --model)
+            if (( CURRENT == 3 )); then
+                local -a models
+                models=('opus' 'sonnet' 'haiku')
+                _describe 'model' models
+            fi
+            ;;
+        --effort)
+            if (( CURRENT == 3 )); then
+                local -a efforts
+                efforts=('low' 'medium' 'high' 'max' 'auto')
+                _describe 'effort' efforts
+            fi
+            ;;
+    esac
+}
+
+_mangolove "$@"

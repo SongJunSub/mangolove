@@ -185,6 +185,7 @@ show_help() {
     echo "  mangolove --mode pr           PR creation mode"
     echo "  mangolove --mode tdd          Test-driven development mode"
     echo "  mangolove --mode strict       Strict mode (auto lint/test/build)"
+    echo "  mangolove --mode docs         Documentation sync mode"
     echo ""
     echo "Options (passed through to Claude Code):"
     echo "  -c, --continue                Continue last conversation"

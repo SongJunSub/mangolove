@@ -23,132 +23,77 @@ FW=$'\033[38;5;255m'
 FGR=$'\033[38;5;245m'
 FBW=$'\033[97m'
 
-# ── Mango (background fills) ──
-mE=$'\033[48;5;180m'    # ear outer (warm cream-yellow)
-mI=$'\033[48;5;138m'    # ear inner (rosy brown)
-mF=$'\033[48;5;230m'    # face (cream ivory)
-mY=$'\033[48;5;223m'    # cheek patches (soft yellow)
-mT=$'\033[48;5;218m'    # tongue (pink)
+# ── Braille Jindo dog art (from mangolove.png) ──
+# Mango (left, yellow) — standing, tongue out
+MANGO_ART=(
+"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠐⠢⣀⠀⠀⢀⣀⣠⣾⠁⢠⣶"
+"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣼⣿⣿⣿⣿⣿⣿⣷⣿⠋"
+"⠀⠀⣀⣴⣶⣿⣶⣦⣄⠀⠀⠀⠀⠀⠀⠀⢨⣿⣿⣏⣹⣿⣿⣿⣴⣿⣿⠀"
+"⠀⢴⣿⣿⠿⢿⣿⣿⣿⣧⣀⣀⣀⣀⣀⡀⣾⣿⣿⣿⣿⣿⠉⠉⢻⣿⣿⠃"
+"⠀⣿⣿⣿⣦⡌⣻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡛⢀⣀⣸⣿⣿⠀"
+"⠀⠻⣿⣿⠋⣷⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣯⡉⠙⠠⠈⣲⢭⣾⣿⡟⠀"
+"⠀⠀⠉⠁⣸⣿⣿⣿⣿⣻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⣦⢀⡀⠈⠉⣽⡇⠀"
+"⠀⠀⠀⠀⣿⣿⣿⣿⣿⣿⠋⠹⢿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣇⣀⣿⠇⠀"
+"⠀⠀⠀⠀⠸⣿⣿⣿⣿⢇⠀⠀⠈⠙⠻⠿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠀⠀"
+"⠀⠀⠀⠀⠀⠻⣿⣿⠋⠀⠀⠀⠀⠀⠀⠀⠸⣿⣿⣿⣿⡟⠉⣿⣿⠃⠀⠀"
+"⠀⠀⠀⠀⠀⠠⡉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⢿⣿⣿⠏⠀⢰⣿⡟⠀⠀⠀"
+"⠀⠀⠀⠀⠀⢸⡃⠀⠀⠀⠀⣆⠀⠀⠀⠀⠀⢸⣿⣿⠀⠀⣿⣿⠁⠀⠀⠀"
+"⠀⠀⠀⠀⠀⢸⣧⠀⠀⠀⠀⠹⠶⠄⠀⠀⠀⠘⣟⣿⡆⠀⡸⠟⠀⠀⠀⠀"
+"⠀⠀⠀⠀⠀⠘⠻⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢹⡏⡇⠀⠠⣄⠀⠀⠀⠀"
+"⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣶⣶⢀⡐⠿⢶⢀⣀⣀"
+)
 
-# ── Sarang (background fills) ──
-sE=$'\033[48;5;255m'    # ear outer (bright white)
-sI=$'\033[48;5;181m'    # ear inner (light mauve)
-sF=$'\033[48;5;231m'    # face (pure white)
+# Sarang (right, white) — sitting, calm
+SARANG_ART=(
+"⣴⣶⡶⠾⠿⢿⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣦⣤⣤⣤⡀⠀⠀⠀⠀"
+"⠉⠀⢷⣶⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣮⣽⣿⣿⣿⣿⣿⠀⠀⠀⠀"
+"⠀⠀⠀⢹⣿⣿⣷⣤⣿⣿⣿⣿⣿⣥⣀⣨⣿⣿⣿⣻⡀⠉⠉⠋⠀⠀⠀⠀"
+"⠀⠀⠀⢻⣿⣿⣿⣿⡏⠉⠉⠉⢻⣿⣿⣿⣿⣿⣿⣿⣷⠀⠀⠀⠀⠀⠀⠀"
+"⠀⠀⠀⢿⣿⣿⣿⣿⣯⣄⣀⣠⣽⣿⣿⣿⣿⣿⣿⣿⣿⡄⠀⠀⠀⠀⠀⠀"
+"⠀⠀⢠⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣆⠀⠀⠀⠀⠀"
+"⠀⢀⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⣄⠀⠀⠀"
+"⠀⠀⢹⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⣄⠀"
+"⠀⠀⠈⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷"
+"⠀⠀⠀⠘⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿"
+"⠀⠀⠀⠀⠈⢿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿"
+"⠀⠀⠀⠀⠀⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿"
+"⠀⠀⠀⠀⠀⠀⣿⣿⣻⣿⣽⣿⣿⣿⣿⣿⢧⣿⣿⣿⣿⠇⠟⠻⢿⣛⣿⣿"
+"⠀⠀⠀⠀⠀⠀⣿⣿⣼⣿⣿⡿⣿⣿⣉⡽⣾⣿⣿⣿⡏⣴⣶⣿⣿⣿⣿⣿"
+"⠀⣀⣀⣀⣀⡀⣿⣿⣾⣯⣭⣥⣶⣿⣿⢳⣿⣿⣿⡟⢺⣿⣿⣿⣿⣿⣿⣿"
+)
 
-# ── Shared (foreground for features on bg) ──
-fK=$'\033[38;5;16m'     # black — eyes
-fN=$'\033[38;5;52m'     # dark brown — nose
-fT=$'\033[38;5;211m'    # deep pink — tongue ω / ‿
-fG=$'\033[38;5;245m'    # gray — sarang closed mouth
-
-# ── Build mango rows (each = exactly 11 visible chars) ──
-#     Col: 0  1  2  3  4  5  6  7  8  9  10
-
-# Row 0: ear tips — _  E  _  _  _  _  _  _  _  E  _
-M0=" ${mE} ${R}       ${mE} ${R} "
-
-# Row 1: ears — E  I  E  _  _  _  _  _  E  I  E
-M1="${mE} ${mI} ${mE} ${R}     ${mE} ${mI} ${mE} ${R}"
-
-# Row 2: ears + face top — E  I  F  F  F  F  F  F  F  I  E
-M2="${mE} ${mI} ${mF}       ${mI} ${mE} ${R}"
-
-# Row 3: forehead — _  F  F  F  F  F  F  F  F  F  _
-M3=" ${mF}         ${R} "
-
-# Row 4: eyes — _  F  ◕  F  F  F  F  F  ◕  F  _
-M4=" ${mF} ${fK}◕     ◕ ${R} "
-
-# Row 5: nose + yellow patches — _  Y  F  F  F  ▾  F  F  F  Y  _
-M5=" ${mY} ${mF}   ${fN}▾   ${mY} ${R} "
-
-# Row 6: mouth — _  _  F  T  T  ω  T  T  F  _  _
-M6="  ${mF} ${mT}  ${fT}ω  ${mF} ${R}  "
-
-# Row 7: tongue — _  _  _  T  ‿  ‿  ‿  T  _  _  _
-M7="   ${mT} ${fT}‿‿‿ ${R}   "
-
-# Row 8: chin — _  _  _  _  F  F  F  _  _  _  _
-M8="    ${mF}   ${R}    "
-
-# ── Build sarang rows (each = exactly 11 visible chars) ──
-
-# Row 0: ear tips
-S0=" ${sE} ${R}       ${sE} ${R} "
-
-# Row 1: ears
-S1="${sE} ${sI} ${sE} ${R}     ${sE} ${sI} ${sE} ${R}"
-
-# Row 2: ears + face top
-S2="${sE} ${sI} ${sF}       ${sI} ${sE} ${R}"
-
-# Row 3: forehead
-S3=" ${sF}         ${R} "
-
-# Row 4: eyes
-S4=" ${sF} ${fK}◕     ◕ ${R} "
-
-# Row 5: nose (no yellow patches)
-S5=" ${sF}    ${fN}▾    ${R} "
-
-# Row 6: closed mouth — _  _  F  F  F  ω  F  F  F  _  _
-S6="  ${sF}   ${fG}ω   ${R}  "
-
-# Row 7: lower face — _  _  _  F  F  F  F  F  _  _  _
-S7="   ${sF}     ${R}   "
-
-# Row 8: chin
-S8="    ${sF}   ${R}    "
-
-# ── Gap / hearts (each = exactly 10 visible chars) ──
-GE="          "
-GH1="    ${FP}♥♥${R}    "
-GH2="   ${FP}♥${R}  ${FP}♥${R}   "
-GH3="    ${FP}♥♥${R}    "
-GH4="     ${FP}♥${R}    "
-
-# ── Layout: 8 left + 11 mango + 10 gap + 11 sarang + 18 right = 58 ──
-L="        "   # 8 spaces left
-T="                  "  # 18 spaces right
 V="${FO}${B}│${R}"  # vertical border
 
 printf '\033c'
 
-# ── Title ──
+# ── Title (frame inner width: 68) ──
 cat << 'FRAME_TOP'
-    ╭──────────────────────────────────────────────────────────╮
+    ╭────────────────────────────────────────────────────────────────────╮
 FRAME_TOP
 
 cat << EOF
-    ${V}                                                          ${V}
-    ${V}   ${FY}${B}  ╔╦╗╔═╗╔╗╔╔═╗╔═╗  ${FP}${B}╦  ╔═╗╦  ╦╔═╗${R}                       ${V}
-    ${V}   ${FY}${B}  ║║║╠═╣║║║║ ╦║ ║  ${FP}${B}║  ║ ║╚╗╔╝║╣${R}                        ${V}
-    ${V}   ${FY}${B}  ╩ ╩╩ ╩╝╚╝╚═╝╚═╝  ${FP}${B}╩═╝╚═╝ ╚╝ ╚═╝${R}                       ${V}
-    ${V}                                                          ${V}
+    ${V}                                                                    ${V}
+    ${V}            ${FY}${B}  ╔╦╗╔═╗╔╗╔╔═╗╔═╗  ${FP}${B}╦  ╔═╗╦  ╦╔═╗${R}                        ${V}
+    ${V}            ${FY}${B}  ║║║╠═╣║║║║ ╦║ ║  ${FP}${B}║  ║ ║╚╗╔╝║╣${R}                         ${V}
+    ${V}            ${FY}${B}  ╩ ╩╩ ╩╝╚╝╚═╝╚═╝  ${FP}${B}╩═╝╚═╝ ╚╝ ╚═╝${R}                        ${V}
+    ${V}                                                                    ${V}
 EOF
 
-# ── Dog art (9 rows) ──
-echo "    ${V}${L}${M0}${GE}${S0}${T}${V}"
-echo "    ${V}${L}${M1}${GE}${S1}${T}${V}"
-echo "    ${V}${L}${M2}${GE}${S2}${T}${V}"
-echo "    ${V}${L}${M3}${GH1}${S3}${T}${V}"
-echo "    ${V}${L}${M4}${GH2}${S4}${T}${V}"
-echo "    ${V}${L}${M5}${GH3}${S5}${T}${V}"
-echo "    ${V}${L}${M6}${GH4}${S6}${T}${V}"
-echo "    ${V}${L}${M7}${GE}${S7}${T}${V}"
-echo "    ${V}${L}${M8}${GE}${S8}${T}${V}"
+# ── Braille dog art (16 rows, 28+4+28=60 chars, centered in 68-char frame) ──
+for i in "${!MANGO_ART[@]}"; do
+    echo "    ${V}    ${FY}${MANGO_ART[$i]}${R}    ${FBW}${SARANG_ART[$i]}${R}    ${V}"
+done
 
 cat << EOF
-    ${V}                                                          ${V}
-    ${V}     ${FY}${IT}Mango${R} ${FGR}🥭${R}                      ${FBW}${IT}Sarang${R} ${FGR}🤍${R}              ${V}
-    ${V}   ${FGR}${DIM}혀 내밀고 방긋!${R}           ${FGR}${DIM}차분하고 단정한 아이${R}         ${V}
-    ${V}                                                          ${V}
-    ${V}  ${FGR}${IT}    " Two Jindo dogs who inspired everything. "${R}         ${V}
-    ${V}                                                          ${V}
+    ${V}                                                                    ${V}
+    ${V}          ${FY}${IT}Mango${R} ${FGR}🥭${R}    ${FGR}&${R}    ${FBW}${IT}Sarang${R} ${FGR}🤍${R}                                ${V}
+    ${V}                                                                    ${V}
+    ${V}     ${FGR}${IT}    " Two Jindo dogs who inspired everything. "${R}                ${V}
+    ${V}                                                                    ${V}
 EOF
 
 cat << 'FRAME_BOT'
-    ╰──────────────────────────────────────────────────────────╯
+    ╰────────────────────────────────────────────────────────────────────╯
 FRAME_BOT
 
 # ── Version ──

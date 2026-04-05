@@ -33,6 +33,12 @@ if [ -L "$BIN_LINK" ]; then
     echo -e "  ${G}✓${R} Removed symlink: $BIN_LINK"
 fi
 
+# Remove shell completions
+ZSH_COMP="${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions/_mangolove"
+BASH_COMP="${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions/mangolove"
+[ -L "$ZSH_COMP" ] && rm "$ZSH_COMP" && echo -e "  ${G}✓${R} Removed zsh completion"
+[ -L "$BASH_COMP" ] && rm "$BASH_COMP" && echo -e "  ${G}✓${R} Removed bash completion"
+
 # Remove installation
 if [ -d "$MANGOLOVE_DIR" ]; then
     # Ask about preserving user data
@@ -45,9 +51,11 @@ if [ -d "$MANGOLOVE_DIR" ]; then
         rm -rf "$MANGOLOVE_DIR/bin"
         rm -rf "$MANGOLOVE_DIR/lib"
         rm -rf "$MANGOLOVE_DIR/prompts"
+        rm -rf "$MANGOLOVE_DIR/completions"
         rm -rf "$MANGOLOVE_DIR/docs"
-        rm -f "$MANGOLOVE_DIR/.git" 2>/dev/null
         rm -rf "$MANGOLOVE_DIR/.git" 2>/dev/null
+        rm -f "$MANGOLOVE_DIR/.version" 2>/dev/null
+        rm -f "$MANGOLOVE_DIR/.gitignore" 2>/dev/null
         echo -e "  ${G}✓${R} Removed program files"
         echo -e "  ${DIM}  Kept: projects/, logs/, config.sh${R}"
     fi

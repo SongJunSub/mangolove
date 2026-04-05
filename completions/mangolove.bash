@@ -8,8 +8,9 @@ _mangolove_completions() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-    local commands="help projects profile log update doctor --version -v --help -h --mode -m --model --effort -c --continue -r --resume -p"
+    local commands="help projects profile plugin log update doctor --version -v --help -h --mode -m --model --effort -c --continue -r --resume -p"
     local profile_cmds="add auto remove"
+    local plugin_cmds="create enable disable"
     local log_cmds="init view search recent"
     local modes=""
     local models="opus sonnet haiku"
@@ -24,6 +25,24 @@ _mangolove_completions() {
     fi
 
     case "${COMP_WORDS[1]}" in
+        plugin|plugins)
+            case "$prev" in
+                plugin|plugins)
+                    COMPREPLY=($(compgen -W "$plugin_cmds" -- "$cur"))
+                    ;;
+                enable|disable)
+                    local plugins=""
+                    local plugins_dir="${MANGOLOVE_DIR:-$HOME/.mangolove}/plugins"
+                    if [ -d "$plugins_dir" ]; then
+                        for pd in "$plugins_dir"/*/; do
+                            [ -f "${pd}plugin.sh" ] && plugins="$plugins $(basename "$pd")"
+                        done
+                    fi
+                    COMPREPLY=($(compgen -W "$plugins" -- "$cur"))
+                    ;;
+            esac
+            return
+            ;;
         profile)
             case "$prev" in
                 profile)

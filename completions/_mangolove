@@ -33,6 +33,7 @@ _mangolove() {
         'help:Show help information'
         'projects:List project profiles'
         'profile:Manage project profiles'
+        'plugin:Manage plugins'
         'log:Work log management'
         'update:Update MangoLove to latest version'
         'doctor:Check installation health'
@@ -80,6 +81,26 @@ _mangolove() {
                         _path_files -/
                         ;;
                 esac
+            fi
+            ;;
+        plugin|plugins)
+            if (( CURRENT == 3 )); then
+                local -a plugin_cmds
+                plugin_cmds=(
+                    'create:Create a new plugin from template'
+                    'enable:Enable a plugin'
+                    'disable:Disable a plugin'
+                )
+                _describe 'plugin command' plugin_cmds
+            elif (( CURRENT == 4 )); then
+                local plugins_dir="${MANGOLOVE_DIR:-$HOME/.mangolove}/plugins"
+                local plugins=()
+                if [ -d "$plugins_dir" ]; then
+                    for pd in "$plugins_dir"/*/; do
+                        [ -f "${pd}plugin.sh" ] && plugins+=($(basename "$pd"))
+                    done
+                fi
+                _describe 'plugin' plugins
             fi
             ;;
         log)

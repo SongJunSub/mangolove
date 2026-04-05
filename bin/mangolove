@@ -12,6 +12,7 @@ MANGOLOVE_DIR="${MANGOLOVE_DIR:-$HOME/.mangolove}"
 SYSTEM_PROMPT_FILE="$MANGOLOVE_DIR/prompts/system-prompt.md"
 WORK_LOGGER="$MANGOLOVE_DIR/lib/work-logger.sh"
 PROFILE_MANAGER="$MANGOLOVE_DIR/lib/profile-manager.sh"
+PLUGIN_MANAGER="$MANGOLOVE_DIR/lib/plugin-manager.sh"
 BANNER_SCRIPT="$MANGOLOVE_DIR/lib/banner.sh"
 
 # ─────────────────────────────────────────────
@@ -107,6 +108,18 @@ On your first response, briefly analyze the project structure and offer to creat
 
     full_prompt="${full_prompt}${log_instruction}"
 
+    # Load plugin prompt additions
+    local plugin_additions=""
+    plugin_additions=$(bash "$PLUGIN_MANAGER" prompts 2>/dev/null) || true
+    if [ -n "$plugin_additions" ]; then
+        full_prompt="${full_prompt}
+
+---
+
+## Plugin Instructions
+${plugin_additions}"
+    fi
+
     if [ -n "$MANGOLOVE_EXTRA_PROMPT" ]; then
         full_prompt="${full_prompt}
 
@@ -140,6 +153,10 @@ show_help() {
     echo "  mangolove profile add         Add a new project profile"
     echo "  mangolove profile auto [dir]  Auto-generate profile from project scan"
     echo "  mangolove profile remove <n>  Remove a project profile"
+    echo "  mangolove plugin              List installed plugins"
+    echo "  mangolove plugin create <n>   Create a new plugin from template"
+    echo "  mangolove plugin enable <n>   Enable a plugin"
+    echo "  mangolove plugin disable <n>  Disable a plugin"
     echo "  mangolove log init            Initialize work log repository"
     echo "  mangolove log view            Open work logs in browser"
     echo "  mangolove log search <term>   Search work logs"
@@ -235,6 +252,20 @@ do_doctor() {
     done
     echo -e "  \033[38;5;113m✓\033[0m Project profiles: ${profile_count}"
 
+    # Count plugins
+    local plugin_count=0
+    for pd in "$MANGOLOVE_DIR/plugins"/*/; do
+        [ -f "${pd}plugin.sh" ] && plugin_count=$((plugin_count + 1))
+    done
+    echo -e "  \033[38;5;113m✓\033[0m Plugins: ${plugin_count}"
+
+    # Count modes
+    local mode_count=0
+    for mf in "$MANGOLOVE_DIR/prompts/modes"/*.md; do
+        [ -f "$mf" ] && mode_count=$((mode_count + 1))
+    done
+    echo -e "  \033[38;5;113m✓\033[0m Modes: ${mode_count}"
+
     echo ""
     echo -e "\033[2m──────────────────────────────────────\033[0m"
     echo ""
@@ -265,6 +296,15 @@ handle_log() {
         *)
             echo "Usage: mangolove log [init|view|search|recent]"
             ;;
+    esac
+}
+
+handle_plugin() {
+    case "${1:-}" in
+        enable)  bash "$PLUGIN_MANAGER" enable "$2" ;;
+        disable) bash "$PLUGIN_MANAGER" disable "$2" ;;
+        create)  bash "$PLUGIN_MANAGER" create "$2" ;;
+        *)       bash "$PLUGIN_MANAGER" list ;;
     esac
 }
 
@@ -299,6 +339,11 @@ main() {
         profile)
             shift
             handle_profile "$@"
+            exit 0
+            ;;
+        plugin|plugins)
+            shift
+            handle_plugin "$@"
             exit 0
             ;;
         log)
@@ -351,6 +396,9 @@ main() {
     # Preflight
     check_dependencies
 
+    # Run plugin on_session_start hooks
+    bash "$PLUGIN_MANAGER" hook on_session_start 2>/dev/null || true
+
     # Show banner
     if [ "$MANGOLOVE_SHOW_BANNER" = "true" ]; then
         bash "$BANNER_SCRIPT"
@@ -364,10 +412,13 @@ main() {
     # Build system prompt
     SYSTEM_PROMPT=$(build_system_prompt)
 
-    # Trap exit to log session end
-    if [ "$MANGOLOVE_AUTO_LOG" = "true" ]; then
-        trap 'bash "$WORK_LOGGER" end &>/dev/null &' EXIT
-    fi
+    # Trap exit to log session end and run plugin hooks
+    trap '{
+        bash "$PLUGIN_MANAGER" hook on_session_end 2>/dev/null &
+        if [ "$MANGOLOVE_AUTO_LOG" = "true" ]; then
+            bash "$WORK_LOGGER" end &>/dev/null &
+        fi
+    }' EXIT
 
     # Build Claude args
     CLAUDE_ARGS=()

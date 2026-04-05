@@ -25,7 +25,15 @@ MANGOLOVE_MODEL=""
 MANGOLOVE_EFFORT=""
 MANGOLOVE_MODE=""
 
-[ -f "$MANGOLOVE_DIR/config.sh" ] && source "$MANGOLOVE_DIR/config.sh"
+if [ -f "$MANGOLOVE_DIR/config.sh" ]; then
+    if bash -n "$MANGOLOVE_DIR/config.sh" 2>/dev/null; then
+        # shellcheck source=/dev/null
+        source "$MANGOLOVE_DIR/config.sh"
+    else
+        echo -e "\033[38;5;220mWarning: config.sh has syntax errors. Using defaults.\033[0m" >&2
+        echo "  Run: bash -n ~/.mangolove/config.sh  to see errors." >&2
+    fi
+fi
 
 # ─────────────────────────────────────────────
 # Preflight check

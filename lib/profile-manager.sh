@@ -197,10 +197,7 @@ auto_generate_profile() {
         if [ -f "$target_dir/settings.gradle" ] || [ -f "$target_dir/settings.gradle.kts" ]; then
             local settings_file="$target_dir/settings.gradle"
             [ -f "$target_dir/settings.gradle.kts" ] && settings_file="$target_dir/settings.gradle.kts"
-            modules=$(grep -oP "include\s*\(?['\"]:\K[^'\"]*" "$settings_file" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
-            if [ -z "$modules" ]; then
-                modules=$(grep -o "include.*" "$settings_file" 2>/dev/null | grep -oP "'[^']*'" | tr -d "'" | tr -d ':' | tr '\n' ', ' | sed 's/,$//')
-            fi
+            modules=$(grep "include" "$settings_file" 2>/dev/null | sed "s/.*include//;s/[\"'()]//g;s/://g" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | grep -v '^$' | tr '\n' ', ' | sed 's/,$//')
         fi
     fi
 
@@ -246,13 +243,13 @@ auto_generate_profile() {
         if grep -q '"express"' "$target_dir/package.json" 2>/dev/null; then
             tech_stack+=("Express")
         fi
-        if grep -q '"nestjs\|@nestjs"' "$target_dir/package.json" 2>/dev/null; then
+        if grep -qE '"nestjs"|"@nestjs"' "$target_dir/package.json" 2>/dev/null; then
             tech_stack+=("NestJS")
         fi
 
         # Build/test commands from scripts
-        local pkg_build=$(grep -oP '"build"\s*:\s*"\K[^"]*' "$target_dir/package.json" 2>/dev/null)
-        local pkg_test=$(grep -oP '"test"\s*:\s*"\K[^"]*' "$target_dir/package.json" 2>/dev/null)
+        local pkg_build=$(grep '"build"' "$target_dir/package.json" 2>/dev/null | sed 's/.*"build"[[:space:]]*:[[:space:]]*"//;s/".*//')
+        local pkg_test=$(grep '"test"' "$target_dir/package.json" 2>/dev/null | sed 's/.*"test"[[:space:]]*:[[:space:]]*"//;s/".*//')
 
         # Detect package manager
         local pkg_mgr="npm"

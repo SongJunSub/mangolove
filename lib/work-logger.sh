@@ -159,7 +159,7 @@ log_session_end() {
     fi
 }
 
-# Collect git commits made during the current session
+# Collect git commits made during the current session (runs in subshell)
 collect_session_commits() {
     local session_start_file="$LOG_DIR/.session_start"
     [ ! -f "$session_start_file" ] && return 0
@@ -170,26 +170,27 @@ collect_session_commits() {
     [ -z "$start_time" ] || [ -z "$work_dir" ] && return 0
     [ ! -d "$work_dir/.git" ] && return 0
 
-    cd "$work_dir" 2>/dev/null || return 0
+    # Run in subshell to avoid directory change side effects
+    (
+        cd "$work_dir" 2>/dev/null || exit 0
 
-    # Get commits made after session start
-    local commits=""
-    commits=$(git log --after="$start_time" --format="- **%h** %s" --no-merges 2>/dev/null)
+        # Get commits made after session start
+        local commits=""
+        commits=$(git log --after="$start_time" --format="- **%h** %s" --no-merges 2>/dev/null)
 
-    if [ -n "$commits" ]; then
-        echo "$commits"
-    fi
+        if [ -n "$commits" ]; then
+            echo "$commits"
+        fi
 
-    # Get changed file stats
-    local stats=""
-    stats=$(git log --after="$start_time" --format="" --stat --no-merges 2>/dev/null | tail -1)
+        # Get changed file stats
+        local stats=""
+        stats=$(git log --after="$start_time" --format="" --stat --no-merges 2>/dev/null | tail -1)
 
-    if [ -n "$stats" ]; then
-        echo ""
-        echo "> ${stats}"
-    fi
-
-    cd - > /dev/null 2>/dev/null
+        if [ -n "$stats" ]; then
+            echo ""
+            echo "> ${stats}"
+        fi
+    )
 }
 
 # Search work logs
@@ -209,7 +210,7 @@ search_logs() {
     echo -e "  \033[2mKeyword:\033[0m ${keyword}"
     echo ""
 
-    grep -rn --color=always "$keyword" "$LOCAL_REPO/logs/" 2>/dev/null | \
+    grep -rn -F --color=always "$keyword" "$LOCAL_REPO/logs/" 2>/dev/null | \
         sed "s|$LOCAL_REPO/logs/||g" | \
         head -50
 

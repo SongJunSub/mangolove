@@ -120,7 +120,7 @@ list_plugins() {
 
         # Detect implemented hooks
         local hooks=""
-        hooks=$(grep -oP '^(on_session_start|on_session_end|on_prompt_build|on_profile_load)\s*\(' "$plugin_script" 2>/dev/null | tr -d '(' | tr '\n' ', ' | sed 's/,$//')
+        hooks=$(grep -o '^on_session_start\|^on_session_end\|^on_prompt_build\|^on_profile_load' "$plugin_script" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
 
         echo -e "  ${G}▸${R} ${B}${plugin_name}${R} ${DIM}${version}${R} [${status}]"
         [ -n "$description" ] && echo -e "    ${DIM}${description}${R}"

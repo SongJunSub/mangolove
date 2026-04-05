@@ -2,7 +2,7 @@
 
 **Autonomous Development Agent** — Built on [Claude Code](https://claude.ai/claude-code)
 
-MangoLove is an autonomous development agent built on top of Claude Code. It remembers project-specific context and handles the full workflow from analysis to implementation.
+MangoLove is an autonomous development agent built on top of Claude Code. It remembers project-specific context, enforces development best practices, and handles the full workflow from analysis to implementation.
 
 > **Origin of the name**
 > Named after two Jindo dogs.
@@ -13,13 +13,15 @@ MangoLove is an autonomous development agent built on top of Claude Code. It rem
 
 ## Features
 
-- **Autonomous Execution** — Automatically performs analysis, planning, implementation, and verification for given tasks
-- **Project Profiles** — Remembers and applies per-project tech stacks, conventions, and architecture
-- **Work Logging** — Records work history to a GitHub private repository
-- **Prompt Modes** — Specialized modes for debugging, code review, refactoring, PR creation, security audit, and planning
-- **Shell Completions** — Tab completion support for Bash and Zsh
-- **Plugin System** — Extensible architecture via plugins
-- **Claude Code Compatible** — Full access to all Claude Code features (`/commands`, MCP, hooks, etc.)
+- **Autonomous Execution** — Analyzes, plans, implements, and verifies tasks end-to-end
+- **Project Profiles** — Remembers per-project tech stacks, conventions, and architecture
+- **Skill Packs** — Composable, installable skill packs from git repositories or local directories
+- **9 Specialized Modes** — TDD, strict (auto lint/test/build), code review, debugging, refactoring, security audit, documentation sync, PR creation, and planning
+- **Work Logging** — Records session history to a GitHub private repository
+- **Plugin System** — Hook-based extensibility with 4 hook types
+- **Shell Completions** — Tab completion for Bash and Zsh
+- **Config Validation** — Syntax checking before sourcing configuration
+- **Claude Code Compatible** — Full access to all Claude Code features
 
 ## Requirements
 
@@ -74,17 +76,59 @@ mangolove -c
 mangolove -p "Review this code"
 ```
 
+### Modes
+
+```bash
+mangolove --mode review       # Code review mode
+mangolove --mode debug        # Debug and root-cause analysis
+mangolove --mode refactor     # Refactoring mode
+mangolove --mode security     # Security audit mode
+mangolove --mode plan         # Planning mode
+mangolove --mode pr           # PR creation mode
+mangolove --mode tdd          # Test-driven development (RED-GREEN-REFACTOR)
+mangolove --mode strict       # Strict mode (auto build/lint/test pipeline)
+mangolove --mode docs         # Documentation sync mode
+```
+
+### Skill Packs
+
+```bash
+# List built-in modes and installed skill packs
+mangolove skill
+
+# Install a skill pack from a git repository
+mangolove skill install https://github.com/user/my-skill-pack.git
+
+# Install from a local directory
+mangolove skill install ./my-local-skill
+
+# Create a new skill pack template
+mangolove skill create my-custom-skill
+
+# Update all installed skill packs
+mangolove skill update
+
+# Remove a skill pack
+mangolove skill remove my-skill-pack
+```
+
 ### Project Profiles
 
 ```bash
 # List registered projects
 mangolove projects
 
+# Auto-generate profile by scanning project directory
+mangolove profile auto
+
 # Manually add a profile
 mangolove profile add
 
-# Running in a project directory for the first time will prompt profile creation
-cd ~/my-project && mangolove
+# Export profile for team sharing
+mangolove profile export my-project
+
+# Import a shared .mangolove.md file
+mangolove profile import .mangolove.md
 ```
 
 ### Work Logging
@@ -95,13 +139,15 @@ mangolove log init
 
 # View work logs in the browser
 mangolove log view
+
+# Search work logs
+mangolove log search "refactoring"
+
+# Show recent session summary
+mangolove log recent
 ```
 
 ### Options
-
-```bash
-mangolove help
-```
 
 All Claude Code options can be passed through directly:
 
@@ -122,21 +168,18 @@ mangolove --worktree             # Work in a separate worktree
 │   ├── banner.sh              # UI banner
 │   ├── work-logger.sh         # GitHub work logger
 │   ├── profile-manager.sh     # Project profile manager
-│   └── plugin-manager.sh      # Plugin manager
+│   ├── plugin-manager.sh      # Plugin manager
+│   └── skill-manager.sh       # Skill pack manager
 ├── prompts/
 │   ├── system-prompt.md       # Core system prompt
-│   └── modes/                 # Specialized prompt modes
-│       ├── debug.md
-│       ├── plan.md
-│       ├── pr.md
-│       ├── refactor.md
-│       ├── review.md
-│       └── security.md
+│   └── modes/                 # Specialized prompt modes (9 modes)
+├── skills/                    # Installed skill packs
 ├── completions/
 │   ├── mangolove.bash         # Bash completions
 │   └── _mangolove             # Zsh completions
 ├── plugins/                   # Plugin directory
 ├── projects/                  # Project profiles (auto-generated)
+├── tests/                     # BATS test suite
 ├── logs/                      # Local work logs
 ├── config.sh                  # User configuration
 ├── install.sh                 # Installer
@@ -168,6 +211,29 @@ MANGOLOVE_MODEL=""
 MANGOLOVE_EFFORT=""
 ```
 
+## Creating Skill Packs
+
+A skill pack is a directory with a `skill.yaml` manifest and prompt files:
+
+```
+my-skill/
+├── skill.yaml          # Manifest (name, version, description, author)
+├── prompts/
+│   └── main.md         # Prompt instructions (auto-loaded)
+└── README.md           # Documentation
+```
+
+Example `skill.yaml`:
+```yaml
+name: my-skill
+version: 1.0.0
+description: Custom skill for domain-specific tasks
+author: your-name
+compatibility: ">=0.2.0"
+```
+
+Skill prompts are automatically injected into the system prompt when active.
+
 ## Creating Project Profiles
 
 When running `mangolove` in a project directory for the first time, it will automatically suggest creating a profile.
@@ -192,6 +258,20 @@ test_cmd: ./gradlew test
 - Conventional Commits
 ```
 
+## Testing
+
+MangoLove includes a comprehensive BATS test suite:
+
+```bash
+# Run all tests (requires bats-core)
+bats tests/
+
+# Run tests for a specific module
+bats tests/profile-manager.bats
+bats tests/plugin-manager.bats
+bats tests/skill-manager.bats
+```
+
 ## Update
 
 ```bash
@@ -212,10 +292,12 @@ cd ~/.mangolove && git pull origin main
 4. Push to the branch (`git push origin feat/amazing-feature`)
 5. Open a Pull Request
 
+All contributions must pass the test suite (`bats tests/`) and ShellCheck (`shellcheck -x bin/mangolove lib/*.sh`).
+
 ## License
 
 MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 
-**MangoLove** v0.2.0 — Built with Claude Code
+**MangoLove** v0.3.0 — Built with Claude Code

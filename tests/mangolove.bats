@@ -24,7 +24,7 @@ teardown() {
     run bash "$MANGOLOVE_DIR/bin/mangolove" --version
     [ "$status" -eq 0 ]
     [[ "$output" == *"MangoLove"* ]]
-    [[ "$output" == *"0.2.0"* ]]
+    [[ "$output" == *"0.3.0"* ]]
 }
 
 @test "version: -v shorthand works" {

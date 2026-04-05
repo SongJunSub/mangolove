@@ -7,7 +7,7 @@
 
 set -eo pipefail
 
-MANGOLOVE_VERSION="0.2.0"
+MANGOLOVE_VERSION="0.3.0"
 MANGOLOVE_DIR="${MANGOLOVE_DIR:-$HOME/.mangolove}"
 SYSTEM_PROMPT_FILE="$MANGOLOVE_DIR/prompts/system-prompt.md"
 WORK_LOGGER="$MANGOLOVE_DIR/lib/work-logger.sh"

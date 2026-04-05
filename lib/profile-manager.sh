@@ -115,7 +115,11 @@ remove_profile() {
 # Auto-generate a project profile by scanning the directory
 auto_generate_profile() {
     local target_dir="${1:-$(pwd)}"
-    target_dir=$(cd "$target_dir" && pwd)  # resolve absolute path
+    # Resolve absolute path safely
+    if ! target_dir=$(cd "$target_dir" 2>/dev/null && pwd); then
+        echo -e "  ${RED}✗ Directory not found:${R} ${1}"
+        return 1
+    fi
 
     echo ""
     echo -e "${O}${B}🥭 MangoLove — Auto-Generate Profile${R}"

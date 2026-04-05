@@ -423,6 +423,7 @@ main() {
         if [ "$MANGOLOVE_AUTO_LOG" = "true" ]; then
             bash "$WORK_LOGGER" end &>/dev/null &
         fi
+        wait 2>/dev/null
     }' EXIT
 
     # Build Claude args

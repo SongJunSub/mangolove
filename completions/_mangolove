@@ -69,16 +69,21 @@ _mangolove() {
                 profile_cmds=(
                     'add:Add a new project profile'
                     'auto:Auto-generate profile from project scan'
+                    'export:Export profile as .mangolove.md for team'
+                    'import:Import .mangolove.md to personal profiles'
                     'remove:Remove a project profile'
                 )
                 _describe 'profile command' profile_cmds
             elif (( CURRENT == 4 )); then
                 case "${words[3]}" in
-                    remove)
+                    remove|export)
                         _mangolove_profiles
                         ;;
                     auto)
                         _path_files -/
+                        ;;
+                    import)
+                        _path_files -g "*.md"
                         ;;
                 esac
             fi

@@ -152,6 +152,8 @@ show_help() {
     echo "  mangolove projects            List project profiles"
     echo "  mangolove profile add         Add a new project profile"
     echo "  mangolove profile auto [dir]  Auto-generate profile from project scan"
+    echo "  mangolove profile export <n>  Export profile as .mangolove.md for team"
+    echo "  mangolove profile import [f]  Import .mangolove.md to personal profiles"
     echo "  mangolove profile remove <n>  Remove a project profile"
     echo "  mangolove plugin              List installed plugins"
     echo "  mangolove plugin create <n>   Create a new plugin from template"
@@ -172,6 +174,7 @@ show_help() {
     echo "  mangolove --mode refactor     Refactoring mode"
     echo "  mangolove --mode security     Security audit mode"
     echo "  mangolove --mode plan         Planning mode"
+    echo "  mangolove --mode pr           PR creation mode"
     echo ""
     echo "Options (passed through to Claude Code):"
     echo "  -c, --continue                Continue last conversation"
@@ -310,10 +313,12 @@ handle_plugin() {
 
 handle_profile() {
     case "${1:-}" in
-        add)    bash "$PROFILE_MANAGER" add ;;
-        remove) bash "$PROFILE_MANAGER" remove "$2" ;;
-        auto)   bash "$PROFILE_MANAGER" auto "${2:-}" ;;
-        *)      bash "$PROFILE_MANAGER" list ;;
+        add)     bash "$PROFILE_MANAGER" add ;;
+        remove)  bash "$PROFILE_MANAGER" remove "$2" ;;
+        auto)    bash "$PROFILE_MANAGER" auto "${2:-}" ;;
+        export)  bash "$PROFILE_MANAGER" export "$2" "${3:-}" ;;
+        import)  bash "$PROFILE_MANAGER" import "${2:-}" ;;
+        *)       bash "$PROFILE_MANAGER" list ;;
     esac
 }
 

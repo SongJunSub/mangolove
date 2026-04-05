@@ -9,7 +9,7 @@ _mangolove_completions() {
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
     local commands="help projects profile plugin log update doctor --version -v --help -h --mode -m --model --effort -c --continue -r --resume -p"
-    local profile_cmds="add auto remove"
+    local profile_cmds="add auto export import remove"
     local plugin_cmds="create enable disable"
     local log_cmds="init view search recent"
     local modes=""
@@ -48,7 +48,7 @@ _mangolove_completions() {
                 profile)
                     COMPREPLY=($(compgen -W "$profile_cmds" -- "$cur"))
                     ;;
-                remove)
+                remove|export)
                     local profiles=""
                     local projects_dir="${MANGOLOVE_DIR:-$HOME/.mangolove}/projects"
                     if [ -d "$projects_dir" ]; then
@@ -58,6 +58,9 @@ _mangolove_completions() {
                         done
                     fi
                     COMPREPLY=($(compgen -W "$profiles" -- "$cur"))
+                    ;;
+                import)
+                    COMPREPLY=($(compgen -f -X '!*.md' -- "$cur"))
                     ;;
                 auto)
                     COMPREPLY=($(compgen -d -- "$cur"))

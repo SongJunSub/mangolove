@@ -381,7 +381,34 @@ $(echo "$modules" | tr ',' '\n' | sed 's/^ *//' | sed 's/^/- /')"
 # Load project context for current directory
 load_project_context() {
     local current_dir=$(pwd)
+    local context=""
 
+    # First: check for .mangolove.md in current or parent directories (team shared config)
+    local check_dir="$current_dir"
+    while [ "$check_dir" != "/" ]; do
+        if [ -f "$check_dir/.mangolove.md" ]; then
+            context=$(cat "$check_dir/.mangolove.md")
+            echo "$context"
+
+            # Also append personal profile if exists
+            for profile in "$PROJECTS_DIR"/*.md; do
+                [ "$(basename "$profile")" = "README.md" ] && continue
+                [ ! -f "$profile" ] && continue
+                local profile_path=$(grep "^path:" "$profile" 2>/dev/null | sed 's/^path: *//')
+                if [ -n "$profile_path" ] && [[ "$current_dir" == "$profile_path"* ]]; then
+                    echo ""
+                    echo "---"
+                    echo "## Personal Profile Additions"
+                    cat "$profile"
+                    break
+                fi
+            done
+            return 0
+        fi
+        check_dir=$(dirname "$check_dir")
+    done
+
+    # Fallback: check personal profiles
     for profile in "$PROJECTS_DIR"/*.md; do
         [ "$(basename "$profile")" = "README.md" ] && continue
         [ ! -f "$profile" ] && continue
@@ -396,6 +423,46 @@ load_project_context() {
     return 1
 }
 
+# Export a profile as a .mangolove.md for team sharing
+export_profile() {
+    local profile_name="$1"
+    local output_dir="${2:-$(pwd)}"
+
+    if [ -z "$profile_name" ]; then
+        echo "Usage: mangolove profile export <name> [output-dir]"
+        return 1
+    fi
+
+    local profile_file="$PROJECTS_DIR/${profile_name}.md"
+    if [ ! -f "$profile_file" ]; then
+        echo -e "  ${RED}✗ Profile not found:${R} ${profile_name}"
+        return 1
+    fi
+
+    cp "$profile_file" "$output_dir/.mangolove.md"
+    echo -e "  ${G}✅ Exported:${R} ${output_dir}/.mangolove.md"
+    echo -e "  ${DIM}Commit this file to share with your team.${R}"
+}
+
+# Import a .mangolove.md from a project directory
+import_profile() {
+    local source_file="${1:-.mangolove.md}"
+
+    if [ ! -f "$source_file" ]; then
+        echo -e "  ${RED}✗ File not found:${R} ${source_file}"
+        return 1
+    fi
+
+    local proj_name=$(grep "^name:" "$source_file" 2>/dev/null | sed 's/^name: *//')
+    [ -z "$proj_name" ] && proj_name=$(basename "$(pwd)")
+
+    local filename=$(echo "$proj_name" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^a-z0-9-]//g')
+
+    mkdir -p "$PROJECTS_DIR"
+    cp "$source_file" "$PROJECTS_DIR/${filename}.md"
+    echo -e "  ${G}✅ Imported:${R} ${PROJECTS_DIR}/${filename}.md"
+}
+
 # Entrypoint
 case "${1:-}" in
     list)    list_profiles ;;
@@ -403,5 +470,7 @@ case "${1:-}" in
     remove)  remove_profile "$2" ;;
     load)    load_project_context ;;
     auto)    auto_generate_profile "${2:-}" ;;
+    export)  export_profile "$2" "${3:-}" ;;
+    import)  import_profile "${2:-}" ;;
     *)       list_profiles ;;
 esac

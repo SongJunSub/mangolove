@@ -142,6 +142,8 @@ show_help() {
     echo "  mangolove profile remove <n>  Remove a project profile"
     echo "  mangolove log init            Initialize work log repository"
     echo "  mangolove log view            Open work logs in browser"
+    echo "  mangolove log search <term>   Search work logs"
+    echo "  mangolove log recent          Show recent sessions"
     echo "  mangolove update              Update MangoLove to latest version"
     echo "  mangolove doctor              Check installation health"
     echo "  mangolove help                Show this help"
@@ -254,8 +256,14 @@ handle_log() {
             open "https://github.com/${repo_full}" 2>/dev/null || \
             echo "https://github.com/${repo_full}"
             ;;
+        search)
+            bash "$WORK_LOGGER" search "${2:-}"
+            ;;
+        recent)
+            bash "$WORK_LOGGER" recent
+            ;;
         *)
-            echo "Usage: mangolove log [init|view]"
+            echo "Usage: mangolove log [init|view|search|recent]"
             ;;
     esac
 }

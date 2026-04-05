@@ -95,6 +95,10 @@ log_session_start() {
 
     mkdir -p "$dir"
 
+    # Save session metadata for auto-summary
+    echo "$(date '+%Y-%m-%d %H:%M:%S')" > "$LOG_DIR/.session_start"
+    echo "$project_dir" > "$LOG_DIR/.session_dir"
+
     if [ ! -f "$file" ]; then
         cat > "$file" << EOF
 # 📅 ${today} — MangoLove Work Log
@@ -132,6 +136,16 @@ log_session_end() {
     local file="$LOCAL_REPO/logs/${year}/${month}/${today}.md"
 
     if [ -f "$file" ]; then
+        # Auto-summarize git commits made during this session
+        local session_summary=""
+        session_summary=$(collect_session_commits)
+
+        if [ -n "$session_summary" ]; then
+            echo "" >> "$file"
+            echo "#### 📝 Changes Made" >> "$file"
+            echo "$session_summary" >> "$file"
+        fi
+
         echo "" >> "$file"
         echo "#### ⏹ Session ended: ${now}" >> "$file"
         echo "" >> "$file"
@@ -145,10 +159,91 @@ log_session_end() {
     fi
 }
 
+# Collect git commits made during the current session
+collect_session_commits() {
+    local session_start_file="$LOG_DIR/.session_start"
+    [ ! -f "$session_start_file" ] && return 0
+
+    local start_time=$(cat "$session_start_file" 2>/dev/null)
+    local work_dir=$(cat "$LOG_DIR/.session_dir" 2>/dev/null)
+
+    [ -z "$start_time" ] || [ -z "$work_dir" ] && return 0
+    [ ! -d "$work_dir/.git" ] && return 0
+
+    cd "$work_dir" 2>/dev/null || return 0
+
+    # Get commits made after session start
+    local commits=""
+    commits=$(git log --after="$start_time" --format="- **%h** %s" --no-merges 2>/dev/null)
+
+    if [ -n "$commits" ]; then
+        echo "$commits"
+    fi
+
+    # Get changed file stats
+    local stats=""
+    stats=$(git log --after="$start_time" --format="" --stat --no-merges 2>/dev/null | tail -1)
+
+    if [ -n "$stats" ]; then
+        echo ""
+        echo "> ${stats}"
+    fi
+
+    cd - > /dev/null 2>/dev/null
+}
+
+# Search work logs
+search_logs() {
+    local keyword="$1"
+    if [ -z "$keyword" ]; then
+        echo "Usage: mangolove log search <keyword>"
+        return 1
+    fi
+
+    get_repo_info || return 1
+    [ ! -d "$LOCAL_REPO/logs" ] && echo "No logs found." && return 1
+
+    echo ""
+    echo -e "\033[38;5;208m\033[1m🥭 MangoLove — Log Search\033[0m"
+    echo -e "\033[2m──────────────────────────────────────\033[0m"
+    echo -e "  \033[2mKeyword:\033[0m ${keyword}"
+    echo ""
+
+    grep -rn --color=always "$keyword" "$LOCAL_REPO/logs/" 2>/dev/null | \
+        sed "s|$LOCAL_REPO/logs/||g" | \
+        head -50
+
+    echo ""
+}
+
+# Show recent log summary
+show_recent() {
+    get_repo_info || return 1
+    [ ! -d "$LOCAL_REPO/logs" ] && echo "No logs found." && return 1
+
+    echo ""
+    echo -e "\033[38;5;208m\033[1m🥭 MangoLove — Recent Sessions\033[0m"
+    echo -e "\033[2m──────────────────────────────────────\033[0m"
+
+    local count=0
+    for logfile in $(find "$LOCAL_REPO/logs" -name "*.md" -type f | sort -r | head -7); do
+        local date_str=$(basename "$logfile" .md)
+        local sessions=$(grep -c "^## 🕐 Session:" "$logfile" 2>/dev/null || echo "0")
+        local commits=$(grep -c "^\- \*\*[a-f0-9]" "$logfile" 2>/dev/null || echo "0")
+        echo -e "  \033[38;5;113m▸\033[0m \033[1m${date_str}\033[0m — ${sessions} session(s), ${commits} commit(s)"
+        count=$((count + 1))
+    done
+
+    [ $count -eq 0 ] && echo -e "  \033[2mNo logs found.\033[0m"
+    echo ""
+}
+
 # Entrypoint
 case "${1:-}" in
-    start) log_session_start ;;
-    end)   log_session_end ;;
-    init)  init_repo ;;
-    *)     echo "Usage: work-logger.sh [start|end|init]" ;;
+    start)  log_session_start ;;
+    end)    log_session_end ;;
+    init)   init_repo ;;
+    search) search_logs "$2" ;;
+    recent) show_recent ;;
+    *)      echo "Usage: work-logger.sh [start|end|init|search|recent]" ;;
 esac

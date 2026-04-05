@@ -74,8 +74,10 @@ EOF
             git clone "$REPO_URL" "$LOCAL_REPO" 2>/dev/null
         fi
     else
-        cd "$LOCAL_REPO" && git pull --rebase origin main 2>/dev/null
-        cd - > /dev/null
+        if [ -d "$LOCAL_REPO/.git" ]; then
+            cd "$LOCAL_REPO" && git pull --rebase origin main 2>/dev/null || true
+            cd - > /dev/null
+        fi
     fi
 }
 

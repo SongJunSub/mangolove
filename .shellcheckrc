@@ -1,0 +1,6 @@
+# MangoLove ShellCheck Configuration
+# SC2155: Declare and assign separately — accepted pattern in this project
+# for concise local variable initialization where return value masking is not a concern
+disable=SC2155
+# SC1090: Can't follow non-constant source — expected for plugin dynamic loading
+disable=SC1090

@@ -10,7 +10,6 @@ B='\033[1m'
 DIM='\033[2m'
 Y='\033[38;5;220m'
 G='\033[38;5;113m'
-RED='\033[38;5;203m'
 
 MANGOLOVE_DIR="$HOME/.mangolove"
 BIN_LINK="$HOME/.local/bin/mangolove"
@@ -19,7 +18,7 @@ echo ""
 echo -e "${Y}${B}🥭 MangoLove Uninstaller${R}"
 echo ""
 
-read -p "Are you sure you want to uninstall MangoLove? [y/N] " confirm
+read -rp "Are you sure you want to uninstall MangoLove? [y/N] " confirm
 if [[ "$confirm" != [yY] ]]; then
     echo "Cancelled."
     exit 0
@@ -42,14 +41,14 @@ BASH_COMP="${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions/mang
 # Remove installation
 if [ -d "$MANGOLOVE_DIR" ]; then
     # Ask about preserving user data
-    read -p "Keep project profiles and work logs? [Y/n] " keep_data
+    read -rp "Keep project profiles and work logs? [Y/n] " keep_data
     if [[ "$keep_data" == [nN] ]]; then
         rm -rf "$MANGOLOVE_DIR"
         echo -e "  ${G}✓${R} Removed: $MANGOLOVE_DIR (all data)"
     else
         # Remove only program files, keep user data
-        rm -rf "$MANGOLOVE_DIR/bin"
-        rm -rf "$MANGOLOVE_DIR/lib"
+        rm -rf "${MANGOLOVE_DIR:?}/bin"
+        rm -rf "${MANGOLOVE_DIR:?}/lib"
         rm -rf "$MANGOLOVE_DIR/prompts"
         rm -rf "$MANGOLOVE_DIR/completions"
         rm -rf "$MANGOLOVE_DIR/docs"

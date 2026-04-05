@@ -212,7 +212,8 @@ do_doctor() {
 
     # Check Claude Code
     if command -v claude &> /dev/null; then
-        local cv=$(claude --version 2>/dev/null)
+        local cv
+        cv=$(claude --version 2>/dev/null)
         echo -e "  \033[38;5;113m✓\033[0m Claude Code: ${cv}"
     else
         echo -e "  \033[38;5;203m✗\033[0m Claude Code: not found"
@@ -220,7 +221,8 @@ do_doctor() {
 
     # Check GitHub CLI
     if command -v gh &> /dev/null; then
-        local gv=$(gh --version 2>/dev/null | head -1)
+        local gv
+        gv=$(gh --version 2>/dev/null | head -1)
         echo -e "  \033[38;5;113m✓\033[0m GitHub CLI: ${gv}"
 
         if gh auth status &> /dev/null; then
@@ -284,7 +286,8 @@ handle_log() {
             if [ -n "$MANGOLOVE_LOG_REPO" ] && [ "$MANGOLOVE_LOG_REPO" != "disabled" ]; then
                 repo_full="$MANGOLOVE_LOG_REPO"
             else
-                local gh_user=$(gh api user --jq '.login' 2>/dev/null)
+                local gh_user
+                gh_user=$(gh api user --jq '.login' 2>/dev/null)
                 repo_full="${gh_user}/mangolove-work-logs"
             fi
             open "https://github.com/${repo_full}" 2>/dev/null || \
@@ -419,21 +422,22 @@ main() {
 
     # Trap exit to log session end and run plugin hooks
     # Use timeout to prevent hanging on network issues
-    trap '{
+    # shellcheck disable=SC2154
+    trap '
         bash "$PLUGIN_MANAGER" hook on_session_end 2>/dev/null &
-        local _plugin_pid=$!
+        _ml_plugin_pid=$!
+        _ml_logger_pid=0
         if [ "$MANGOLOVE_AUTO_LOG" = "true" ]; then
             bash "$WORK_LOGGER" end 2>/dev/null &
-            local _logger_pid=$!
+            _ml_logger_pid=$!
         fi
-        # Wait up to 10 seconds for cleanup, then proceed
-        local _wait_count=0
-        while [ $_wait_count -lt 10 ]; do
-            kill -0 $_plugin_pid 2>/dev/null || kill -0 ${_logger_pid:-0} 2>/dev/null || break
+        _ml_wait=0
+        while [ $_ml_wait -lt 10 ]; do
+            kill -0 $_ml_plugin_pid 2>/dev/null || kill -0 $_ml_logger_pid 2>/dev/null || break
             sleep 1
-            _wait_count=$((_wait_count + 1))
+            _ml_wait=$((_ml_wait + 1))
         done
-    }' EXIT
+    ' EXIT
 
     # Build Claude args
     CLAUDE_ARGS=()

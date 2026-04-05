@@ -14,7 +14,6 @@ Y='\033[38;5;220m'
 O='\033[38;5;208m'
 G='\033[38;5;113m'
 C='\033[38;5;117m'
-W='\033[38;5;255m'
 RED='\033[38;5;203m'
 
 list_profiles() {
@@ -59,13 +58,13 @@ add_profile() {
     echo -e "${DIM}──────────────────────────────────────${R}"
     echo ""
 
-    read -p "  Project name: " proj_name
-    read -p "  Project path [$(pwd)]: " proj_path
+    read -rp "  Project name: " proj_name
+    read -rp "  Project path [$(pwd)]: " proj_path
     proj_path="${proj_path:-$(pwd)}"
-    read -p "  Tech stack (comma-separated): " proj_stack
-    read -p "  Build command [./gradlew build]: " proj_build
+    read -rp "  Tech stack (comma-separated): " proj_stack
+    read -rp "  Build command [./gradlew build]: " proj_build
     proj_build="${proj_build:-./gradlew build}"
-    read -p "  Test command [./gradlew test]: " proj_test
+    read -rp "  Test command [./gradlew test]: " proj_test
     proj_test="${proj_test:-./gradlew test}"
 
     local filename=$(echo "$proj_name" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^a-z0-9-]//g')

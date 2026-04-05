@@ -112,6 +112,272 @@ remove_profile() {
     fi
 }
 
+# Auto-generate a project profile by scanning the directory
+auto_generate_profile() {
+    local target_dir="${1:-$(pwd)}"
+    target_dir=$(cd "$target_dir" && pwd)  # resolve absolute path
+
+    echo ""
+    echo -e "${O}${B}🥭 MangoLove — Auto-Generate Profile${R}"
+    echo -e "${DIM}──────────────────────────────────────${R}"
+    echo -e "  ${DIM}Scanning:${R} ${target_dir}"
+    echo ""
+
+    # Detect project name
+    local proj_name=$(basename "$target_dir")
+
+    # Detect tech stack and build tools
+    local tech_stack=()
+    local build_cmd=""
+    local test_cmd=""
+    local modules=""
+
+    # --- Gradle (Java/Kotlin) ---
+    if [ -f "$target_dir/build.gradle" ] || [ -f "$target_dir/build.gradle.kts" ]; then
+        if [ -f "$target_dir/build.gradle.kts" ]; then
+            tech_stack+=("Kotlin")
+        fi
+
+        # Check for Java/Kotlin source
+        if [ -d "$target_dir/src/main/java" ] || find "$target_dir" -maxdepth 3 -name "*.java" -print -quit 2>/dev/null | grep -q .; then
+            # Avoid duplicates
+            [[ ! " ${tech_stack[*]} " =~ " Java " ]] && tech_stack+=("Java")
+        fi
+        if [ -d "$target_dir/src/main/kotlin" ] || find "$target_dir" -maxdepth 3 -name "*.kt" -print -quit 2>/dev/null | grep -q .; then
+            [[ ! " ${tech_stack[*]} " =~ " Kotlin " ]] && tech_stack+=("Kotlin")
+        fi
+
+        # Detect Spring Boot
+        if grep -rq "org.springframework.boot" "$target_dir/build.gradle"* 2>/dev/null; then
+            tech_stack+=("Spring Boot")
+        fi
+
+        # Detect JPA
+        if grep -rq "spring-boot-starter-data-jpa\|jakarta.persistence\|javax.persistence" "$target_dir/build.gradle"* 2>/dev/null; then
+            tech_stack+=("JPA")
+        fi
+
+        # Detect QueryDSL
+        if grep -rq "querydsl" "$target_dir/build.gradle"* 2>/dev/null; then
+            tech_stack+=("QueryDSL")
+        fi
+
+        # Detect databases from dependencies
+        if grep -rq "mysql" "$target_dir/build.gradle"* 2>/dev/null; then
+            tech_stack+=("MySQL")
+        fi
+        if grep -rq "postgresql\|postgres" "$target_dir/build.gradle"* 2>/dev/null; then
+            tech_stack+=("PostgreSQL")
+        fi
+        if grep -rq "mongodb\|mongo" "$target_dir/build.gradle"* 2>/dev/null; then
+            tech_stack+=("MongoDB")
+        fi
+        if grep -rq "redis\|lettuce\|jedis" "$target_dir/build.gradle"* 2>/dev/null; then
+            tech_stack+=("Redis")
+        fi
+
+        # Detect messaging
+        if grep -rq "kafka" "$target_dir/build.gradle"* 2>/dev/null; then
+            tech_stack+=("Kafka")
+        fi
+        if grep -rq "rabbitmq\|amqp" "$target_dir/build.gradle"* 2>/dev/null; then
+            tech_stack+=("RabbitMQ")
+        fi
+
+        # Build/test commands
+        if [ -f "$target_dir/gradlew" ]; then
+            build_cmd="./gradlew build"
+            test_cmd="./gradlew test"
+        else
+            build_cmd="gradle build"
+            test_cmd="gradle test"
+        fi
+
+        # Detect multi-module
+        if [ -f "$target_dir/settings.gradle" ] || [ -f "$target_dir/settings.gradle.kts" ]; then
+            local settings_file="$target_dir/settings.gradle"
+            [ -f "$target_dir/settings.gradle.kts" ] && settings_file="$target_dir/settings.gradle.kts"
+            modules=$(grep -oP "include\s*\(?['\"]:\K[^'\"]*" "$settings_file" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
+            if [ -z "$modules" ]; then
+                modules=$(grep -o "include.*" "$settings_file" 2>/dev/null | grep -oP "'[^']*'" | tr -d "'" | tr -d ':' | tr '\n' ', ' | sed 's/,$//')
+            fi
+        fi
+    fi
+
+    # --- Maven (Java) ---
+    if [ -f "$target_dir/pom.xml" ]; then
+        [[ ! " ${tech_stack[*]} " =~ " Java " ]] && tech_stack+=("Java")
+
+        if grep -q "spring-boot" "$target_dir/pom.xml" 2>/dev/null; then
+            [[ ! " ${tech_stack[*]} " =~ " Spring Boot " ]] && tech_stack+=("Spring Boot")
+        fi
+        if grep -q "spring-boot-starter-data-jpa\|jakarta.persistence" "$target_dir/pom.xml" 2>/dev/null; then
+            [[ ! " ${tech_stack[*]} " =~ " JPA " ]] && tech_stack+=("JPA")
+        fi
+
+        if [ -f "$target_dir/mvnw" ]; then
+            build_cmd="./mvnw package"
+            test_cmd="./mvnw test"
+        else
+            build_cmd="mvn package"
+            test_cmd="mvn test"
+        fi
+    fi
+
+    # --- Node.js (package.json) ---
+    if [ -f "$target_dir/package.json" ]; then
+        tech_stack+=("Node.js")
+
+        # Detect TypeScript
+        if [ -f "$target_dir/tsconfig.json" ]; then
+            tech_stack+=("TypeScript")
+        fi
+
+        # Detect frameworks from package.json
+        if grep -q '"react"' "$target_dir/package.json" 2>/dev/null; then
+            tech_stack+=("React")
+        fi
+        if grep -q '"next"' "$target_dir/package.json" 2>/dev/null; then
+            tech_stack+=("Next.js")
+        fi
+        if grep -q '"vue"' "$target_dir/package.json" 2>/dev/null; then
+            tech_stack+=("Vue")
+        fi
+        if grep -q '"express"' "$target_dir/package.json" 2>/dev/null; then
+            tech_stack+=("Express")
+        fi
+        if grep -q '"nestjs\|@nestjs"' "$target_dir/package.json" 2>/dev/null; then
+            tech_stack+=("NestJS")
+        fi
+
+        # Build/test commands from scripts
+        local pkg_build=$(grep -oP '"build"\s*:\s*"\K[^"]*' "$target_dir/package.json" 2>/dev/null)
+        local pkg_test=$(grep -oP '"test"\s*:\s*"\K[^"]*' "$target_dir/package.json" 2>/dev/null)
+
+        # Detect package manager
+        local pkg_mgr="npm"
+        [ -f "$target_dir/yarn.lock" ] && pkg_mgr="yarn"
+        [ -f "$target_dir/pnpm-lock.yaml" ] && pkg_mgr="pnpm"
+        [ -f "$target_dir/bun.lockb" ] && pkg_mgr="bun"
+
+        [ -n "$pkg_build" ] && build_cmd="${pkg_mgr} run build"
+        [ -n "$pkg_test" ] && test_cmd="${pkg_mgr} run test"
+        [ -z "$build_cmd" ] && build_cmd="${pkg_mgr} run build"
+        [ -z "$test_cmd" ] && test_cmd="${pkg_mgr} test"
+    fi
+
+    # --- Python ---
+    if [ -f "$target_dir/pyproject.toml" ] || [ -f "$target_dir/setup.py" ] || [ -f "$target_dir/requirements.txt" ]; then
+        tech_stack+=("Python")
+
+        if grep -rq "django" "$target_dir/requirements.txt" "$target_dir/pyproject.toml" 2>/dev/null; then
+            tech_stack+=("Django")
+        fi
+        if grep -rq "fastapi" "$target_dir/requirements.txt" "$target_dir/pyproject.toml" 2>/dev/null; then
+            tech_stack+=("FastAPI")
+        fi
+        if grep -rq "flask" "$target_dir/requirements.txt" "$target_dir/pyproject.toml" 2>/dev/null; then
+            tech_stack+=("Flask")
+        fi
+
+        [ -z "$test_cmd" ] && test_cmd="pytest"
+    fi
+
+    # --- Go ---
+    if [ -f "$target_dir/go.mod" ]; then
+        tech_stack+=("Go")
+        [ -z "$build_cmd" ] && build_cmd="go build ./..."
+        [ -z "$test_cmd" ] && test_cmd="go test ./..."
+    fi
+
+    # --- Rust ---
+    if [ -f "$target_dir/Cargo.toml" ]; then
+        tech_stack+=("Rust")
+        [ -z "$build_cmd" ] && build_cmd="cargo build"
+        [ -z "$test_cmd" ] && test_cmd="cargo test"
+    fi
+
+    # --- Docker ---
+    if [ -f "$target_dir/Dockerfile" ] || [ -f "$target_dir/docker-compose.yml" ] || [ -f "$target_dir/docker-compose.yaml" ]; then
+        tech_stack+=("Docker")
+    fi
+
+    # --- Kubernetes ---
+    if [ -d "$target_dir/k8s" ] || [ -d "$target_dir/kubernetes" ] || find "$target_dir" -maxdepth 2 -name "*.yaml" -exec grep -l "kind: Deployment\|kind: Service" {} + 2>/dev/null | grep -q .; then
+        tech_stack+=("Kubernetes")
+    fi
+
+    # --- CI/CD ---
+    if [ -d "$target_dir/.github/workflows" ]; then
+        tech_stack+=("GitHub Actions")
+    fi
+
+    # Fallback defaults
+    [ -z "$build_cmd" ] && build_cmd="echo 'No build command detected'"
+    [ -z "$test_cmd" ] && test_cmd="echo 'No test command detected'"
+
+    # Build tech stack string
+    local stack_str=""
+    if [ ${#tech_stack[@]} -gt 0 ]; then
+        stack_str=$(IFS=', '; echo "${tech_stack[*]}")
+    else
+        stack_str="Unknown"
+    fi
+
+    # Generate filename
+    local filename=$(echo "$proj_name" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^a-z0-9-]//g')
+
+    # Check if profile already exists
+    if [ -f "$PROJECTS_DIR/${filename}.md" ]; then
+        echo -e "  ${Y}⚠️  Profile already exists:${R} ${PROJECTS_DIR}/${filename}.md"
+        echo -e "  ${DIM}Use 'mangolove profile remove ${filename}' to recreate.${R}"
+        echo ""
+        return 1
+    fi
+
+    # Generate profile
+    mkdir -p "$PROJECTS_DIR"
+    local profile_content="---
+name: ${proj_name}
+path: ${target_dir}
+tech_stack: [${stack_str}]
+build_cmd: ${build_cmd}
+test_cmd: ${test_cmd}
+---"
+
+    # Add modules if detected
+    if [ -n "$modules" ]; then
+        profile_content="${profile_content}
+
+## Modules
+$(echo "$modules" | tr ',' '\n' | sed 's/^ *//' | sed 's/^/- /')"
+    fi
+
+    profile_content="${profile_content}
+
+## Architecture
+<!-- Describe the project architecture -->
+
+## Conventions
+<!-- Describe coding conventions -->
+
+## Notes
+<!-- Any important notes for the agent -->"
+
+    echo "$profile_content" > "$PROJECTS_DIR/${filename}.md"
+
+    echo -e "  ${G}✅ Profile auto-generated:${R} ${PROJECTS_DIR}/${filename}.md"
+    echo ""
+    echo -e "  ${DIM}Detected:${R}"
+    echo -e "    ${C}Tech Stack${R} : ${stack_str}"
+    echo -e "    ${C}Build${R}      : ${build_cmd}"
+    echo -e "    ${C}Test${R}       : ${test_cmd}"
+    [ -n "$modules" ] && echo -e "    ${C}Modules${R}    : ${modules}"
+    echo ""
+    echo -e "  ${DIM}Edit the profile to add architecture and convention details.${R}"
+    echo ""
+}
+
 # Load project context for current directory
 load_project_context() {
     local current_dir=$(pwd)
@@ -136,5 +402,6 @@ case "${1:-}" in
     add)     add_profile ;;
     remove)  remove_profile "$2" ;;
     load)    load_project_context ;;
+    auto)    auto_generate_profile "${2:-}" ;;
     *)       list_profiles ;;
 esac

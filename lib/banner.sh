@@ -86,7 +86,7 @@ done
 
 cat << EOF
     ${V}                                                                    ${V}
-    ${V}          ${FY}${IT}Mango${R} ${FGR}🥭${R}    ${FGR}&${R}    ${FBW}${IT}Sarang${R} ${FGR}🤍${R}                                ${V}
+    ${V}               ${FY}${IT}Mango${R}                           ${FBW}${IT}Sarang${R}               ${V}
     ${V}                                                                    ${V}
     ${V}     ${FGR}${IT}    " Two Jindo dogs who inspired everything. "${R}                ${V}
     ${V}                                                                    ${V}

@@ -152,7 +152,7 @@ if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
 fi
 
 # ─── Version file ───
-echo "0.1.0" > "$MANGOLOVE_DIR/.version"
+echo "0.2.0" > "$MANGOLOVE_DIR/.version"
 
 # ─── Done ───
 echo ""

@@ -1,6 +1,6 @@
 #!/bin/bash
 # ─────────────────────────────────────────────
-# 🥭 MangoLove — Autonomous Development Agent
+# MangoLove — Autonomous Development Agent
 # Powered by Claude Code
 # https://github.com/SongJunSub/mangolove
 # ─────────────────────────────────────────────
@@ -161,12 +161,12 @@ ${MANGOLOVE_EXTRA_PROMPT}"
 # Subcommands
 # ─────────────────────────────────────────────
 show_version() {
-    echo "🥭 MangoLove v${MANGOLOVE_VERSION}"
+    echo "MangoLove v${MANGOLOVE_VERSION}"
 }
 
 show_help() {
     echo ""
-    echo -e "\033[38;5;208m\033[1m🥭 MangoLove\033[0m v${MANGOLOVE_VERSION} — Autonomous Development Agent"
+    echo -e "\033[38;5;208m\033[1mMangoLove\033[0m v${MANGOLOVE_VERSION} — Autonomous Development Agent"
     echo ""
     echo "Usage:"
     echo "  mangolove                     Start interactive session"
@@ -251,7 +251,7 @@ do_update() {
 
 do_doctor() {
     echo ""
-    echo -e "\033[38;5;208m\033[1m🥭 MangoLove Doctor\033[0m"
+    echo -e "\033[38;5;208m\033[1mMangoLove Doctor\033[0m"
     echo -e "\033[2m──────────────────────────────────────\033[0m"
 
     # Check Claude Code
@@ -639,9 +639,9 @@ Continue from where you left off. Summarize the previous session state and ask w
     CLAUDE_ARGS=()
     CLAUDE_ARGS+=(--append-system-prompt "$SYSTEM_PROMPT")
     if [ -n "$MANGOLOVE_MODE" ]; then
-        CLAUDE_ARGS+=(--name "🥭 MangoLove [${MANGOLOVE_MODE}]")
+        CLAUDE_ARGS+=(--name "MangoLove [${MANGOLOVE_MODE}]")
     else
-        CLAUDE_ARGS+=(--name "🥭 MangoLove")
+        CLAUDE_ARGS+=(--name "MangoLove")
     fi
 
     [ -n "$MANGOLOVE_MODEL" ] && CLAUDE_ARGS+=(--model "$MANGOLOVE_MODEL")

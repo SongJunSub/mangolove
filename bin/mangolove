@@ -176,6 +176,8 @@ show_help() {
     echo "  mangolove init                Generate CLAUDE.md + commands + hooks"
     echo "  mangolove init --strict       Same + quality gates (auto lint/test)"
     echo "  mangolove init --force        Regenerate even if CLAUDE.md exists"
+    echo "  mangolove init --export       Export .mangolove.md for team sharing"
+    echo "  mangolove init --from-team    Setup from team's .mangolove.md"
     echo "  mangolove sync                Update CLAUDE.md with current project state"
     echo "  mangolove resume              Show last session context and continue"
     echo "  mangolove sessions            List all saved sessions"

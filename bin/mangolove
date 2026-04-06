@@ -14,7 +14,6 @@ WORK_LOGGER="$MANGOLOVE_DIR/lib/work-logger.sh"
 PROFILE_MANAGER="$MANGOLOVE_DIR/lib/profile-manager.sh"
 PLUGIN_MANAGER="$MANGOLOVE_DIR/lib/plugin-manager.sh"
 SKILL_MANAGER="$MANGOLOVE_DIR/lib/skill-manager.sh"
-PROJECT_INIT="$MANGOLOVE_DIR/lib/project-init.sh"
 SESSION_MEMORY="$MANGOLOVE_DIR/lib/session-memory.sh"
 STATS_SCRIPT="$MANGOLOVE_DIR/lib/stats.sh"
 COST_TRACKER="$MANGOLOVE_DIR/lib/cost-tracker.sh"
@@ -174,12 +173,6 @@ show_help() {
     echo "  mangolove -p [prompt]         Print mode (non-interactive)"
     echo ""
     echo "Commands:"
-    echo "  mangolove init                Generate CLAUDE.md + commands + hooks"
-    echo "  mangolove init --strict       Same + quality gates (auto lint/test)"
-    echo "  mangolove init --force        Regenerate even if CLAUDE.md exists"
-    echo "  mangolove init --export       Export .mangolove.md for team sharing"
-    echo "  mangolove init --from-team    Setup from team's .mangolove.md"
-    echo "  mangolove sync                Update CLAUDE.md with current project state"
     echo "  mangolove resume              Show last session context and continue"
     echo "  mangolove sessions            List all saved sessions"
     echo "  mangolove stats [period]      Productivity stats (today/week/month)"
@@ -444,16 +437,8 @@ handle_switch() {
         return 1
     fi
 
-    # Switch and sync
     echo -e "  \033[38;5;113mSwitching to:\033[0m $target_path"
     cd "$target_path" || return 1
-
-    # Auto-sync if CLAUDE.md exists
-    if [ -f "CLAUDE.md" ]; then
-        bash "$PROJECT_INIT" sync 2>/dev/null
-    fi
-
-    # Launch claude
     check_dependencies
     exec claude
 }
@@ -482,15 +467,6 @@ main() {
             ;;
         --version|-v)
             show_version
-            exit 0
-            ;;
-        init)
-            shift
-            bash "$PROJECT_INIT" init "$@"
-            exit 0
-            ;;
-        sync)
-            bash "$PROJECT_INIT" sync
             exit 0
             ;;
         resume)
@@ -634,24 +610,6 @@ Continue from where you left off. Summarize the previous session state and ask w
             exit 0
         fi
     fi
-
-    # Auto-init or auto-sync CLAUDE.md
-    # ONLY touch files that MangoLove created (identified by marker comment)
-    if [ -f "CLAUDE.md" ]; then
-        if grep -q "mangolove:auto-start" "CLAUDE.md" 2>/dev/null; then
-            # MangoLove-managed CLAUDE.md — safe to sync
-            bash "$PROJECT_INIT" sync --quiet 2>/dev/null || true
-        fi
-        # else: user-created CLAUDE.md — do not touch
-    elif [ ! -d ".claude" ]; then
-        # No CLAUDE.md and no .claude/ — safe to init
-        echo ""
-        echo -e "\033[38;5;208m\033[1mMangoLove\033[0m — First run in this project. Initializing..."
-        echo ""
-        bash "$PROJECT_INIT" init --strict 2>/dev/null || true
-        echo ""
-    fi
-    # else: CLAUDE.md doesn't exist but .claude/ does — user has custom setup, skip
 
     # Run plugin on_session_start hooks
     bash "$PLUGIN_MANAGER" hook on_session_start 2>/dev/null || true

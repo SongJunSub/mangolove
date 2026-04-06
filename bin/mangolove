@@ -184,6 +184,7 @@ show_help() {
     echo "  mangolove sessions            List all saved sessions"
     echo "  mangolove stats [period]      Productivity stats (today/week/month)"
     echo "  mangolove cost [period]       Token usage and cost (today/week/month/all)"
+    echo "  mangolove switch <project>    Switch to project directory and launch claude"
     echo "  mangolove projects            List project profiles"
     echo "  mangolove profile add         Add a new project profile"
     echo "  mangolove profile auto [dir]  Auto-generate profile from project scan"
@@ -374,6 +375,89 @@ handle_plugin() {
     esac
 }
 
+handle_switch() {
+    local query="${1:-}"
+
+    if [ -z "$query" ]; then
+        echo ""
+        echo -e "\033[38;5;208m\033[1mMangoLove Switch\033[0m"
+        echo -e "\033[2m──────────────────────────────────────\033[0m"
+
+        # List available projects
+        local count=0
+        for profile in "$MANGOLOVE_DIR/projects"/*.md; do
+            [ "$(basename "$profile")" = "README.md" ] && continue
+            [ ! -f "$profile" ] && continue
+            local name path
+            name=$(grep "^name:" "$profile" 2>/dev/null | sed 's/^name: *//') || true
+            path=$(grep "^path:" "$profile" 2>/dev/null | sed 's/^path: *//') || true
+            local status="\033[38;5;113m*\033[0m"
+            [ ! -d "$path" ] && status="\033[38;5;203mx\033[0m"
+            echo -e "  ${status} \033[1m${name}\033[0m"
+            echo -e "    \033[2m${path}\033[0m"
+            count=$((count + 1))
+        done
+
+        # Also check CLAUDE.md in recent directories
+        if [ $count -eq 0 ]; then
+            echo -e "  \033[2mNo projects registered.\033[0m"
+            echo -e "  \033[2mRun 'mangolove init' in a project, or 'mangolove profile add'.\033[0m"
+        fi
+
+        echo ""
+        echo -e "  Usage: mangolove switch <project-name>"
+        echo ""
+        return 0
+    fi
+
+    # Search for matching project
+    local target_path=""
+    for profile in "$MANGOLOVE_DIR/projects"/*.md; do
+        [ "$(basename "$profile")" = "README.md" ] && continue
+        [ ! -f "$profile" ] && continue
+        local name path
+        name=$(grep "^name:" "$profile" 2>/dev/null | sed 's/^name: *//') || true
+        path=$(grep "^path:" "$profile" 2>/dev/null | sed 's/^path: *//') || true
+
+        # Match by name (case-insensitive partial match)
+        if echo "$name" | grep -iq "$query" 2>/dev/null; then
+            target_path="$path"
+            break
+        fi
+        # Match by filename
+        local fname
+        fname=$(basename "$profile" .md)
+        if echo "$fname" | grep -iq "$query" 2>/dev/null; then
+            target_path="$path"
+            break
+        fi
+    done
+
+    if [ -z "$target_path" ]; then
+        echo -e "  \033[38;5;203mProject not found:\033[0m $query"
+        echo -e "  \033[2mRun 'mangolove switch' to see available projects.\033[0m"
+        return 1
+    fi
+
+    if [ ! -d "$target_path" ]; then
+        echo -e "  \033[38;5;203mProject directory not found:\033[0m $target_path"
+        return 1
+    fi
+
+    # Switch and sync
+    echo -e "  \033[38;5;113mSwitching to:\033[0m $target_path"
+    cd "$target_path" || return 1
+
+    # Auto-sync if CLAUDE.md exists
+    if [ -f "CLAUDE.md" ]; then
+        bash "$PROJECT_INIT" sync 2>/dev/null
+    fi
+
+    # Launch claude
+    check_dependencies
+    exec claude
+}
+
 handle_profile() {
     case "${1:-}" in
         add)     bash "$PROFILE_MANAGER" add ;;
@@ -441,6 +525,10 @@ Continue from where you left off. Summarize the previous session state and ask w
             shift
             bash "$COST_TRACKER" "${1:-week}"
             exit 0
+            ;;
+        switch)
+            shift
+            handle_switch "$@"
             ;;
         projects)
             bash "$PROFILE_MANAGER" list

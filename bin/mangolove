@@ -14,6 +14,7 @@ WORK_LOGGER="$MANGOLOVE_DIR/lib/work-logger.sh"
 PROFILE_MANAGER="$MANGOLOVE_DIR/lib/profile-manager.sh"
 PLUGIN_MANAGER="$MANGOLOVE_DIR/lib/plugin-manager.sh"
 SKILL_MANAGER="$MANGOLOVE_DIR/lib/skill-manager.sh"
+PROJECT_INIT="$MANGOLOVE_DIR/lib/project-init.sh"
 BANNER_SCRIPT="$MANGOLOVE_DIR/lib/banner.sh"
 
 # ─────────────────────────────────────────────
@@ -170,6 +171,9 @@ show_help() {
     echo "  mangolove -p [prompt]         Print mode (non-interactive)"
     echo ""
     echo "Commands:"
+    echo "  mangolove init                Generate CLAUDE.md + commands + hooks"
+    echo "  mangolove init --strict       Same + quality gates (auto lint/test)"
+    echo "  mangolove init --force        Regenerate even if CLAUDE.md exists"
     echo "  mangolove projects            List project profiles"
     echo "  mangolove profile add         Add a new project profile"
     echo "  mangolove profile auto [dir]  Auto-generate profile from project scan"
@@ -384,6 +388,11 @@ main() {
             ;;
         --version|-v)
             show_version
+            exit 0
+            ;;
+        init)
+            shift
+            bash "$PROJECT_INIT" init "$@"
             exit 0
             ;;
         projects)

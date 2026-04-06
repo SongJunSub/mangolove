@@ -599,6 +599,17 @@ Continue from where you left off. Summarize the previous session state and ask w
     # Preflight
     check_dependencies
 
+    # Auto-init or auto-sync CLAUDE.md
+    if [ ! -f "CLAUDE.md" ]; then
+        echo -e "\033[38;5;208m\033[1mMangoLove\033[0m — First run in this project. Initializing..."
+        echo ""
+        bash "$PROJECT_INIT" init --strict 2>/dev/null || true
+        echo ""
+    else
+        # Silent sync — update CLAUDE.md if project changed
+        bash "$PROJECT_INIT" sync --quiet 2>/dev/null || true
+    fi
+
     # Run plugin on_session_start hooks
     bash "$PLUGIN_MANAGER" hook on_session_start 2>/dev/null || true
 

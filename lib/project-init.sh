@@ -1239,22 +1239,28 @@ EOF
 do_sync() {
     local target_dir
     target_dir=$(pwd)
+    local quiet="false"
+
+    # Parse flags
+    [ "${1:-}" = "--quiet" ] && quiet="true"
 
     if ! target_dir=$(cd "$target_dir" 2>/dev/null && pwd); then
-        echo -e "  ${RED}Directory not found${R}"
+        [ "$quiet" = "false" ] && echo -e "  ${RED}Directory not found${R}"
         return 1
     fi
 
     if [ ! -f "$target_dir/CLAUDE.md" ]; then
-        echo -e "  ${Y}No CLAUDE.md found.${R} Run ${B}mangolove init${R} first."
+        [ "$quiet" = "false" ] && echo -e "  ${Y}No CLAUDE.md found.${R} Run ${B}mangolove init${R} first."
         return 1
     fi
 
-    echo ""
-    echo -e "${O}${B}MangoLove Sync${R}"
-    echo -e "${DIM}──────────────────────────────────────${R}"
-    echo -e "  Scanning: ${B}${target_dir}${R}"
-    echo ""
+    if [ "$quiet" = "false" ]; then
+        echo ""
+        echo -e "${O}${B}MangoLove Sync${R}"
+        echo -e "${DIM}──────────────────────────────────────${R}"
+        echo -e "  Scanning: ${B}${target_dir}${R}"
+        echo ""
+    fi
 
     # Save snapshot of previous state for comparison
     local prev_file="$target_dir/.claude/.mangolove_snapshot"
@@ -1427,24 +1433,29 @@ $(echo "$PROJ_API_PATHS")
     local cmd_count
     cmd_count=$(find "$target_dir/.claude/commands" -name "*.md" 2>/dev/null | wc -l | tr -d ' ')
 
-    echo -e "  ${G}Synced:${R}"
-    echo -e "    CLAUDE.md   : updated"
-    echo -e "    Commands    : ${cmd_count}"
+    if [ "$quiet" = "false" ]; then
+        echo -e "  ${G}Synced:${R}"
+        echo -e "    CLAUDE.md   : updated"
+        echo -e "    Commands    : ${cmd_count}"
 
-    if [ ${#changes[@]} -gt 0 ]; then
+        if [ ${#changes[@]} -gt 0 ]; then
+            echo ""
+            echo -e "  ${C}Changes detected:${R}"
+            for change in "${changes[@]}"; do
+                echo -e "    - ${change}"
+            done
+        else
+            echo ""
+            echo -e "  ${DIM}No changes since last sync.${R}"
+        fi
+
         echo ""
-        echo -e "  ${C}Changes detected:${R}"
-        for change in "${changes[@]}"; do
-            echo -e "    - ${change}"
-        done
-    else
+        echo -e "${DIM}──────────────────────────────────────${R}"
         echo ""
-        echo -e "  ${DIM}No changes since last sync.${R}"
+    elif [ ${#changes[@]} -gt 0 ]; then
+        # Quiet mode: only show if changes detected
+        echo -e "  ${C}Synced:${R} $(IFS=', '; echo "${changes[*]}")"
     fi
-
-    echo ""
-    echo -e "${DIM}──────────────────────────────────────${R}"
-    echo ""
 }
 
 # ─────────────────────────────────────────────

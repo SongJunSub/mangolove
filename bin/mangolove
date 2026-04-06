@@ -599,8 +599,45 @@ Continue from where you left off. Summarize the previous session state and ask w
     # Preflight
     check_dependencies
 
+    # Detect multi-project root (directory with multiple sub-projects, each with their own .git)
+    local sub_project_count=0
+    local sub_projects=()
+    for sub_dir in */; do
+        [ ! -d "$sub_dir" ] && continue
+        if [ -d "${sub_dir}.git" ] && { [ -f "${sub_dir}build.gradle" ] || [ -f "${sub_dir}build.gradle.kts" ] || [ -f "${sub_dir}package.json" ] || [ -f "${sub_dir}pom.xml" ] || [ -f "${sub_dir}go.mod" ] || [ -f "${sub_dir}Cargo.toml" ] || [ -f "${sub_dir}pyproject.toml" ]; }; then
+            sub_project_count=$((sub_project_count + 1))
+            sub_projects+=("$(basename "$sub_dir")")
+        fi
+    done
+
+    if [ "$sub_project_count" -ge 2 ] && [ ! -f "build.gradle" ] && [ ! -f "package.json" ] && [ ! -f "pom.xml" ]; then
+        # This is a multi-project root — let user pick
+        echo ""
+        echo -e "\033[38;5;208m\033[1mMangoLove\033[0m — Multi-project directory detected"
+        echo ""
+        local idx=1
+        for sp in "${sub_projects[@]}"; do
+            local sp_status=""
+            [ -f "${sp}/CLAUDE.md" ] && sp_status=" \033[38;5;113m(initialized)\033[0m"
+            echo -e "  ${idx}) \033[1m${sp}\033[0m${sp_status}"
+            idx=$((idx + 1))
+        done
+        echo ""
+        read -rp "  Select project (1-${sub_project_count}): " choice
+
+        if [ -n "$choice" ] && [ "$choice" -ge 1 ] 2>/dev/null && [ "$choice" -le "$sub_project_count" ] 2>/dev/null; then
+            local selected="${sub_projects[$((choice - 1))]}"
+            echo -e "  \033[38;5;113m→\033[0m ${selected}"
+            cd "$selected" || exit 1
+        else
+            echo "  Cancelled."
+            exit 0
+        fi
+    fi
+
     # Auto-init or auto-sync CLAUDE.md
     if [ ! -f "CLAUDE.md" ]; then
+        echo ""
         echo -e "\033[38;5;208m\033[1mMangoLove\033[0m — First run in this project. Initializing..."
         echo ""
         bash "$PROJECT_INIT" init --strict 2>/dev/null || true

@@ -1,6 +1,6 @@
 #!/bin/bash
 # ─────────────────────────────────────────────
-# 🥭 MangoLove — Banner Display
+# MangoLove — Banner Display
 # Mango:  happy Jindo, cream face, yellowish ear tips, tongue out
 # Sarang: calm Jindo, pure white, mouth closed, composed
 # ─────────────────────────────────────────────
@@ -103,7 +103,7 @@ VERSION="0.1.0"
 
 cat << EOF
 
-    ${FP}${B}♥${R}  ${FO}${B}Mango${R}${FY}Love${R} ${FGR}v${VERSION}${R} ${DIM}— Autonomous Dev Agent${R}  ${FP}${B}♥${R}
+    ${FO}${B}Mango${R}${FY}Love${R} ${FGR}v${VERSION}${R} ${DIM}— Autonomous Dev Agent${R}
 
     ${FGR}┌─────────────────────────────────────────┐${R}
 EOF
@@ -140,6 +140,6 @@ fi
 cat << EOF
     ${FGR}└─────────────────────────────────────────┘${R}
 
-      ${FO}🥭${R} ${FGR}Powered by Claude Code${R}  ${FP}♥${R}  ${FGR}Ready to build${R}
+      ${FGR}Powered by Claude Code${R}
 
 EOF

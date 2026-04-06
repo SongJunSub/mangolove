@@ -227,129 +227,8 @@ detect_directories() {
 }
 
 # ─────────────────────────────────────────────
-# Deep source code analysis
-# ─────────────────────────────────────────────
-analyze_spring_boot() {
-    local dir="$1"
-
-    PROJ_CONTROLLERS=0
-    PROJ_SERVICES=0
-    PROJ_REPOSITORIES=0
-    PROJ_ENTITIES=0
-    PROJ_ENDPOINTS=""
-    PROJ_API_PATHS=""
-    PROJ_BASE_PACKAGE=""
-
-    # Find all Java/Kotlin source files (exclude build/generated)
-    local src_files
-    src_files=$(find "$dir" -path "*/src/main/*" \( -name "*.java" -o -name "*.kt" \) \
-        -not -path "*/build/*" -not -path "*/target/*" 2>/dev/null)
-
-    [ -z "$src_files" ] && return
-
-    # Count components
-    PROJ_CONTROLLERS=$(echo "$src_files" | xargs grep -l "@RestController\|@Controller" 2>/dev/null | wc -l | tr -d ' ')
-    PROJ_SERVICES=$(echo "$src_files" | xargs grep -l "@Service" 2>/dev/null | wc -l | tr -d ' ')
-    PROJ_REPOSITORIES=$(echo "$src_files" | xargs grep -l "@Repository\|extends.*Repository" 2>/dev/null | wc -l | tr -d ' ')
-    PROJ_ENTITIES=$(echo "$src_files" | xargs grep -l "@Entity" 2>/dev/null | wc -l | tr -d ' ')
-
-    # Extract API paths from @RequestMapping
-    PROJ_API_PATHS=$(echo "$src_files" | xargs grep -h '@RequestMapping.*"' 2>/dev/null | \
-        sed 's/.*"\(\/[^"]*\)".*/\1/' | sort -u | head -25)
-
-    # Count endpoints by method
-    local get_count post_count put_count delete_count
-    get_count=$(echo "$src_files" | xargs grep -h "@GetMapping" 2>/dev/null | wc -l | tr -d ' ')
-    post_count=$(echo "$src_files" | xargs grep -h "@PostMapping" 2>/dev/null | wc -l | tr -d ' ')
-    put_count=$(echo "$src_files" | xargs grep -h "@PutMapping" 2>/dev/null | wc -l | tr -d ' ')
-    delete_count=$(echo "$src_files" | xargs grep -h "@DeleteMapping" 2>/dev/null | wc -l | tr -d ' ')
-    PROJ_ENDPOINTS="GET:${get_count} POST:${post_count} PUT:${put_count} DELETE:${delete_count}"
-
-    # Detect base package
-    PROJ_BASE_PACKAGE=$(echo "$src_files" | head -1 | sed 's|.*/src/main/[^/]*/||;s|/[^/]*$||;s|/|.|g' | \
-        awk -F. '{print $1"."$2"."$3}')
-}
-
-analyze_node_project() {
-    local dir="$1"
-
-    PROJ_COMPONENTS=0
-    PROJ_PAGES=0
-    PROJ_API_ROUTES=0
-    PROJ_HOOKS=0
-
-    # React/Next.js components
-    if [ -d "$dir/src/components" ] || [ -d "$dir/components" ]; then
-        PROJ_COMPONENTS=$(find "$dir" -path "*/components/*" \( -name "*.tsx" -o -name "*.jsx" -o -name "*.vue" \) \
-            -not -path "*/node_modules/*" 2>/dev/null | wc -l | tr -d ' ')
-    fi
-
-    # Next.js pages/app routes
-    if [ -d "$dir/src/app" ] || [ -d "$dir/app" ]; then
-        PROJ_PAGES=$(find "$dir" -path "*/app/*" -name "page.tsx" -o -name "page.jsx" \
-            -not -path "*/node_modules/*" 2>/dev/null | wc -l | tr -d ' ')
-    elif [ -d "$dir/src/pages" ] || [ -d "$dir/pages" ]; then
-        PROJ_PAGES=$(find "$dir" -path "*/pages/*" \( -name "*.tsx" -o -name "*.jsx" \) \
-            -not -path "*/node_modules/*" -not -name "_*" 2>/dev/null | wc -l | tr -d ' ')
-    fi
-
-    # API routes
-    if [ -d "$dir/src/app/api" ] || [ -d "$dir/app/api" ] || [ -d "$dir/pages/api" ]; then
-        PROJ_API_ROUTES=$(find "$dir" -path "*/api/*" -name "route.ts" -o -name "route.js" -o -name "*.ts" -path "*/pages/api/*" \
-            -not -path "*/node_modules/*" 2>/dev/null | wc -l | tr -d ' ')
-    fi
-
-    # Custom hooks
-    export PROJ_HOOKS
-    PROJ_HOOKS=$(find "$dir" -not -path "*/node_modules/*" \
-        \( -path "*/hooks/*" -o -name "use*.ts" -o -name "use*.tsx" \) \
-        2>/dev/null | wc -l | tr -d ' ')
-}
-
-analyze_python_project() {
-    local dir="$1"
-
-    export PROJ_PY_MODELS=0
-    export PROJ_PY_VIEWS=0
-    export PROJ_PY_ROUTES=0
-
-    # Django models
-    PROJ_PY_MODELS=$(find "$dir" -name "models.py" -not -path "*/venv/*" -not -path "*/.venv/*" 2>/dev/null | \
-        xargs grep -c "class.*Model" 2>/dev/null | awk -F: '{s+=$2}END{print s+0}')
-
-    # Django views / FastAPI routes
-    PROJ_PY_VIEWS=$(find "$dir" -name "views.py" -not -path "*/venv/*" 2>/dev/null | \
-        xargs grep -c "def " 2>/dev/null | awk -F: '{s+=$2}END{print s+0}')
-
-    # FastAPI/Flask routes
-    PROJ_PY_ROUTES=$(find "$dir" \( -name "*.py" \) -not -path "*/venv/*" -not -path "*/.venv/*" 2>/dev/null | \
-        xargs grep -c "@app\.\(get\|post\|put\|delete\)\|@router\.\(get\|post\|put\|delete\)" 2>/dev/null | \
-        awk -F: '{s+=$2}END{print s+0}')
-}
-
-# ─────────────────────────────────────────────
 # Detect naming conventions from existing code
 # ─────────────────────────────────────────────
-# ─────────────────────────────────────────────
-# Run all deep analysis based on detected stack
-# ─────────────────────────────────────────────
-run_deep_analysis() {
-    local dir="$1"
-    # shellcheck disable=SC2076
-    if [[ " ${PROJ_TECH[*]} " =~ " Spring Boot " ]] || [[ " ${PROJ_TECH[*]} " =~ " Java " ]]; then
-        analyze_spring_boot "$dir"
-    fi
-    # shellcheck disable=SC2076
-    if [[ " ${PROJ_TECH[*]} " =~ " Node.js " ]]; then
-        analyze_node_project "$dir"
-    fi
-    # shellcheck disable=SC2076
-    if [[ " ${PROJ_TECH[*]} " =~ " Python " ]]; then
-        analyze_python_project "$dir"
-    fi
-    detect_conventions "$dir"
-}
-
 detect_conventions() {
     local dir="$1"
 
@@ -732,7 +611,7 @@ do_export() {
         return 1
     fi
 
-    run_deep_analysis "$target_dir"
+    detect_conventions "$target_dir"
 
     # Generate .mangolove.md with full project context
     local export_file="$target_dir/.mangolove.md"
@@ -771,28 +650,6 @@ $([ ${#PROJ_INFRA[@]} -gt 0 ] && echo "- Infrastructure: ${infra_str}")
 $([ -n "$PROJ_LINT" ] && echo "- Lint: \`${PROJ_LINT}\`")
 $([ -n "$PROJ_TYPECHECK" ] && echo "- Type Check: \`${PROJ_TYPECHECK}\`")
 EXPORTEOF
-
-    if [ "${PROJ_CONTROLLERS:-0}" -gt 0 ] 2>/dev/null; then
-        cat >> "$export_file" << ARCHEOF
-
-## Architecture
-- Base package: \`${PROJ_BASE_PACKAGE}\`
-- Controllers: ${PROJ_CONTROLLERS}
-- Services: ${PROJ_SERVICES}
-- Repositories: ${PROJ_REPOSITORIES}
-- Entities: ${PROJ_ENTITIES}
-ARCHEOF
-    fi
-
-    if [ -n "$PROJ_API_PATHS" ]; then
-        {
-            echo ""
-            echo "## API Endpoints"
-            echo '```'
-            echo "$PROJ_API_PATHS"
-            echo '```'
-        } >> "$export_file"
-    fi
 
     # Append conventions section for team to customize
     cat >> "$export_file" << 'CONVEOF'
@@ -862,7 +719,7 @@ do_from_team() {
     [ -n "$team_lint" ] && PROJ_LINT="$team_lint"
     [ -n "$team_typecheck" ] && PROJ_TYPECHECK="$team_typecheck"
 
-    run_deep_analysis "$target_dir"
+    detect_conventions "$target_dir"
 
     # Generate CLAUDE.md
     local claude_md
@@ -900,18 +757,6 @@ ${team_onboarding}"
     echo -e "  ${G}+${R} .claude/settings.json"
 
     update_gitignore "$target_dir"
-
-    # Save snapshot
-    mkdir -p "$target_dir/.claude"
-    cat > "$target_dir/.claude/.mangolove_snapshot" << SNAPSHOT
-tech=$(printf '%s, ' "${PROJ_TECH[@]}" | sed 's/, $//')
-controllers=${PROJ_CONTROLLERS:-0}
-services=${PROJ_SERVICES:-0}
-entities=${PROJ_ENTITIES:-0}
-endpoints=${PROJ_ENDPOINTS:-}
-components=${PROJ_COMPONENTS:-0}
-pages=${PROJ_PAGES:-0}
-SNAPSHOT
 
     echo ""
     echo -e "${DIM}──────────────────────────────────────${R}"
@@ -982,9 +827,7 @@ do_init() {
         return 1
     fi
 
-    # Deep analysis based on detected stack
-    echo -e "  ${DIM}Analyzing source code...${R}"
-    run_deep_analysis "$target_dir"
+    detect_conventions "$target_dir"
 
     # Report detection
     local tech_display
@@ -997,18 +840,7 @@ do_init() {
     echo -e "    Test       : ${DIM}${PROJ_TEST}${R}"
     [ -n "$PROJ_LINT" ] && echo -e "    Lint       : ${DIM}${PROJ_LINT}${R}"
     [ -n "$PROJ_MODULES" ] && echo -e "    Modules    : ${DIM}${PROJ_MODULES}${R}"
-
-    # Show deep analysis results
-    if [ "${PROJ_CONTROLLERS:-0}" -gt 0 ] 2>/dev/null; then
-        echo -e "    Controllers: ${DIM}${PROJ_CONTROLLERS}${R}"
-        echo -e "    Services   : ${DIM}${PROJ_SERVICES}${R}"
-        echo -e "    Entities   : ${DIM}${PROJ_ENTITIES}${R}"
-        echo -e "    Endpoints  : ${DIM}${PROJ_ENDPOINTS}${R}"
-    fi
-    if [ "${PROJ_COMPONENTS:-0}" -gt 0 ] 2>/dev/null; then
-        echo -e "    Components : ${DIM}${PROJ_COMPONENTS}${R}"
-        [ "${PROJ_PAGES:-0}" -gt 0 ] && echo -e "    Pages      : ${DIM}${PROJ_PAGES}${R}"
-    fi
+    [ ${#PROJ_VERSIONS[@]} -gt 0 ] && echo -e "    Versions   : ${DIM}$(printf '%s, ' "${PROJ_VERSIONS[@]}" | sed 's/, $//')${R}"
     echo ""
 
     # Generate files
@@ -1031,28 +863,7 @@ do_init() {
     generate_settings "$target_dir" "$strict"
     echo -e "    ${G}+${R} .claude/settings.json"
 
-    # 4. Save snapshot for future sync
-    local snapshot_file="$target_dir/.claude/.mangolove_snapshot"
-    mkdir -p "$target_dir/.claude"
-    cat > "$snapshot_file" << SNAPSHOT
-tech=$(printf '%s, ' "${PROJ_TECH[@]}" | sed 's/, $//')
-db=$(printf '%s, ' "${PROJ_DB[@]}" | sed 's/, $//')
-infra=$(printf '%s, ' "${PROJ_INFRA[@]}" | sed 's/, $//')
-build=${PROJ_BUILD}
-test=${PROJ_TEST}
-lint=${PROJ_LINT}
-modules=${PROJ_MODULES}
-controllers=${PROJ_CONTROLLERS:-0}
-services=${PROJ_SERVICES:-0}
-repositories=${PROJ_REPOSITORIES:-0}
-entities=${PROJ_ENTITIES:-0}
-endpoints=${PROJ_ENDPOINTS:-}
-components=${PROJ_COMPONENTS:-0}
-pages=${PROJ_PAGES:-0}
-api_routes=${PROJ_API_ROUTES:-0}
-SNAPSHOT
-
-    # 5. Update .gitignore
+    # 4. Update .gitignore
     update_gitignore "$target_dir"
 
     echo ""
@@ -1230,65 +1041,15 @@ do_sync() {
         echo ""
     fi
 
-    # Save snapshot of previous state for comparison
-    local prev_file="$target_dir/.claude/.mangolove_snapshot"
-    mkdir -p "$target_dir/.claude"
-
     # Scan current project
     scan_project "$target_dir"
 
     if [ ${#PROJ_TECH[@]} -eq 0 ]; then
-        echo -e "  ${Y}No recognized project structure.${R}"
+        [ "$quiet" = "false" ] && echo -e "  ${Y}No recognized project structure.${R}"
         return 1
     fi
 
-    run_deep_analysis "$target_dir"
-
-    # Build current snapshot for diff
-    local current_snapshot=""
-    current_snapshot="tech=$(printf '%s, ' "${PROJ_TECH[@]}" | sed 's/, $//')
-db=$(printf '%s, ' "${PROJ_DB[@]}" | sed 's/, $//')
-infra=$(printf '%s, ' "${PROJ_INFRA[@]}" | sed 's/, $//')
-build=${PROJ_BUILD}
-test=${PROJ_TEST}
-lint=${PROJ_LINT}
-modules=${PROJ_MODULES}
-controllers=${PROJ_CONTROLLERS:-0}
-services=${PROJ_SERVICES:-0}
-repositories=${PROJ_REPOSITORIES:-0}
-entities=${PROJ_ENTITIES:-0}
-endpoints=${PROJ_ENDPOINTS:-}
-components=${PROJ_COMPONENTS:-0}
-pages=${PROJ_PAGES:-0}
-api_routes=${PROJ_API_ROUTES:-0}"
-
-    # Compare with previous snapshot
-    local changes=()
-    if [ -f "$prev_file" ]; then
-        local prev_controllers prev_services prev_entities prev_endpoints prev_components prev_pages
-        prev_controllers=$(grep "^controllers=" "$prev_file" 2>/dev/null | cut -d= -f2) || true
-        prev_services=$(grep "^services=" "$prev_file" 2>/dev/null | cut -d= -f2) || true
-        prev_entities=$(grep "^entities=" "$prev_file" 2>/dev/null | cut -d= -f2) || true
-        prev_endpoints=$(grep "^endpoints=" "$prev_file" 2>/dev/null | cut -d= -f2) || true
-        prev_components=$(grep "^components=" "$prev_file" 2>/dev/null | cut -d= -f2) || true
-        prev_pages=$(grep "^pages=" "$prev_file" 2>/dev/null | cut -d= -f2) || true
-
-        # Detect changes
-        local curr_c="${PROJ_CONTROLLERS:-0}" curr_s="${PROJ_SERVICES:-0}" curr_e="${PROJ_ENTITIES:-0}"
-        local curr_comp="${PROJ_COMPONENTS:-0}" curr_p="${PROJ_PAGES:-0}"
-
-        [ "${prev_controllers:-0}" != "$curr_c" ] && changes+=("Controllers: ${prev_controllers:-0} -> ${curr_c}")
-        [ "${prev_services:-0}" != "$curr_s" ] && changes+=("Services: ${prev_services:-0} -> ${curr_s}")
-        [ "${prev_entities:-0}" != "$curr_e" ] && changes+=("Entities: ${prev_entities:-0} -> ${curr_e}")
-        [ "${prev_endpoints:-}" != "${PROJ_ENDPOINTS:-}" ] && [ -n "${PROJ_ENDPOINTS:-}" ] && changes+=("Endpoints: ${prev_endpoints:-N/A} -> ${PROJ_ENDPOINTS}")
-        [ "${prev_components:-0}" != "$curr_comp" ] && [ "$curr_comp" -gt 0 ] && changes+=("Components: ${prev_components:-0} -> ${curr_comp}")
-        [ "${prev_pages:-0}" != "$curr_p" ] && [ "$curr_p" -gt 0 ] && changes+=("Pages: ${prev_pages:-0} -> ${curr_p}")
-    else
-        changes+=("First sync — full snapshot created")
-    fi
-
-    # Save new snapshot
-    echo "$current_snapshot" > "$prev_file"
+    detect_conventions "$target_dir"
 
     # Update only the auto-generated sections of CLAUDE.md
     # Strategy: replace sections between markers, preserve everything else
@@ -1373,26 +1134,11 @@ $(echo "$PROJ_MODULES" | tr ',' '\n' | sed 's/^ */- /')")"
 
     if [ "$quiet" = "false" ]; then
         echo -e "  ${G}Synced:${R}"
-        echo -e "    CLAUDE.md   : updated"
-        echo -e "    Commands    : ${cmd_count}"
-
-        if [ ${#changes[@]} -gt 0 ]; then
-            echo ""
-            echo -e "  ${C}Changes detected:${R}"
-            for change in "${changes[@]}"; do
-                echo -e "    - ${change}"
-            done
-        else
-            echo ""
-            echo -e "  ${DIM}No changes since last sync.${R}"
-        fi
-
+        echo -e "    CLAUDE.md : updated"
+        echo -e "    Commands  : ${cmd_count}"
         echo ""
         echo -e "${DIM}──────────────────────────────────────${R}"
         echo ""
-    elif [ ${#changes[@]} -gt 0 ]; then
-        # Quiet mode: only show if changes detected
-        echo -e "  ${C}Synced:${R} $(IFS=', '; echo "${changes[*]}")"
     fi
 }
 

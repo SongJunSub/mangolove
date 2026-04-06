@@ -17,6 +17,7 @@ SKILL_MANAGER="$MANGOLOVE_DIR/lib/skill-manager.sh"
 PROJECT_INIT="$MANGOLOVE_DIR/lib/project-init.sh"
 SESSION_MEMORY="$MANGOLOVE_DIR/lib/session-memory.sh"
 STATS_SCRIPT="$MANGOLOVE_DIR/lib/stats.sh"
+COST_TRACKER="$MANGOLOVE_DIR/lib/cost-tracker.sh"
 BANNER_SCRIPT="$MANGOLOVE_DIR/lib/banner.sh"
 
 # ─────────────────────────────────────────────
@@ -182,6 +183,7 @@ show_help() {
     echo "  mangolove resume              Show last session context and continue"
     echo "  mangolove sessions            List all saved sessions"
     echo "  mangolove stats [period]      Productivity stats (today/week/month)"
+    echo "  mangolove cost [period]       Token usage and cost (today/week/month/all)"
     echo "  mangolove projects            List project profiles"
     echo "  mangolove profile add         Add a new project profile"
     echo "  mangolove profile auto [dir]  Auto-generate profile from project scan"
@@ -433,6 +435,11 @@ Continue from where you left off. Summarize the previous session state and ask w
         stats)
             shift
             bash "$STATS_SCRIPT" "${1:-week}"
+            exit 0
+            ;;
+        cost)
+            shift
+            bash "$COST_TRACKER" "${1:-week}"
             exit 0
             ;;
         projects)

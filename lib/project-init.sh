@@ -492,14 +492,106 @@ $(echo "$PROJ_API_PATHS")
     if [ "$strict" = "true" ]; then
         content="${content}
 
-## Quality Rules (Strict Mode)
-- After EVERY code change, run: \`${PROJ_TEST}\`
-- Before EVERY commit, run: \`${PROJ_LINT:-echo 'no linter configured'}\`$([ -n "$PROJ_TYPECHECK" ] && echo "
-- Type check: \`${PROJ_TYPECHECK}\`")
-- Write tests for all new functions and bug fixes.
-- If tests fail, fix them before writing more code.
-- Use \`/check\` to run the full validation pipeline.
-- NEVER mark a task as done without all checks passing."
+## Mandatory Workflow (Strict Mode)
+
+You MUST follow this workflow for EVERY task. No exceptions.
+
+### Phase 1: Analysis (ALWAYS FIRST)
+When the user describes a problem or feature:
+1. Read ALL related files before responding
+2. Trace the full call chain (Controller -> Service -> Repository -> Entity -> DTO)
+3. Identify every file that will be affected
+4. Present a plan with:
+   - Root cause / requirements analysis
+   - List of files to modify with specific changes
+   - Potential risks and edge cases
+   - Estimated impact on existing tests
+5. WAIT for user approval before writing any code
+
+### Phase 2: Implementation
+After the user approves the plan:
+1. Implement changes following the plan exactly
+2. For EVERY piece of code you write, verify these BEFORE moving to the next file:
+
+**Security**
+- No SQL injection (use parameterized queries, never string concatenation)
+- No XSS (escape all user input in responses)
+- No hardcoded secrets, credentials, or API keys
+- Proper authentication/authorization checks on every endpoint
+- Input validation on all public API parameters
+- No sensitive data in logs or error messages
+
+**Style & Conventions**$([ -n "$PROJ_LINT" ] && echo "
+- Run \`${PROJ_LINT}\` and fix ALL warnings")
+- Follow the project's existing naming patterns exactly
+- Match the indentation and formatting of surrounding code
+- No unused imports, variables, or dead code
+- No commented-out code blocks
+- Method length: prefer under 30 lines
+- Class length: prefer under 300 lines
+
+**Performance**
+- No N+1 query patterns (use JOIN or batch fetch)
+- No unnecessary object creation in loops
+- No blocking calls in async/reactive code
+- Use pagination for list endpoints
+- Consider index usage for new queries
+
+**Maintainability & Readability**
+- Single Responsibility: each method does one thing
+- Clear, descriptive naming (no abbreviations like \`tmp\`, \`val\`, \`x\`)
+- Extract complex conditions into named boolean methods
+- No magic numbers or strings — use constants
+- Error messages should be actionable and specific
+
+**Null Safety & Error Handling**
+- Handle all nullable values explicitly
+- Never return null from public methods — use Optional or empty collections
+- Catch specific exceptions, not generic Exception
+- Include context in error messages (what failed, what was the input)
+
+3. After ALL changes are complete, run:
+   \`\`\`
+   ${PROJ_BUILD}$([ -n "$PROJ_LINT" ] && echo " && ${PROJ_LINT}")$([ -n "$PROJ_TYPECHECK" ] && echo " && ${PROJ_TYPECHECK}") && ${PROJ_TEST}
+   \`\`\`
+   Fix any failures before proceeding.
+
+### Phase 3: Self-Review (MANDATORY)
+After implementation is complete and all checks pass, perform a critical self-review:
+
+1. Re-read every changed file as if you are a hostile code reviewer
+2. Check against this list — if ANY item fails, fix it immediately:
+   - [ ] No security vulnerabilities (OWASP Top 10)
+   - [ ] No performance anti-patterns (N+1, unnecessary allocation)
+   - [ ] All public methods have clear names and documentation
+   - [ ] Error handling is complete (no swallowed exceptions)
+   - [ ] No code duplication introduced
+   - [ ] Consistent with existing codebase patterns
+   - [ ] All new code paths have test coverage
+   - [ ] No hardcoded values that should be configurable
+   - [ ] Thread safety considered for shared state
+   - [ ] API responses follow existing format conventions
+3. If you find ANY issue during self-review, fix it and re-run checks
+4. Report the self-review result to the user
+
+### Phase 4: Completion Report
+After passing self-review, report:
+\`\`\`
+Changes:
+  - [list of files modified with what changed]
+
+Verification:
+  - Build: PASS
+  - Lint: PASS$([ -n "$PROJ_TYPECHECK" ] && echo "
+  - Type Check: PASS")
+  - Tests: PASS (N passed, N new)
+
+Self-Review:
+  - Security: PASS
+  - Performance: PASS
+  - Style: PASS
+  - Maintainability: PASS
+\`\`\`"
     fi
 
     echo "$content"
@@ -599,19 +691,10 @@ generate_settings() {
     fi
 
     if [ "$strict" = "true" ] && [ -n "$PROJ_TEST" ]; then
-        # Build lint command for hook
-        local lint_hook=""
+        # Build lint hook command
+        local lint_cmd="echo 'No linter configured'"
         if [ -n "$PROJ_LINT" ]; then
-            lint_hook=",
-      {
-        \"matcher\": \"Write|Edit\",
-        \"hooks\": [
-          {
-            \"type\": \"command\",
-            \"command\": \"${PROJ_LINT} 2>&1 | tail -20 || echo 'LINT FAILED: fix before continuing'\"
-          }
-        ]
-      }"
+            lint_cmd="${PROJ_LINT} 2>&1 | tail -30; exit 0"
         fi
 
         cat > "$settings_file" << SETTINGSEOF
@@ -619,22 +702,11 @@ generate_settings() {
   "hooks": {
     "PostToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Write|Edit",
         "hooks": [
           {
             "type": "command",
-            "command": "echo ''"
-          }
-        ]
-      }${lint_hook}
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo ''"
+            "command": "${lint_cmd}"
           }
         ]
       }

@@ -172,8 +172,10 @@ EOF
     cd "$proj"
     run bash "$MANGOLOVE_DIR/lib/project-init.sh" init --strict
     [ "$status" -eq 0 ]
-    grep -q "Quality Rules" "$proj/CLAUDE.md"
-    grep -q "EVERY code change" "$proj/CLAUDE.md"
+    grep -q "Mandatory Workflow" "$proj/CLAUDE.md"
+    grep -q "Phase 1: Analysis" "$proj/CLAUDE.md"
+    grep -q "Phase 3: Self-Review" "$proj/CLAUDE.md"
+    grep -q "Security" "$proj/CLAUDE.md"
 }
 
 # ─────────────────────────────────────────────

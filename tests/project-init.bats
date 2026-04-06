@@ -165,17 +165,19 @@ EOF
 # Strict mode
 # ─────────────────────────────────────────────
 
-@test "init: --strict adds quality rules to CLAUDE.md" {
+@test "init: --strict creates lint hook in settings.json" {
     local proj=$(create_fake_project "strict-init")
-    echo '{"name":"app","scripts":{"test":"jest"}}' > "$proj/package.json"
+    echo '{"name":"app","scripts":{"test":"jest","lint":"eslint ."}}' > "$proj/package.json"
+    echo '{}' > "$proj/.eslintrc.json"
 
     cd "$proj"
     run bash "$MANGOLOVE_DIR/lib/project-init.sh" init --strict
     [ "$status" -eq 0 ]
-    grep -q "필수 워크플로우" "$proj/CLAUDE.md"
-    grep -q "1단계: 분석" "$proj/CLAUDE.md"
-    grep -q "3단계: 셀프 리뷰" "$proj/CLAUDE.md"
-    grep -q "보안" "$proj/CLAUDE.md"
+    [ -f "$proj/.claude/settings.json" ]
+    grep -q "PostToolUse" "$proj/.claude/settings.json"
+    grep -q "SessionStart" "$proj/.claude/settings.json"
+    # Methodology is NOT in CLAUDE.md anymore
+    ! grep -q "필수 워크플로우" "$proj/CLAUDE.md"
 }
 
 # ─────────────────────────────────────────────

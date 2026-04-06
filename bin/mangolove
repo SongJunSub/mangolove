@@ -669,6 +669,18 @@ Continue from where you left off. Summarize the previous session state and ask w
     # Build system prompt
     SYSTEM_PROMPT=$(build_system_prompt)
 
+    # Inject methodology (strict mode by default)
+    local methodology_file="$MANGOLOVE_DIR/methodology/strict.md"
+    if [ -f "$methodology_file" ]; then
+        local methodology
+        methodology=$(cat "$methodology_file")
+        SYSTEM_PROMPT="${SYSTEM_PROMPT}
+
+---
+
+${methodology}"
+    fi
+
     # Trap exit to log session end and run plugin hooks
     # Use timeout to prevent hanging on network issues
     # shellcheck disable=SC2154

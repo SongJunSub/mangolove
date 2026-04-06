@@ -1132,14 +1132,6 @@ EOF
 - 프로젝트의 API 버전 관리 패턴 준수
 EOF
 
-        _write_cmd "$cmd_dir/migration.md" << 'EOF'
-현재 JPA 엔티티를 분석하고 데이터베이스 마이그레이션을 생성한다.
-
-1. 엔티티 정의와 현재 스키마를 비교
-2. 적절한 마이그레이션 스크립트 생성 (SQL 또는 Flyway/Liquibase)
-3. UP과 DOWN 마이그레이션을 모두 포함
-4. 파괴적 변경 사항 (컬럼 삭제, 타입 변경) 플래그 표시
-EOF
     fi
 
     # Next.js 전용 커맨드

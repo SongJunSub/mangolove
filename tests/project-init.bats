@@ -218,7 +218,6 @@ EOF
     bash "$MANGOLOVE_DIR/lib/project-init.sh" init
     [ -f "$proj/.claude/commands/entity.md" ]
     [ -f "$proj/.claude/commands/api.md" ]
-    [ -f "$proj/.claude/commands/migration.md" ]
 }
 
 @test "init: updates .gitignore with .claude/" {

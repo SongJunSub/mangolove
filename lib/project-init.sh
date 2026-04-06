@@ -612,16 +612,26 @@ generate_settings() {
         return 0
     fi
 
-    if [ "$strict" = "true" ] && [ -n "$PROJ_TEST" ]; then
-        # Build lint hook command
-        local lint_cmd="echo 'No linter configured'"
-        if [ -n "$PROJ_LINT" ]; then
-            lint_cmd="${PROJ_LINT} 2>&1 | tail -30; exit 0"
-        fi
+    # Sync script path
+    local mangolove_dir="${MANGOLOVE_DIR:-$HOME/.mangolove}"
+    local sync_cmd="bash '${mangolove_dir}/lib/project-init.sh' sync --quiet 2>/dev/null; exit 0"
+
+    if [ "$strict" = "true" ] && [ -n "$PROJ_LINT" ]; then
+        local lint_cmd="${PROJ_LINT} 2>&1 | tail -30; exit 0"
 
         cat > "$settings_file" << SETTINGSEOF
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${sync_cmd}"
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Write|Edit",
@@ -637,9 +647,20 @@ generate_settings() {
 }
 SETTINGSEOF
     else
-        cat > "$settings_file" << 'SETTINGSEOF'
+        cat > "$settings_file" << SETTINGSEOF
 {
-  "hooks": {}
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${sync_cmd}"
+          }
+        ]
+      }
+    ]
+  }
 }
 SETTINGSEOF
     fi
@@ -807,7 +828,6 @@ ${team_onboarding}"
 
     # Generate commands and settings
     generate_commands "$target_dir"
-    generate_framework_commands "$target_dir"
     local cmd_count
     cmd_count=$(find "$target_dir/.claude/commands" -name "*.md" 2>/dev/null | wc -l | tr -d ' ')
     echo -e "  ${G}+${R} .claude/commands/ (${cmd_count} commands)"
@@ -913,7 +933,6 @@ do_init() {
 
     # 2. .claude/commands/
     generate_commands "$target_dir"
-    generate_framework_commands "$target_dir"
     local cmd_count
     cmd_count=$(find "$target_dir/.claude/commands" -name "*.md" 2>/dev/null | wc -l | tr -d ' ')
     echo -e "    ${G}+${R} .claude/commands/ (${cmd_count} commands)"
@@ -978,111 +997,6 @@ update_gitignore() {
     echo "# Claude Code local settings" >> "$gitignore"
     echo ".claude/" >> "$gitignore"
     echo -e "    ${G}+${R} .gitignore (added .claude/)"
-}
-
-# ─────────────────────────────────────────────
-# Generate framework-specific commands
-# ─────────────────────────────────────────────
-generate_framework_commands() {
-    local dir="$1"
-    local cmd_dir="$dir/.claude/commands"
-
-    # Spring Boot specific commands
-    # shellcheck disable=SC2076
-    if [[ " ${PROJ_TECH[*]} " =~ " Spring Boot " ]]; then
-        _write_cmd "$cmd_dir/entity.md" << 'EOF'
-새로운 JPA 엔티티 클래스를 생성한다. 다음을 확인:
-1. 엔티티 이름
-2. 테이블 이름
-3. 필드 (이름, 타입, 제약 조건)
-
-프로젝트의 기존 엔티티 패턴을 따를 것:
-- 베이스 엔티티 클래스가 있으면 상속
-- JPA 어노테이션 (@Entity, @Table, @Column) 올바르게 적용
-- 프로젝트가 Auditing을 사용하면 감사 필드 추가
-- 대응하는 Repository 인터페이스 생성
-- 프로젝트 패키지 구조에 맞는 위치에 배치
-EOF
-
-        _write_cmd "$cmd_dir/api.md" << 'EOF'
-새로운 REST API 엔드포인트를 생성한다. 다음을 확인:
-1. 리소스 이름
-2. HTTP 메서드 및 경로
-3. 요청/응답 DTO
-
-프로젝트의 기존 패턴을 따를 것:
-- Controller -> Service -> Repository 레이어링
-- 일관된 네이밍: {Resource}Controller, {Resource}Service
-- 기존 DTO 컨벤션 사용 (RequestDto, ResponseDto)
-- 적절한 validation 어노테이션 추가
-- 프로젝트의 API 버전 관리 패턴 준수
-EOF
-
-    fi
-
-    # Next.js 전용 커맨드
-    # shellcheck disable=SC2076
-    if [[ " ${PROJ_TECH[*]} " =~ " Next.js " ]]; then
-        _write_cmd "$cmd_dir/page.md" << 'EOF'
-새로운 Next.js 페이지/라우트를 생성한다. 다음을 확인:
-1. 라우트 경로
-2. 서버 사이드 데이터 페칭 필요 여부
-3. 클라이언트 사이드 인터랙티비티 필요 여부
-
-프로젝트의 기존 패턴을 따를 것:
-- 파일 기반 라우팅 구조 (app/ 또는 pages/)
-- 레이아웃 사용 방식
-- 데이터 페칭 패턴 (Server Components vs Client)
-- 스타일링 접근 방식
-EOF
-
-        _write_cmd "$cmd_dir/component.md" << 'EOF'
-새로운 React 컴포넌트를 생성한다. 다음을 확인:
-1. 컴포넌트 이름
-2. Props 인터페이스
-3. 서버 컴포넌트인지 클라이언트 컴포넌트인지
-
-프로젝트의 기존 패턴을 따를 것:
-- 컴포넌트 파일 구조
-- Props 타이핑 방식
-- 스타일링 접근 방식 (CSS modules, Tailwind, styled-components)
-- 테스트 파일 공동 배치
-EOF
-    fi
-
-    # Django 전용 커맨드
-    # shellcheck disable=SC2076
-    if [[ " ${PROJ_TECH[*]} " =~ " Django " ]]; then
-        _write_cmd "$cmd_dir/model.md" << 'EOF'
-새로운 Django 모델을 생성한다. 다음을 확인:
-1. 모델 이름
-2. 필드 (이름, 타입, 제약 조건)
-3. 소속 앱
-
-프로젝트의 기존 패턴을 따를 것:
-- 모델 네이밍 및 필드 컨벤션
-- Meta 클래스 설정
-- 마이그레이션 생성 및 적용
-- admin을 사용하는 경우 admin에 등록
-EOF
-    fi
-
-    # FastAPI 전용 커맨드
-    # shellcheck disable=SC2076
-    if [[ " ${PROJ_TECH[*]} " =~ " FastAPI " ]]; then
-        _write_cmd "$cmd_dir/endpoint.md" << 'EOF'
-새로운 FastAPI 엔드포인트를 생성한다. 다음을 확인:
-1. 경로 및 HTTP 메서드
-2. 요청/응답 스키마 (Pydantic 모델)
-3. 의존성
-
-프로젝트의 기존 패턴을 따를 것:
-- 라우터 구성 방식
-- Pydantic 모델 컨벤션
-- 의존성 주입 패턴
-- 에러 처리 방식
-EOF
-    fi
 }
 
 # ─────────────────────────────────────────────
@@ -1201,7 +1115,6 @@ $(echo "$PROJ_MODULES" | tr ',' '\n' | sed 's/^ */- /')")"
 
     # Also update commands if new frameworks detected
     generate_commands "$target_dir"
-    generate_framework_commands "$target_dir"
 
     # Report
     local cmd_count

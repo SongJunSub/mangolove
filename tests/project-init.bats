@@ -205,7 +205,7 @@ EOF
     grep -q "any" "$proj/CLAUDE.md"
 }
 
-@test "init: generates framework-specific commands for Spring Boot" {
+@test "init: generates core commands but not framework-specific" {
     local proj=$(create_fake_project "spring-cmd")
     cat > "$proj/build.gradle" << 'EOF'
 plugins { id 'org.springframework.boot' version '3.2.0' }
@@ -216,8 +216,11 @@ EOF
 
     cd "$proj"
     bash "$MANGOLOVE_DIR/lib/project-init.sh" init
-    [ -f "$proj/.claude/commands/entity.md" ]
-    [ -f "$proj/.claude/commands/api.md" ]
+    [ -f "$proj/.claude/commands/test.md" ]
+    [ -f "$proj/.claude/commands/build.md" ]
+    [ -f "$proj/.claude/commands/review.md" ]
+    [ ! -f "$proj/.claude/commands/entity.md" ]
+    [ ! -f "$proj/.claude/commands/api.md" ]
 }
 
 @test "init: updates .gitignore with .claude/" {

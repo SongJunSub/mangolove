@@ -15,6 +15,7 @@ PROFILE_MANAGER="$MANGOLOVE_DIR/lib/profile-manager.sh"
 PLUGIN_MANAGER="$MANGOLOVE_DIR/lib/plugin-manager.sh"
 SKILL_MANAGER="$MANGOLOVE_DIR/lib/skill-manager.sh"
 PROJECT_INIT="$MANGOLOVE_DIR/lib/project-init.sh"
+SESSION_MEMORY="$MANGOLOVE_DIR/lib/session-memory.sh"
 BANNER_SCRIPT="$MANGOLOVE_DIR/lib/banner.sh"
 
 # ─────────────────────────────────────────────
@@ -174,6 +175,8 @@ show_help() {
     echo "  mangolove init                Generate CLAUDE.md + commands + hooks"
     echo "  mangolove init --strict       Same + quality gates (auto lint/test)"
     echo "  mangolove init --force        Regenerate even if CLAUDE.md exists"
+    echo "  mangolove resume              Show last session context and continue"
+    echo "  mangolove sessions            List all saved sessions"
     echo "  mangolove projects            List project profiles"
     echo "  mangolove profile add         Add a new project profile"
     echo "  mangolove profile auto [dir]  Auto-generate profile from project scan"
@@ -395,6 +398,29 @@ main() {
             bash "$PROJECT_INIT" init "$@"
             exit 0
             ;;
+        resume)
+            bash "$SESSION_MEMORY" show
+            # After showing context, launch claude with session context
+            check_dependencies
+            local session_context=""
+            session_context=$(bash "$SESSION_MEMORY" load 2>/dev/null) || true
+            if [ -n "$session_context" ]; then
+                claude --append-system-prompt "## Previous Session Context
+${session_context}
+
+Continue from where you left off. Summarize the previous session state and ask what to work on next." -c 2>/dev/null || claude --append-system-prompt "## Previous Session Context
+${session_context}
+
+Continue from where you left off. Summarize the previous session state and ask what to work on next."
+            else
+                claude -c 2>/dev/null || claude
+            fi
+            exit 0
+            ;;
+        sessions)
+            bash "$SESSION_MEMORY" list
+            exit 0
+            ;;
         projects)
             bash "$PROFILE_MANAGER" list
             exit 0
@@ -484,6 +510,7 @@ main() {
     # Use timeout to prevent hanging on network issues
     # shellcheck disable=SC2154
     trap '
+        bash "$SESSION_MEMORY" save 2>/dev/null &
         bash "$PLUGIN_MANAGER" hook on_session_end 2>/dev/null &
         _ml_plugin_pid=$!
         _ml_logger_pid=0

@@ -14,3 +14,5 @@ disable=SC2038
 disable=SC2116
 # SC2129: grouped redirects — individual redirects are clearer for appending
 disable=SC2129
+# SC1091: Can't follow dynamic source paths — colors.sh is sourced at runtime
+disable=SC1091

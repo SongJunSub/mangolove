@@ -6,15 +6,8 @@
 MANGOLOVE_DIR="${MANGOLOVE_DIR:-$HOME/.mangolove}"
 PROJECTS_DIR="$MANGOLOVE_DIR/projects"
 
-# Colors
-R='\033[0m'
-B='\033[1m'
-DIM='\033[2m'
-Y='\033[38;5;220m'
-O='\033[38;5;208m'
-G='\033[38;5;113m'
-C='\033[38;5;117m'
-RED='\033[38;5;203m'
+# shellcheck source=colors.sh
+source "${MANGOLOVE_DIR}/lib/colors.sh"
 
 list_profiles() {
     echo ""

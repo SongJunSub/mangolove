@@ -11,7 +11,7 @@ setup_test_env() {
 
     mkdir -p "$MANGOLOVE_DIR"/{bin,lib,prompts/modes,projects,plugins,logs,completions}
 
-    # Copy lib scripts
+    # Copy lib scripts (colors.sh must come first as other scripts source it)
     cp "$BATS_TEST_DIRNAME/../lib/"*.sh "$MANGOLOVE_DIR/lib/"
 
     # Copy prompts

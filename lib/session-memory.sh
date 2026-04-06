@@ -9,14 +9,8 @@ set -o pipefail
 MANGOLOVE_DIR="${MANGOLOVE_DIR:-$HOME/.mangolove}"
 SESSIONS_DIR="$MANGOLOVE_DIR/sessions"
 
-# Colors
-R='\033[0m'
-B='\033[1m'
-DIM='\033[2m'
-O='\033[38;5;208m'
-G='\033[38;5;113m'
-C='\033[38;5;117m'
-Y='\033[38;5;220m'
+# shellcheck source=colors.sh
+source "${MANGOLOVE_DIR}/lib/colors.sh"
 
 # ─────────────────────────────────────────────
 # Save session context

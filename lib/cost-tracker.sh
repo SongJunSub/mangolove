@@ -6,14 +6,9 @@
 
 set -o pipefail
 
-# Colors
-R='\033[0m'
-B='\033[1m'
-DIM='\033[2m'
-O='\033[38;5;208m'
-G='\033[38;5;113m'
-C='\033[38;5;117m'
-Y='\033[38;5;220m'
+MANGOLOVE_DIR="${MANGOLOVE_DIR:-$HOME/.mangolove}"
+# shellcheck source=colors.sh
+source "${MANGOLOVE_DIR}/lib/colors.sh"
 
 CLAUDE_DIR="$HOME/.claude"
 PROJECTS_DIR="$CLAUDE_DIR/projects"
@@ -27,41 +22,54 @@ PRICE_CACHE_READ=0.30
 # ─────────────────────────────────────────────
 # Parse a single session file and sum tokens
 # ─────────────────────────────────────────────
-parse_session_tokens() {
-    local session_file="$1"
-    # since_ts reserved for future timestamp filtering
+# ─────────────────────────────────────────────
+# Batch-process all session files with a single python3 call
+# Input: list of "project_name:file_path" on stdin
+# Output: "project_name,input,output,cache_write,cache_read,msgs" per project
+# ─────────────────────────────────────────────
+batch_parse_sessions() {
+    local input_data
+    input_data=$(cat)
+    python3 -c "
+import json, os
+from collections import defaultdict
 
-    [ ! -f "$session_file" ] && return
+projects = defaultdict(lambda: [0, 0, 0, 0, 0, 0])
+file_list = '''${input_data}'''
 
-    # Use python3 for reliable JSON parsing
-    python3 << PYEOF 2>/dev/null
-import json, sys
+for line in file_list.strip().split('\n'):
+    line = line.strip()
+    if not line or ':' not in line:
+        continue
+    idx = line.index(':')
+    proj_name = line[:idx]
+    file_path = line[idx+1:]
+    if not os.path.isfile(file_path):
+        continue
+    session_msgs = 0
+    with open(file_path, 'r') as f:
+        for fline in f:
+            fline = fline.strip()
+            if not fline:
+                continue
+            try:
+                data = json.loads(fline)
+                usage = data.get('message', {}).get('usage', {})
+                if usage:
+                    projects[proj_name][0] += usage.get('input_tokens', 0)
+                    projects[proj_name][1] += usage.get('output_tokens', 0)
+                    projects[proj_name][2] += usage.get('cache_creation_input_tokens', 0)
+                    projects[proj_name][3] += usage.get('cache_read_input_tokens', 0)
+                    projects[proj_name][4] += 1
+                    session_msgs += 1
+            except (json.JSONDecodeError, KeyError):
+                continue
+    if session_msgs > 0:
+        projects[proj_name][5] += 1
 
-input_tokens = 0
-output_tokens = 0
-cache_write_tokens = 0
-cache_read_tokens = 0
-msg_count = 0
-
-with open("${session_file}", "r") as f:
-    for line in f:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            data = json.loads(line)
-            usage = data.get("message", {}).get("usage", {})
-            if usage:
-                input_tokens += usage.get("input_tokens", 0)
-                output_tokens += usage.get("output_tokens", 0)
-                cache_write_tokens += usage.get("cache_creation_input_tokens", 0)
-                cache_read_tokens += usage.get("cache_read_input_tokens", 0)
-                msg_count += 1
-        except (json.JSONDecodeError, KeyError):
-            continue
-
-print(f"{input_tokens},{output_tokens},{cache_write_tokens},{cache_read_tokens},{msg_count}")
-PYEOF
+for name, vals in projects.items():
+    print(f'{name},{vals[0]},{vals[1]},{vals[2]},{vals[3]},{vals[4]},{vals[5]}')
+" 2>/dev/null
 }
 
 # ─────────────────────────────────────────────
@@ -125,66 +133,48 @@ show_cost() {
     echo -e "  Period: ${C}${period}${R} (since ${since_date})"
     echo ""
 
-    local total_input=0
-    local total_output=0
-    local total_cache_write=0
-    local total_cache_read=0
-    local total_messages=0
-    local total_sessions=0
-
-    # Per-project breakdown
-    local project_data=""
-
+    # Collect all session files matching the date range
+    local file_list=""
     for project_dir in "$PROJECTS_DIR"/*/; do
         [ ! -d "$project_dir" ] && continue
-
-        local proj_input=0 proj_output=0 proj_cw=0 proj_cr=0 proj_msgs=0 proj_sessions=0
+        local proj_name
+        proj_name=$(dir_to_project_name "$(basename "$project_dir")")
 
         for session_file in "$project_dir"/*.jsonl; do
             [ ! -f "$session_file" ] && continue
-
-            # Check file modification date
             local file_date
             file_date=$(stat -f "%Sm" -t "%Y-%m-%d" "$session_file" 2>/dev/null) || \
             file_date=$(stat -c "%y" "$session_file" 2>/dev/null | cut -d' ' -f1) || continue
-
-            if [[ "$file_date" < "$since_date" ]]; then
-                continue
-            fi
-
-            local result
-            result=$(parse_session_tokens "$session_file") || continue
-            [ -z "$result" ] && continue
-
-            local s_input s_output s_cw s_cr s_msgs
-            IFS=',' read -r s_input s_output s_cw s_cr s_msgs <<< "$result"
-
-            [ "$s_msgs" -eq 0 ] 2>/dev/null && continue
-
-            proj_input=$((proj_input + s_input))
-            proj_output=$((proj_output + s_output))
-            proj_cw=$((proj_cw + s_cw))
-            proj_cr=$((proj_cr + s_cr))
-            proj_msgs=$((proj_msgs + s_msgs))
-            proj_sessions=$((proj_sessions + 1))
-        done
-
-        if [ "$proj_msgs" -gt 0 ]; then
-            local proj_name
-            proj_name=$(dir_to_project_name "$(basename "$project_dir")")
-            local proj_cost
-            proj_cost=$(calculate_cost "$proj_input" "$proj_output" "$proj_cw" "$proj_cr")
-
-            project_data="${project_data}${proj_cost}|${proj_name}|${proj_input}|${proj_output}|${proj_cw}|${proj_cr}|${proj_msgs}|${proj_sessions}
+            if [[ ! "$file_date" < "$since_date" ]]; then
+                file_list="${file_list}${proj_name}:${session_file}
 "
-            total_input=$((total_input + proj_input))
-            total_output=$((total_output + proj_output))
-            total_cache_write=$((total_cache_write + proj_cw))
-            total_cache_read=$((total_cache_read + proj_cr))
-            total_messages=$((total_messages + proj_msgs))
-            total_sessions=$((total_sessions + proj_sessions))
-        fi
+            fi
+        done
     done
+
+    # Single python3 call for all session files
+    local batch_result=""
+    if [ -n "$file_list" ]; then
+        batch_result=$(echo "$file_list" | batch_parse_sessions) || true
+    fi
+
+    local total_input=0 total_output=0 total_cache_write=0 total_cache_read=0
+    local total_messages=0 total_sessions=0
+    local project_data=""
+
+    while IFS=',' read -r pname p_in p_out p_cw p_cr p_msgs p_sess; do
+        [ -z "$pname" ] && continue
+        local proj_cost
+        proj_cost=$(calculate_cost "$p_in" "$p_out" "$p_cw" "$p_cr")
+        project_data="${project_data}${proj_cost}|${pname}|${p_in}|${p_out}|${p_cw}|${p_cr}|${p_msgs}|${p_sess}
+"
+        total_input=$((total_input + p_in))
+        total_output=$((total_output + p_out))
+        total_cache_write=$((total_cache_write + p_cw))
+        total_cache_read=$((total_cache_read + p_cr))
+        total_messages=$((total_messages + p_msgs))
+        total_sessions=$((total_sessions + p_sess))
+    done <<< "$batch_result"
 
     if [ "$total_messages" -eq 0 ]; then
         echo -e "  ${DIM}No session data found for this period.${R}"
@@ -227,10 +217,4 @@ show_cost() {
 # ─────────────────────────────────────────────
 # Entrypoint
 # ─────────────────────────────────────────────
-case "${1:-}" in
-    today) show_cost "today" ;;
-    week)  show_cost "week" ;;
-    month) show_cost "month" ;;
-    all)   show_cost "all" ;;
-    *)     show_cost "${1:-week}" ;;
-esac
+show_cost "${1:-week}"

@@ -6,14 +6,9 @@
 
 set -o pipefail
 
-# Colors
-R='\033[0m'
-B='\033[1m'
-DIM='\033[2m'
-O='\033[38;5;208m'
-G='\033[38;5;113m'
-C='\033[38;5;117m'
-Y='\033[38;5;220m'
+MANGOLOVE_DIR="${MANGOLOVE_DIR:-$HOME/.mangolove}"
+# shellcheck source=colors.sh
+source "${MANGOLOVE_DIR}/lib/colors.sh"
 
 # ─────────────────────────────���───────────────
 # Show stats for current project
@@ -44,9 +39,12 @@ show_stats() {
     echo -e "  Period  : ${C}${period}${R} (since ${since})"
     echo ""
 
-    # --- Commit stats ---
+    # --- Commit stats (single git log call) ---
+    local commit_log
+    commit_log=$(git log --since="$since" --oneline --no-merges 2>/dev/null) || true
+
     local total_commits
-    total_commits=$(git log --since="$since" --oneline --no-merges 2>/dev/null | wc -l | tr -d ' ') || true
+    total_commits=$(echo "$commit_log" | grep -c . || true)
 
     local authors
     authors=$(git log --since="$since" --format="%aN" --no-merges 2>/dev/null | sort -u | wc -l | tr -d ' ') || true
@@ -55,14 +53,14 @@ show_stats() {
     echo -e "    Total     : ${B}${total_commits}${R}"
     echo -e "    Authors   : ${DIM}${authors}${R}"
 
-    # Commits by type (conventional commits)
+    # Commits by type (from cached log)
     local feat_count fix_count refactor_count test_count docs_count chore_count
-    feat_count=$(git log --since="$since" --oneline --no-merges 2>/dev/null | grep -c "^[a-f0-9]* feat" || true)
-    fix_count=$(git log --since="$since" --oneline --no-merges 2>/dev/null | grep -c "^[a-f0-9]* fix" || true)
-    refactor_count=$(git log --since="$since" --oneline --no-merges 2>/dev/null | grep -c "^[a-f0-9]* refactor" || true)
-    test_count=$(git log --since="$since" --oneline --no-merges 2>/dev/null | grep -c "^[a-f0-9]* test" || true)
-    docs_count=$(git log --since="$since" --oneline --no-merges 2>/dev/null | grep -c "^[a-f0-9]* docs" || true)
-    chore_count=$(git log --since="$since" --oneline --no-merges 2>/dev/null | grep -c "^[a-f0-9]* chore" || true)
+    feat_count=$(echo "$commit_log" | grep -c "^[a-f0-9]* feat" || true)
+    fix_count=$(echo "$commit_log" | grep -c "^[a-f0-9]* fix" || true)
+    refactor_count=$(echo "$commit_log" | grep -c "^[a-f0-9]* refactor" || true)
+    test_count=$(echo "$commit_log" | grep -c "^[a-f0-9]* test" || true)
+    docs_count=$(echo "$commit_log" | grep -c "^[a-f0-9]* docs" || true)
+    chore_count=$(echo "$commit_log" | grep -c "^[a-f0-9]* chore" || true)
 
     if [ "$total_commits" -gt 0 ]; then
         echo ""
@@ -75,12 +73,15 @@ show_stats() {
         [ "$chore_count" -gt 0 ] && echo -e "    chore     : ${chore_count}"
     fi
 
-    # --- File stats ---
+    # --- File stats (single git log call for file names) ---
+    local file_log
+    file_log=$(git log --since="$since" --no-merges --format="" --name-only 2>/dev/null) || true
+
     echo ""
     echo -e "  ${G}Files Changed${R}"
 
     local files_changed
-    files_changed=$(git log --since="$since" --no-merges --format="" --name-only 2>/dev/null | sort -u | wc -l | tr -d ' ') || true
+    files_changed=$(echo "$file_log" | sort -u | grep -c . || true)
     echo -e "    Unique files : ${B}${files_changed}${R}"
 
     # Insertions/deletions
@@ -107,11 +108,11 @@ show_stats() {
         echo -e "    Net          : ${Y}${net}${R}"
     fi
 
-    # --- Most active files ---
+    # --- Most active files (from cached file log) ---
     if [ "$total_commits" -gt 0 ]; then
         echo ""
         echo -e "  ${G}Most Active Files${R}"
-        git log --since="$since" --no-merges --format="" --name-only 2>/dev/null | \
+        echo "$file_log" | grep -v '^$' | \
             sort | uniq -c | sort -rn | head -5 | \
             while IFS= read -r line; do
                 local count file
@@ -139,9 +140,4 @@ show_stats() {
 # ─────────────────────────────────────────────
 # Entrypoint
 # ─────────────────────────────────────────────
-case "${1:-}" in
-    today) show_stats "today" ;;
-    week)  show_stats "week" ;;
-    month) show_stats "month" ;;
-    *)     show_stats "${1:-week}" ;;
-esac
+show_stats "${1:-week}"

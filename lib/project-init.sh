@@ -9,15 +9,8 @@ set -o pipefail
 
 MANGOLOVE_DIR="${MANGOLOVE_DIR:-$HOME/.mangolove}"
 
-# Colors
-R='\033[0m'
-B='\033[1m'
-DIM='\033[2m'
-O='\033[38;5;208m'
-G='\033[38;5;113m'
-C='\033[38;5;117m'
-RED='\033[38;5;203m'
-Y='\033[38;5;220m'
+# shellcheck source=colors.sh
+source "${MANGOLOVE_DIR}/lib/colors.sh"
 
 # ─────────────────────────────────────────────
 # Project scanner — detect everything about the project
@@ -34,10 +27,8 @@ scan_project() {
     PROJ_TYPECHECK=""
     PROJ_MODULES=""
     PROJ_PKG_MGR=""
-    export PROJ_FRAMEWORK=""
     PROJ_DB=()
     PROJ_INFRA=()
-    export PROJ_STRUCTURE=""
 
     # --- Gradle (Java/Kotlin) ---
     if [ -f "$dir/build.gradle" ] || [ -f "$dir/build.gradle.kts" ]; then
@@ -55,7 +46,7 @@ scan_project() {
             # Spring Boot implies Java at minimum
             [[ ! " ${PROJ_TECH[*]} " =~ " Java " ]] && PROJ_TECH+=("Java")
             PROJ_TECH+=("Spring Boot")
-            PROJ_FRAMEWORK="Spring Boot"
+            : # framework: Spring Boot
         fi
         grep -rq "spring-boot-starter-data-jpa\|jakarta.persistence" "$dir/build.gradle"* 2>/dev/null && PROJ_TECH+=("JPA")
         grep -rq "querydsl" "$dir/build.gradle"* 2>/dev/null && PROJ_TECH+=("QueryDSL")
@@ -95,16 +86,12 @@ scan_project() {
             PROJ_MODULES=$(grep "include" "$settings_file" 2>/dev/null | sed "s/.*include//;s/[\"'()]//g;s/://g" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | grep -v '^$' | tr '\n' ', ' | sed 's/,$//')
         fi
 
-        # Detect package structure
-        local base_pkg=""
-        base_pkg=$(find "$dir/src/main" -type f \( -name "*.java" -o -name "*.kt" \) -print -quit 2>/dev/null | sed 's|.*/src/main/[^/]*/||;s|/[^/]*$||;s|/|.|g')
-        [ -n "$base_pkg" ] && PROJ_STRUCTURE="$base_pkg"
     fi
 
     # --- Maven ---
     if [ -f "$dir/pom.xml" ]; then
         [[ ! " ${PROJ_TECH[*]} " =~ " Java " ]] && PROJ_TECH+=("Java")
-        grep -q "spring-boot" "$dir/pom.xml" 2>/dev/null && { [[ ! " ${PROJ_TECH[*]} " =~ " Spring Boot " ]] && PROJ_TECH+=("Spring Boot"); PROJ_FRAMEWORK="Spring Boot"; }
+        grep -q "spring-boot" "$dir/pom.xml" 2>/dev/null && { [[ ! " ${PROJ_TECH[*]} " =~ " Spring Boot " ]] && PROJ_TECH+=("Spring Boot"); }
         grep -q "spring-boot-starter-data-jpa" "$dir/pom.xml" 2>/dev/null && { [[ ! " ${PROJ_TECH[*]} " =~ " JPA " ]] && PROJ_TECH+=("JPA"); }
 
         if [ -f "$dir/mvnw" ]; then
@@ -121,11 +108,11 @@ scan_project() {
         PROJ_TECH+=("Node.js")
         [ -f "$dir/tsconfig.json" ] && PROJ_TECH+=("TypeScript")
 
-        grep -q '"react"' "$dir/package.json" 2>/dev/null && { PROJ_TECH+=("React"); PROJ_FRAMEWORK="React"; }
-        grep -q '"next"' "$dir/package.json" 2>/dev/null && { PROJ_TECH+=("Next.js"); PROJ_FRAMEWORK="Next.js"; }
-        grep -q '"vue"' "$dir/package.json" 2>/dev/null && { PROJ_TECH+=("Vue"); PROJ_FRAMEWORK="Vue"; }
-        grep -q '"express"' "$dir/package.json" 2>/dev/null && { PROJ_TECH+=("Express"); PROJ_FRAMEWORK="Express"; }
-        grep -qE '"@nestjs"' "$dir/package.json" 2>/dev/null && { PROJ_TECH+=("NestJS"); PROJ_FRAMEWORK="NestJS"; }
+        grep -q '"react"' "$dir/package.json" 2>/dev/null && { PROJ_TECH+=("React"); }
+        grep -q '"next"' "$dir/package.json" 2>/dev/null && { PROJ_TECH+=("Next.js"); }
+        grep -q '"vue"' "$dir/package.json" 2>/dev/null && { PROJ_TECH+=("Vue"); }
+        grep -q '"express"' "$dir/package.json" 2>/dev/null && { PROJ_TECH+=("Express"); }
+        grep -qE '"@nestjs"' "$dir/package.json" 2>/dev/null && { PROJ_TECH+=("NestJS"); }
 
         # Package manager
         PROJ_PKG_MGR="npm"
@@ -148,9 +135,9 @@ scan_project() {
     # --- Python ---
     if [ -f "$dir/pyproject.toml" ] || [ -f "$dir/setup.py" ] || [ -f "$dir/requirements.txt" ]; then
         PROJ_TECH+=("Python")
-        grep -rq "django" "$dir/requirements.txt" "$dir/pyproject.toml" 2>/dev/null && { PROJ_TECH+=("Django"); PROJ_FRAMEWORK="Django"; }
-        grep -rq "fastapi" "$dir/requirements.txt" "$dir/pyproject.toml" 2>/dev/null && { PROJ_TECH+=("FastAPI"); PROJ_FRAMEWORK="FastAPI"; }
-        grep -rq "flask" "$dir/requirements.txt" "$dir/pyproject.toml" 2>/dev/null && { PROJ_TECH+=("Flask"); PROJ_FRAMEWORK="Flask"; }
+        grep -rq "django" "$dir/requirements.txt" "$dir/pyproject.toml" 2>/dev/null && { PROJ_TECH+=("Django"); }
+        grep -rq "fastapi" "$dir/requirements.txt" "$dir/pyproject.toml" 2>/dev/null && { PROJ_TECH+=("FastAPI"); }
+        grep -rq "flask" "$dir/requirements.txt" "$dir/pyproject.toml" 2>/dev/null && { PROJ_TECH+=("Flask"); }
         [ -z "$PROJ_TEST" ] && PROJ_TEST="pytest"
         # Detect linter
         if grep -rq "ruff" "$dir/pyproject.toml" 2>/dev/null; then
@@ -287,8 +274,9 @@ analyze_node_project() {
     fi
 
     # Custom hooks
-    PROJ_HOOKS=$(find "$dir" -path "*/hooks/*" -o -name "use*.ts" -o -name "use*.tsx" \
-        -not -path "*/node_modules/*" 2>/dev/null | wc -l | tr -d ' ')
+    PROJ_HOOKS=$(find "$dir" -not -path "*/node_modules/*" \
+        \( -path "*/hooks/*" -o -name "use*.ts" -o -name "use*.tsx" \) \
+        2>/dev/null | wc -l | tr -d ' ')
 }
 
 analyze_python_project() {
@@ -315,6 +303,26 @@ analyze_python_project() {
 # ─────────────────────────────────────────────
 # Detect naming conventions from existing code
 # ─────────────────────────────────────────────
+# ─────────────────────────────────────────────
+# Run all deep analysis based on detected stack
+# ─────────────────────────────────────────────
+run_deep_analysis() {
+    local dir="$1"
+    # shellcheck disable=SC2076
+    if [[ " ${PROJ_TECH[*]} " =~ " Spring Boot " ]] || [[ " ${PROJ_TECH[*]} " =~ " Java " ]]; then
+        analyze_spring_boot "$dir"
+    fi
+    # shellcheck disable=SC2076
+    if [[ " ${PROJ_TECH[*]} " =~ " Node.js " ]]; then
+        analyze_node_project "$dir"
+    fi
+    # shellcheck disable=SC2076
+    if [[ " ${PROJ_TECH[*]} " =~ " Python " ]]; then
+        analyze_python_project "$dir"
+    fi
+    detect_conventions "$dir"
+}
+
 detect_conventions() {
     local dir="$1"
 
@@ -748,20 +756,7 @@ do_export() {
         return 1
     fi
 
-    # Deep analysis
-    # shellcheck disable=SC2076
-    if [[ " ${PROJ_TECH[*]} " =~ " Spring Boot " ]] || [[ " ${PROJ_TECH[*]} " =~ " Java " ]]; then
-        analyze_spring_boot "$target_dir"
-    fi
-    # shellcheck disable=SC2076
-    if [[ " ${PROJ_TECH[*]} " =~ " Node.js " ]]; then
-        analyze_node_project "$target_dir"
-    fi
-    # shellcheck disable=SC2076
-    if [[ " ${PROJ_TECH[*]} " =~ " Python " ]]; then
-        analyze_python_project "$target_dir"
-    fi
-    detect_conventions "$target_dir"
+    run_deep_analysis "$target_dir"
 
     # Generate .mangolove.md with full project context
     local export_file="$target_dir/.mangolove.md"
@@ -891,16 +886,7 @@ do_from_team() {
     [ -n "$team_lint" ] && PROJ_LINT="$team_lint"
     [ -n "$team_typecheck" ] && PROJ_TYPECHECK="$team_typecheck"
 
-    # Deep analysis
-    # shellcheck disable=SC2076
-    if [[ " ${PROJ_TECH[*]} " =~ " Spring Boot " ]] || [[ " ${PROJ_TECH[*]} " =~ " Java " ]]; then
-        analyze_spring_boot "$target_dir"
-    fi
-    # shellcheck disable=SC2076
-    if [[ " ${PROJ_TECH[*]} " =~ " Node.js " ]]; then
-        analyze_node_project "$target_dir"
-    fi
-    detect_conventions "$target_dir"
+    run_deep_analysis "$target_dir"
 
     # Generate CLAUDE.md
     local claude_md
@@ -1022,19 +1008,7 @@ do_init() {
 
     # Deep analysis based on detected stack
     echo -e "  ${DIM}Analyzing source code...${R}"
-    # shellcheck disable=SC2076
-    if [[ " ${PROJ_TECH[*]} " =~ " Spring Boot " ]] || [[ " ${PROJ_TECH[*]} " =~ " Java " ]]; then
-        analyze_spring_boot "$target_dir"
-    fi
-    # shellcheck disable=SC2076
-    if [[ " ${PROJ_TECH[*]} " =~ " Node.js " ]]; then
-        analyze_node_project "$target_dir"
-    fi
-    # shellcheck disable=SC2076
-    if [[ " ${PROJ_TECH[*]} " =~ " Python " ]]; then
-        analyze_python_project "$target_dir"
-    fi
-    detect_conventions "$target_dir"
+    run_deep_analysis "$target_dir"
 
     # Report detection
     local tech_display
@@ -1294,20 +1268,7 @@ do_sync() {
         return 1
     fi
 
-    # Deep analysis
-    # shellcheck disable=SC2076
-    if [[ " ${PROJ_TECH[*]} " =~ " Spring Boot " ]] || [[ " ${PROJ_TECH[*]} " =~ " Java " ]]; then
-        analyze_spring_boot "$target_dir"
-    fi
-    # shellcheck disable=SC2076
-    if [[ " ${PROJ_TECH[*]} " =~ " Node.js " ]]; then
-        analyze_node_project "$target_dir"
-    fi
-    # shellcheck disable=SC2076
-    if [[ " ${PROJ_TECH[*]} " =~ " Python " ]]; then
-        analyze_python_project "$target_dir"
-    fi
-    detect_conventions "$target_dir"
+    run_deep_analysis "$target_dir"
 
     # Build current snapshot for diff
     local current_snapshot=""

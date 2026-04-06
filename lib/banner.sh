@@ -110,6 +110,11 @@ EOF
 
 # ── Session info ──
 CURRENT_DIR=$(pwd)
+CLAUDE_VER=$(claude --version 2>/dev/null | sed 's/ (Claude Code)//')
+CLAUDE_MODEL="${MANGOLOVE_MODEL:-opus}"
+
+echo "    ${FGR}│${R} ${FC}${B}⟩${R} ${FW}${B}Claude${R}    ${FGR}·${R} ${FG}v${CLAUDE_VER}${R}"
+echo "    ${FGR}│${R} ${FC}${B}⟩${R} ${FW}${B}Model${R}     ${FGR}·${R} ${FG}${CLAUDE_MODEL}${R}"
 echo "    ${FGR}│${R} ${FC}${B}⟩${R} ${FW}${B}User${R}      ${FGR}·${R} ${FG}$(whoami)${R}"
 echo "    ${FGR}│${R} ${FC}${B}⟩${R} ${FW}${B}Directory${R} ${FGR}·${R} ${FG}${CURRENT_DIR}${R}"
 echo "    ${FGR}│${R} ${FC}${B}⟩${R} ${FW}${B}Date${R}      ${FGR}·${R} ${FG}$(date '+%Y-%m-%d %H:%M')${R}"
@@ -126,7 +131,7 @@ for profile in "$MANGOLOVE_DIR/projects"/*.md; do
 done
 
 if [ -n "$PROJECT_NAME" ]; then
-    echo "    ${FGR}│${R} ${FC}${B}⟩${R} ${FW}${B}Project${R}   ${FGR}·${R} ${FY}${B}${PROJECT_NAME}${R} ${FG}✓${R}"
+    echo "    ${FGR}│${R} ${FC}${B}⟩${R} ${FW}${B}Project${R}   ${FGR}·${R} ${FY}${B}${PROJECT_NAME}${R}"
 else
     echo "    ${FGR}│${R} ${FC}${B}⟩${R} ${FW}${B}Project${R}   ${FGR}·${R} ${FGR}${IT}auto-detecting...${R}"
 fi
@@ -139,7 +144,5 @@ fi
 
 cat << EOF
     ${FGR}└─────────────────────────────────────────┘${R}
-
-      ${FGR}Powered by Claude Code${R}
 
 EOF

@@ -613,9 +613,18 @@ generate_commands() {
     local cmd_dir="$dir/.claude/commands"
     mkdir -p "$cmd_dir"
 
+    # Helper: only write if file doesn't exist (never overwrite user commands)
+    _write_cmd() {
+        local file="$1"
+        if [ -f "$file" ]; then
+            return 0
+        fi
+        cat > "$file"
+    }
+
     # /test command
     if [ -n "$PROJ_TEST" ]; then
-        cat > "$cmd_dir/test.md" << EOF
+        _write_cmd "$cmd_dir/test.md" << EOF
 Run the project test suite and report results.
 
 \`\`\`bash
@@ -628,7 +637,7 @@ EOF
 
     # /build command
     if [ -n "$PROJ_BUILD" ]; then
-        cat > "$cmd_dir/build.md" << EOF
+        _write_cmd "$cmd_dir/build.md" << EOF
 Build the project and report any errors.
 
 \`\`\`bash
@@ -641,7 +650,7 @@ EOF
 
     # /lint command
     if [ -n "$PROJ_LINT" ]; then
-        cat > "$cmd_dir/lint.md" << EOF
+        _write_cmd "$cmd_dir/lint.md" << EOF
 Run the linter and fix all issues found.
 
 \`\`\`bash
@@ -653,7 +662,7 @@ EOF
     fi
 
     # /review command
-    cat > "$cmd_dir/review.md" << EOF
+    _write_cmd "$cmd_dir/review.md" << EOF
 Review the staged changes (or recent commits if nothing staged) for:
 
 1. Correctness — logic errors, edge cases, null safety
@@ -670,7 +679,7 @@ EOF
     [ -n "$PROJ_TYPECHECK" ] && check_steps="${check_steps} && echo '--- Type Check ---' && ${PROJ_TYPECHECK}"
     check_steps="${check_steps} && echo '--- Test ---' && ${PROJ_TEST}"
 
-    cat > "$cmd_dir/check.md" << EOF
+    _write_cmd "$cmd_dir/check.md" << EOF
 Run the full validation pipeline: build, lint, type check, and test.
 
 \`\`\`bash
@@ -1128,7 +1137,7 @@ generate_framework_commands() {
     # Spring Boot specific commands
     # shellcheck disable=SC2076
     if [[ " ${PROJ_TECH[*]} " =~ " Spring Boot " ]]; then
-        cat > "$cmd_dir/entity.md" << 'EOF'
+        _write_cmd "$cmd_dir/entity.md" << 'EOF'
 Create a new JPA entity class. Ask for:
 1. Entity name
 2. Table name
@@ -1142,7 +1151,7 @@ Follow the project's existing entity patterns:
 - Place in the correct package following project structure
 EOF
 
-        cat > "$cmd_dir/api.md" << 'EOF'
+        _write_cmd "$cmd_dir/api.md" << 'EOF'
 Create a new REST API endpoint. Ask for:
 1. Resource name
 2. HTTP method and path
@@ -1156,7 +1165,7 @@ Follow the project's existing patterns:
 - Follow the project's API versioning pattern
 EOF
 
-        cat > "$cmd_dir/migration.md" << 'EOF'
+        _write_cmd "$cmd_dir/migration.md" << 'EOF'
 Analyze the current JPA entities and generate a database migration.
 
 1. Compare entity definitions with the current schema
@@ -1169,7 +1178,7 @@ EOF
     # Next.js specific commands
     # shellcheck disable=SC2076
     if [[ " ${PROJ_TECH[*]} " =~ " Next.js " ]]; then
-        cat > "$cmd_dir/page.md" << 'EOF'
+        _write_cmd "$cmd_dir/page.md" << 'EOF'
 Create a new Next.js page/route. Ask for:
 1. Route path
 2. Whether it needs server-side data fetching
@@ -1182,7 +1191,7 @@ Follow the project's existing patterns for:
 - Styling approach
 EOF
 
-        cat > "$cmd_dir/component.md" << 'EOF'
+        _write_cmd "$cmd_dir/component.md" << 'EOF'
 Create a new React component. Ask for:
 1. Component name
 2. Props interface
@@ -1199,7 +1208,7 @@ EOF
     # Django specific commands
     # shellcheck disable=SC2076
     if [[ " ${PROJ_TECH[*]} " =~ " Django " ]]; then
-        cat > "$cmd_dir/model.md" << 'EOF'
+        _write_cmd "$cmd_dir/model.md" << 'EOF'
 Create a new Django model. Ask for:
 1. Model name
 2. Fields (name, type, constraints)
@@ -1216,7 +1225,7 @@ EOF
     # FastAPI specific commands
     # shellcheck disable=SC2076
     if [[ " ${PROJ_TECH[*]} " =~ " FastAPI " ]]; then
-        cat > "$cmd_dir/endpoint.md" << 'EOF'
+        _write_cmd "$cmd_dir/endpoint.md" << 'EOF'
 Create a new FastAPI endpoint. Ask for:
 1. Path and HTTP method
 2. Request/response schemas (Pydantic models)

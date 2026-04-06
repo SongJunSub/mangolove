@@ -636,16 +636,22 @@ Continue from where you left off. Summarize the previous session state and ask w
     fi
 
     # Auto-init or auto-sync CLAUDE.md
-    if [ ! -f "CLAUDE.md" ]; then
+    # ONLY touch files that MangoLove created (identified by marker comment)
+    if [ -f "CLAUDE.md" ]; then
+        if grep -q "mangolove:auto-start" "CLAUDE.md" 2>/dev/null; then
+            # MangoLove-managed CLAUDE.md — safe to sync
+            bash "$PROJECT_INIT" sync --quiet 2>/dev/null || true
+        fi
+        # else: user-created CLAUDE.md — do not touch
+    elif [ ! -d ".claude" ]; then
+        # No CLAUDE.md and no .claude/ — safe to init
         echo ""
         echo -e "\033[38;5;208m\033[1mMangoLove\033[0m — First run in this project. Initializing..."
         echo ""
         bash "$PROJECT_INIT" init --strict 2>/dev/null || true
         echo ""
-    else
-        # Silent sync — update CLAUDE.md if project changed
-        bash "$PROJECT_INIT" sync --quiet 2>/dev/null || true
     fi
+    # else: CLAUDE.md doesn't exist but .claude/ does — user has custom setup, skip
 
     # Run plugin on_session_start hooks
     bash "$PLUGIN_MANAGER" hook on_session_start 2>/dev/null || true

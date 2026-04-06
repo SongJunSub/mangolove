@@ -29,6 +29,7 @@ scan_project() {
     PROJ_PKG_MGR=""
     PROJ_DB=()
     PROJ_INFRA=()
+    PROJ_VERSIONS=()
 
     # --- Gradle (Java/Kotlin) ---
     if [ -f "$dir/build.gradle" ] || [ -f "$dir/build.gradle.kts" ]; then
@@ -79,6 +80,15 @@ scan_project() {
             PROJ_LINT="./gradlew spotlessCheck"
         fi
 
+        # Detect versions
+        local java_ver=""
+        java_ver=$(grep -h "sourceCompatibility\|JavaVersion\.\|jvmTarget" "$dir/build.gradle"* 2>/dev/null | grep -oE '[0-9]+' | head -1) || true
+        [ -n "$java_ver" ] && PROJ_VERSIONS+=("Java ${java_ver}")
+
+        local spring_ver=""
+        spring_ver=$(grep -h "springBootVersion\|org.springframework.boot.*version" "$dir/build.gradle"* 2>/dev/null | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" | head -1) || true
+        [ -n "$spring_ver" ] && PROJ_VERSIONS+=("Spring Boot ${spring_ver}")
+
         # Multi-module
         if [ -f "$dir/settings.gradle" ] || [ -f "$dir/settings.gradle.kts" ]; then
             local settings_file="$dir/settings.gradle"
@@ -113,6 +123,22 @@ scan_project() {
         grep -q '"vue"' "$dir/package.json" 2>/dev/null && { PROJ_TECH+=("Vue"); }
         grep -q '"express"' "$dir/package.json" 2>/dev/null && { PROJ_TECH+=("Express"); }
         grep -qE '"@nestjs"' "$dir/package.json" 2>/dev/null && { PROJ_TECH+=("NestJS"); }
+
+        # Detect versions from package.json
+        local react_ver="" next_ver="" ts_ver="" node_ver=""
+        react_ver=$(grep '"react"' "$dir/package.json" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1) || true
+        next_ver=$(grep '"next"' "$dir/package.json" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1) || true
+        ts_ver=$(grep '"typescript"' "$dir/package.json" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1) || true
+        [ -n "$react_ver" ] && PROJ_VERSIONS+=("React ${react_ver}")
+        [ -n "$next_ver" ] && PROJ_VERSIONS+=("Next.js ${next_ver}")
+        [ -n "$ts_ver" ] && PROJ_VERSIONS+=("TypeScript ${ts_ver}")
+        if [ -f "$dir/.node-version" ]; then
+            node_ver=$(cat "$dir/.node-version" 2>/dev/null | tr -d '[:space:]') || true
+            [ -n "$node_ver" ] && PROJ_VERSIONS+=("Node.js ${node_ver}")
+        elif [ -f "$dir/.nvmrc" ]; then
+            node_ver=$(cat "$dir/.nvmrc" 2>/dev/null | tr -d '[:space:]') || true
+            [ -n "$node_ver" ] && PROJ_VERSIONS+=("Node.js ${node_ver}")
+        fi
 
         # Package manager
         PROJ_PKG_MGR="npm"
@@ -274,6 +300,7 @@ analyze_node_project() {
     fi
 
     # Custom hooks
+    export PROJ_HOOKS
     PROJ_HOOKS=$(find "$dir" -not -path "*/node_modules/*" \
         \( -path "*/hooks/*" -o -name "use*.ts" -o -name "use*.tsx" \) \
         2>/dev/null | wc -l | tr -d ' ')
@@ -282,9 +309,9 @@ analyze_node_project() {
 analyze_python_project() {
     local dir="$1"
 
-    PROJ_PY_MODELS=0
-    PROJ_PY_VIEWS=0
-    PROJ_PY_ROUTES=0
+    export PROJ_PY_MODELS=0
+    export PROJ_PY_VIEWS=0
+    export PROJ_PY_ROUTES=0
 
     # Django models
     PROJ_PY_MODELS=$(find "$dir" -name "models.py" -not -path "*/venv/*" -not -path "*/.venv/*" 2>/dev/null | \
@@ -358,247 +385,187 @@ generate_claude_md() {
     local dir="$1"
     local strict="$2"
 
-    local tech_str db_str infra_str
+    local tech_str db_str infra_str ver_str
     tech_str=$(printf '%s, ' "${PROJ_TECH[@]}" | sed 's/, $//')
     db_str=$(printf '%s, ' "${PROJ_DB[@]}" | sed 's/, $//')
     infra_str=$(printf '%s, ' "${PROJ_INFRA[@]}" | sed 's/, $//')
+    ver_str=$(printf '%s, ' "${PROJ_VERSIONS[@]}" | sed 's/, $//')
 
     local content="# ${PROJ_NAME}
 
 <!-- mangolove:auto-start -->
-## Tech Stack
+## 기술 스택
 - ${tech_str}
-$([ ${#PROJ_DB[@]} -gt 0 ] && echo "- Database: ${db_str}")
-$([ ${#PROJ_INFRA[@]} -gt 0 ] && echo "- Infrastructure: ${infra_str}")
+$([ ${#PROJ_DB[@]} -gt 0 ] && echo "- 데이터베이스: ${db_str}")
+$([ ${#PROJ_INFRA[@]} -gt 0 ] && echo "- 인프라: ${infra_str}")
+$([ -n "$ver_str" ] && echo "- 버전: ${ver_str}")
 
-## Commands
-- Build: \`${PROJ_BUILD}\`
-- Test: \`${PROJ_TEST}\`"
+## 명령어
+- 빌드: \`${PROJ_BUILD}\`
+- 테스트: \`${PROJ_TEST}\`"
 
     [ -n "$PROJ_LINT" ] && content="${content}
-- Lint: \`${PROJ_LINT}\`"
+- 린트: \`${PROJ_LINT}\`"
 
     [ -n "$PROJ_TYPECHECK" ] && content="${content}
-- Type Check: \`${PROJ_TYPECHECK}\`"
+- 타입 체크: \`${PROJ_TYPECHECK}\`"
 
     [ -n "$PROJ_MODULES" ] && content="${content}
 
-## Modules
+## 모듈
 $(echo "$PROJ_MODULES" | tr ',' '\n' | sed 's/^ */- /')"
-
-    # Detect and list key directories
-    local dirs
-    dirs=$(detect_directories "$dir")
-    if [ -n "$dirs" ]; then
-        content="${content}
-
-## Project Structure
-\`\`\`
-$(echo "$dirs" | head -20)
-\`\`\`"
-    fi
-
-    # Add deep analysis results for Spring Boot
-    if [ "${PROJ_CONTROLLERS:-0}" -gt 0 ] 2>/dev/null; then
-        content="${content}
-
-## Architecture Overview
-- Base package: \`${PROJ_BASE_PACKAGE}\`
-- Controllers: ${PROJ_CONTROLLERS}
-- Services: ${PROJ_SERVICES}
-- Repositories: ${PROJ_REPOSITORIES}
-- Entities: ${PROJ_ENTITIES}
-- Endpoints: ${PROJ_ENDPOINTS}"
-
-        if [ -n "$PROJ_API_PATHS" ]; then
-            content="${content}
-
-## API Endpoints
-\`\`\`
-$(echo "$PROJ_API_PATHS")
-\`\`\`"
-        fi
-    fi
-
-    # Add deep analysis results for Node.js
-    if [ "${PROJ_COMPONENTS:-0}" -gt 0 ] || [ "${PROJ_PAGES:-0}" -gt 0 ] 2>/dev/null; then
-        content="${content}
-
-## Architecture Overview"
-        [ "${PROJ_COMPONENTS:-0}" -gt 0 ] && content="${content}
-- Components: ${PROJ_COMPONENTS}"
-        [ "${PROJ_PAGES:-0}" -gt 0 ] && content="${content}
-- Pages/Routes: ${PROJ_PAGES}"
-        [ "${PROJ_API_ROUTES:-0}" -gt 0 ] && content="${content}
-- API Routes: ${PROJ_API_ROUTES}"
-        [ "${PROJ_HOOKS:-0}" -gt 0 ] && content="${content}
-- Custom Hooks: ${PROJ_HOOKS}"
-    fi
-
-    # Add deep analysis results for Python
-    if [ "${PROJ_PY_MODELS:-0}" -gt 0 ] || [ "${PROJ_PY_ROUTES:-0}" -gt 0 ] 2>/dev/null; then
-        content="${content}
-
-## Architecture Overview"
-        [ "${PROJ_PY_MODELS:-0}" -gt 0 ] && content="${content}
-- Models: ${PROJ_PY_MODELS}"
-        [ "${PROJ_PY_VIEWS:-0}" -gt 0 ] && content="${content}
-- Views: ${PROJ_PY_VIEWS}"
-        [ "${PROJ_PY_ROUTES:-0}" -gt 0 ] && content="${content}
-- API Routes: ${PROJ_PY_ROUTES}"
-    fi
 
     content="${content}
 <!-- mangolove:auto-end -->
 
-## Conventions"
+## 코드 컨벤션"
 
     # shellcheck disable=SC2076
     if [[ " ${PROJ_TECH[*]} " =~ " Java " ]] || [[ " ${PROJ_TECH[*]} " =~ " Kotlin " ]]; then
         content="${content}
-- Follow Google Java Style Guide (4-space indent, 100-char line limit)
-- Use Conventional Commits for commit messages
-- All public APIs must have Javadoc/KDoc"
+- Google Java Style Guide 준수 (들여쓰기 4칸, 줄 길이 최대 100자)
+- Conventional Commits 형식으로 커밋 메시지 작성
+- 모든 public API에 Javadoc/KDoc 작성"
     fi
 
     # shellcheck disable=SC2076
     if [[ " ${PROJ_TECH[*]} " =~ " TypeScript " ]] || [[ " ${PROJ_TECH[*]} " =~ " Node.js " ]]; then
-        local ts_style="2-space indent"
-        [ -n "${PROJ_INDENT:-}" ] && ts_style="${PROJ_INDENT} indent"
+        local ts_style="들여쓰기 2칸"
+        [ -n "${PROJ_INDENT:-}" ] && ts_style="들여쓰기 ${PROJ_INDENT}칸"
         [ -n "${PROJ_QUOTE_STYLE:-}" ] && ts_style="${ts_style}, ${PROJ_QUOTE_STYLE}"
         [ -n "${PROJ_SEMICOLONS:-}" ] && ts_style="${ts_style}, ${PROJ_SEMICOLONS}"
         content="${content}
-- Code style: ${ts_style}
-- Use Conventional Commits for commit messages
-- No \`any\` type — use \`unknown\` or specific types"
+- 코드 스타일: ${ts_style}
+- Conventional Commits 형식으로 커밋 메시지 작성
+- \`any\` 타입 사용 금지 — \`unknown\` 또는 구체적 타입 사용"
     fi
 
     # shellcheck disable=SC2076
     if [[ " ${PROJ_TECH[*]} " =~ " Python " ]]; then
         content="${content}
-- Follow PEP 8 style guide
-- Use type hints for all function signatures
-- Use Conventional Commits for commit messages"
+- PEP 8 스타일 가이드 준수
+- 모든 함수에 타입 힌트 명시
+- Conventional Commits 형식으로 커밋 메시지 작성"
     fi
 
     # shellcheck disable=SC2076
     if [[ " ${PROJ_TECH[*]} " =~ " Go " ]]; then
         content="${content}
-- Follow Effective Go conventions
-- Run \`gofmt\` before committing
-- Use Conventional Commits for commit messages"
+- Effective Go 컨벤션 준수
+- 커밋 전 \`gofmt\` 실행
+- Conventional Commits 형식으로 커밋 메시지 작성"
     fi
 
     # shellcheck disable=SC2076
     if [[ " ${PROJ_TECH[*]} " =~ " Rust " ]]; then
         content="${content}
-- Follow Rust API guidelines
-- Run \`cargo fmt\` before committing
-- Use Conventional Commits for commit messages"
+- Rust API 가이드라인 준수
+- 커밋 전 \`cargo fmt\` 실행
+- Conventional Commits 형식으로 커밋 메시지 작성"
     fi
 
     if [ "$strict" = "true" ]; then
         content="${content}
 
-## Mandatory Workflow (Strict Mode)
+## 필수 워크플로우 (Strict Mode)
 
-You MUST follow this workflow for EVERY task. No exceptions.
+모든 작업에서 반드시 이 워크플로우를 따를 것. 예외 없음.
 
-### Phase 1: Analysis (ALWAYS FIRST)
-When the user describes a problem or feature:
-1. Read ALL related files before responding
-2. Trace the full call chain (Controller -> Service -> Repository -> Entity -> DTO)
-3. Identify every file that will be affected
-4. Present a plan with:
-   - Root cause / requirements analysis
-   - List of files to modify with specific changes
-   - Potential risks and edge cases
-   - Estimated impact on existing tests
-5. WAIT for user approval before writing any code
+### 1단계: 분석 (항상 먼저)
+사용자가 문제나 기능을 설명하면:
+1. 응답 전에 관련 파일을 모두 읽을 것
+2. 전체 호출 체인을 추적 (Controller -> Service -> Repository -> Entity -> DTO)
+3. 영향 받는 모든 파일을 식별
+4. 계획을 제시:
+   - 근본 원인 / 요구사항 분석
+   - 수정할 파일 목록과 구체적 변경 내용
+   - 잠재적 위험과 엣지 케이스
+   - 기존 테스트에 미치는 영향
+5. 코드 작성 전 사용자 승인을 기다릴 것
 
-### Phase 2: Implementation
-After the user approves the plan:
-1. Implement changes following the plan exactly
-2. For EVERY piece of code you write, verify these BEFORE moving to the next file:
+### 2단계: 구현
+사용자가 계획을 승인한 후:
+1. 계획대로 정확히 구현
+2. 코드를 작성할 때마다 다음을 검증:
 
-**Security**
-- No SQL injection (use parameterized queries, never string concatenation)
-- No XSS (escape all user input in responses)
-- No hardcoded secrets, credentials, or API keys
-- Proper authentication/authorization checks on every endpoint
-- Input validation on all public API parameters
-- No sensitive data in logs or error messages
+**보안**
+- SQL Injection 금지 (파라미터 바인딩 사용, 문자열 결합 금지)
+- XSS 금지 (모든 사용자 입력을 이스케이프)
+- 시크릿, 인증 정보, API 키 하드코딩 금지
+- 모든 엔드포인트에 인증/인가 확인
+- 모든 public API 파라미터에 입력 검증
+- 로그나 에러 메시지에 민감한 데이터 포함 금지
 
-**Style & Conventions**$([ -n "$PROJ_LINT" ] && echo "
-- Run \`${PROJ_LINT}\` and fix ALL warnings")
-- Follow the project's existing naming patterns exactly
-- Match the indentation and formatting of surrounding code
-- No unused imports, variables, or dead code
-- No commented-out code blocks
-- Method length: prefer under 30 lines
-- Class length: prefer under 300 lines
+**스타일 및 컨벤션**$([ -n "$PROJ_LINT" ] && echo "
+- \`${PROJ_LINT}\` 실행 후 모든 경고 수정")
+- 프로젝트의 기존 네이밍 패턴을 정확히 따를 것
+- 주변 코드의 들여쓰기와 포맷을 맞출 것
+- 사용하지 않는 import, 변수, 데드 코드 금지
+- 주석 처리된 코드 블록 금지
+- 메서드 길이: 30줄 이하 권장
+- 클래스 길이: 300줄 이하 권장
 
-**Performance**
-- No N+1 query patterns (use JOIN or batch fetch)
-- No unnecessary object creation in loops
-- No blocking calls in async/reactive code
-- Use pagination for list endpoints
-- Consider index usage for new queries
+**성능**
+- N+1 쿼리 패턴 금지 (JOIN 또는 배치 조회 사용)
+- 루프 내 불필요한 객체 생성 금지
+- 비동기/리액티브 코드에서 블로킹 호출 금지
+- 목록 조회 엔드포인트에 페이지네이션 적용
+- 새로운 쿼리에 인덱스 활용 검토
 
-**Maintainability & Readability**
-- Single Responsibility: each method does one thing
-- Clear, descriptive naming (no abbreviations like \`tmp\`, \`val\`, \`x\`)
-- Extract complex conditions into named boolean methods
-- No magic numbers or strings — use constants
-- Error messages should be actionable and specific
+**유지보수성 및 가독성**
+- 단일 책임 원칙: 각 메서드는 하나의 일만 수행
+- 명확하고 서술적인 네이밍 (\`tmp\`, \`val\`, \`x\` 같은 약어 금지)
+- 복잡한 조건문은 이름 있는 boolean 메서드로 추출
+- 매직 넘버나 매직 스트링 금지 — 상수 사용
+- 에러 메시지는 구체적이고 조치 가능하게 작성
 
-**Null Safety & Error Handling**
-- Handle all nullable values explicitly
-- Never return null from public methods — use Optional or empty collections
-- Catch specific exceptions, not generic Exception
-- Include context in error messages (what failed, what was the input)
+**Null Safety 및 에러 처리**
+- 모든 nullable 값을 명시적으로 처리
+- public 메서드에서 null 반환 금지 — Optional 또는 빈 컬렉션 사용
+- 구체적 예외를 catch (Exception 같은 범용 예외 금지)
+- 에러 메시지에 컨텍스트 포함 (무엇이 실패했고, 입력값은 무엇이었는지)
 
-3. After ALL changes are complete, run:
+3. 모든 변경 완료 후 실행:
    \`\`\`
    ${PROJ_BUILD}$([ -n "$PROJ_LINT" ] && echo " && ${PROJ_LINT}")$([ -n "$PROJ_TYPECHECK" ] && echo " && ${PROJ_TYPECHECK}") && ${PROJ_TEST}
    \`\`\`
-   Fix any failures before proceeding.
+   실패 시 수정 후 재실행.
 
-### Phase 3: Self-Review (MANDATORY)
-After implementation is complete and all checks pass, perform a critical self-review:
+### 3단계: 셀프 리뷰 (필수)
+구현 완료 및 모든 체크 통과 후, 비판적 셀프 리뷰 수행:
 
-1. Re-read every changed file as if you are a hostile code reviewer
-2. Check against this list — if ANY item fails, fix it immediately:
-   - [ ] No security vulnerabilities (OWASP Top 10)
-   - [ ] No performance anti-patterns (N+1, unnecessary allocation)
-   - [ ] All public methods have clear names and documentation
-   - [ ] Error handling is complete (no swallowed exceptions)
-   - [ ] No code duplication introduced
-   - [ ] Consistent with existing codebase patterns
-   - [ ] All new code paths have test coverage
-   - [ ] No hardcoded values that should be configurable
-   - [ ] Thread safety considered for shared state
-   - [ ] API responses follow existing format conventions
-3. If you find ANY issue during self-review, fix it and re-run checks
-4. Report the self-review result to the user
+1. 변경된 모든 파일을 적대적 코드 리뷰어 관점에서 다시 읽을 것
+2. 아래 항목을 점검 — 하나라도 실패하면 즉시 수정:
+   - [ ] 보안 취약점 없음 (OWASP Top 10)
+   - [ ] 성능 안티패턴 없음 (N+1, 불필요한 객체 할당)
+   - [ ] 모든 public 메서드에 명확한 이름과 문서화
+   - [ ] 에러 처리 완전 (삼켜진 예외 없음)
+   - [ ] 코드 중복 없음
+   - [ ] 기존 코드베이스 패턴과 일관성 유지
+   - [ ] 새로운 코드 경로에 테스트 커버리지 확보
+   - [ ] 설정 가능해야 할 값의 하드코딩 없음
+   - [ ] 공유 상태에 대한 스레드 안전성 검토
+   - [ ] API 응답이 기존 형식과 일관성 유지
+3. 셀프 리뷰에서 문제 발견 시 수정 후 체크 재실행
+4. 셀프 리뷰 결과를 사용자에게 보고
 
-### Phase 4: Completion Report
-After passing self-review, report:
+### 4단계: 완료 보고
+셀프 리뷰 통과 후 보고:
 \`\`\`
-Changes:
-  - [list of files modified with what changed]
+변경 사항:
+  - [수정된 파일 목록과 변경 내용]
 
-Verification:
-  - Build: PASS
-  - Lint: PASS$([ -n "$PROJ_TYPECHECK" ] && echo "
-  - Type Check: PASS")
-  - Tests: PASS (N passed, N new)
+검증 결과:
+  - 빌드: PASS
+  - 린트: PASS$([ -n "$PROJ_TYPECHECK" ] && echo "
+  - 타입 체크: PASS")
+  - 테스트: PASS (N개 통과, N개 신규)
 
-Self-Review:
-  - Security: PASS
-  - Performance: PASS
-  - Style: PASS
-  - Maintainability: PASS
+셀프 리뷰:
+  - 보안: PASS
+  - 성능: PASS
+  - 스타일: PASS
+  - 유지보수성: PASS
 \`\`\`"
     fi
 
@@ -622,71 +589,71 @@ generate_commands() {
         cat > "$file"
     }
 
-    # /test command
+    # /test
     if [ -n "$PROJ_TEST" ]; then
         _write_cmd "$cmd_dir/test.md" << EOF
-Run the project test suite and report results.
+프로젝트 테스트를 실행하고 결과를 보고한다.
 
 \`\`\`bash
 ${PROJ_TEST}
 \`\`\`
 
-If tests fail, analyze the failures and suggest fixes.
+테스트 실패 시 원인을 분석하고 수정을 제안한다.
 EOF
     fi
 
-    # /build command
+    # /build
     if [ -n "$PROJ_BUILD" ]; then
         _write_cmd "$cmd_dir/build.md" << EOF
-Build the project and report any errors.
+프로젝트를 빌드하고 에러가 있으면 보고한다.
 
 \`\`\`bash
 ${PROJ_BUILD}
 \`\`\`
 
-If the build fails, analyze the error and fix it.
+빌드 실패 시 에러를 분석하고 수정한다.
 EOF
     fi
 
-    # /lint command
+    # /lint
     if [ -n "$PROJ_LINT" ]; then
         _write_cmd "$cmd_dir/lint.md" << EOF
-Run the linter and fix all issues found.
+린터를 실행하고 발견된 모든 문제를 수정한다.
 
 \`\`\`bash
 ${PROJ_LINT}
 \`\`\`
 
-Fix all warnings and errors. Do not suppress warnings without justification.
+모든 경고와 에러를 수정한다. 정당한 사유 없이 경고를 무시하지 않는다.
 EOF
     fi
 
-    # /review command
+    # /review
     _write_cmd "$cmd_dir/review.md" << EOF
-Review the staged changes (or recent commits if nothing staged) for:
+스테이징된 변경 사항 (없으면 최근 커밋)을 다음 관점에서 리뷰한다:
 
-1. Correctness — logic errors, edge cases, null safety
-2. Security — injection, auth gaps, data exposure
-3. Performance — N+1 queries, unnecessary allocations
-4. Style — naming, readability, consistency with codebase
+1. 정확성 — 로직 에러, 엣지 케이스, null safety
+2. 보안 — 인젝션, 인증 누락, 데이터 노출
+3. 성능 — N+1 쿼리, 불필요한 메모리 할당
+4. 스타일 — 네이밍, 가독성, 코드베이스와의 일관성
 
-Report each issue with file path, line number, severity, and suggested fix.
+각 이슈를 파일 경로, 줄 번호, 심각도, 수정 제안과 함께 보고한다.
 EOF
 
-    # /check command — run full validation pipeline
-    local check_steps="echo '--- Build ---' && ${PROJ_BUILD}"
-    [ -n "$PROJ_LINT" ] && check_steps="${check_steps} && echo '--- Lint ---' && ${PROJ_LINT}"
-    [ -n "$PROJ_TYPECHECK" ] && check_steps="${check_steps} && echo '--- Type Check ---' && ${PROJ_TYPECHECK}"
-    check_steps="${check_steps} && echo '--- Test ---' && ${PROJ_TEST}"
+    # /check — 전체 검증 파이프라인
+    local check_steps="echo '--- 빌드 ---' && ${PROJ_BUILD}"
+    [ -n "$PROJ_LINT" ] && check_steps="${check_steps} && echo '--- 린트 ---' && ${PROJ_LINT}"
+    [ -n "$PROJ_TYPECHECK" ] && check_steps="${check_steps} && echo '--- 타입 체크 ---' && ${PROJ_TYPECHECK}"
+    check_steps="${check_steps} && echo '--- 테스트 ---' && ${PROJ_TEST}"
 
     _write_cmd "$cmd_dir/check.md" << EOF
-Run the full validation pipeline: build, lint, type check, and test.
+전체 검증 파이프라인을 실행한다: 빌드, 린트, 타입 체크, 테스트.
 
 \`\`\`bash
 ${check_steps}
 \`\`\`
 
-Report the result of each step. If any step fails, fix the issue before proceeding.
+각 단계의 결과를 보고한다. 실패 시 다음 단계로 넘어가지 않고 문제를 수정한다.
 EOF
 }
 
@@ -1138,104 +1105,104 @@ generate_framework_commands() {
     # shellcheck disable=SC2076
     if [[ " ${PROJ_TECH[*]} " =~ " Spring Boot " ]]; then
         _write_cmd "$cmd_dir/entity.md" << 'EOF'
-Create a new JPA entity class. Ask for:
-1. Entity name
-2. Table name
-3. Fields (name, type, constraints)
+새로운 JPA 엔티티 클래스를 생성한다. 다음을 확인:
+1. 엔티티 이름
+2. 테이블 이름
+3. 필드 (이름, 타입, 제약 조건)
 
-Follow the project's existing entity patterns:
-- Extend base entity class if one exists
-- Add proper JPA annotations (@Entity, @Table, @Column)
-- Add audit fields if the project uses auditing
-- Create the corresponding Repository interface
-- Place in the correct package following project structure
+프로젝트의 기존 엔티티 패턴을 따를 것:
+- 베이스 엔티티 클래스가 있으면 상속
+- JPA 어노테이션 (@Entity, @Table, @Column) 올바르게 적용
+- 프로젝트가 Auditing을 사용하면 감사 필드 추가
+- 대응하는 Repository 인터페이스 생성
+- 프로젝트 패키지 구조에 맞는 위치에 배치
 EOF
 
         _write_cmd "$cmd_dir/api.md" << 'EOF'
-Create a new REST API endpoint. Ask for:
-1. Resource name
-2. HTTP method and path
-3. Request/response DTOs
+새로운 REST API 엔드포인트를 생성한다. 다음을 확인:
+1. 리소스 이름
+2. HTTP 메서드 및 경로
+3. 요청/응답 DTO
 
-Follow the project's existing patterns:
-- Controller -> Service -> Repository layering
-- Consistent naming: {Resource}Controller, {Resource}Service
-- Use existing DTO conventions (RequestDto, ResponseDto)
-- Add proper validation annotations
-- Follow the project's API versioning pattern
+프로젝트의 기존 패턴을 따를 것:
+- Controller -> Service -> Repository 레이어링
+- 일관된 네이밍: {Resource}Controller, {Resource}Service
+- 기존 DTO 컨벤션 사용 (RequestDto, ResponseDto)
+- 적절한 validation 어노테이션 추가
+- 프로젝트의 API 버전 관리 패턴 준수
 EOF
 
         _write_cmd "$cmd_dir/migration.md" << 'EOF'
-Analyze the current JPA entities and generate a database migration.
+현재 JPA 엔티티를 분석하고 데이터베이스 마이그레이션을 생성한다.
 
-1. Compare entity definitions with the current schema
-2. Generate the appropriate migration script (SQL or Flyway/Liquibase)
-3. Include both UP and DOWN migrations
-4. Flag any destructive changes (column drops, type changes)
+1. 엔티티 정의와 현재 스키마를 비교
+2. 적절한 마이그레이션 스크립트 생성 (SQL 또는 Flyway/Liquibase)
+3. UP과 DOWN 마이그레이션을 모두 포함
+4. 파괴적 변경 사항 (컬럼 삭제, 타입 변경) 플래그 표시
 EOF
     fi
 
-    # Next.js specific commands
+    # Next.js 전용 커맨드
     # shellcheck disable=SC2076
     if [[ " ${PROJ_TECH[*]} " =~ " Next.js " ]]; then
         _write_cmd "$cmd_dir/page.md" << 'EOF'
-Create a new Next.js page/route. Ask for:
-1. Route path
-2. Whether it needs server-side data fetching
-3. Whether it needs client-side interactivity
+새로운 Next.js 페이지/라우트를 생성한다. 다음을 확인:
+1. 라우트 경로
+2. 서버 사이드 데이터 페칭 필요 여부
+3. 클라이언트 사이드 인터랙티비티 필요 여부
 
-Follow the project's existing patterns for:
-- File-based routing structure (app/ or pages/)
-- Layout usage
-- Data fetching patterns (Server Components vs Client)
-- Styling approach
+프로젝트의 기존 패턴을 따를 것:
+- 파일 기반 라우팅 구조 (app/ 또는 pages/)
+- 레이아웃 사용 방식
+- 데이터 페칭 패턴 (Server Components vs Client)
+- 스타일링 접근 방식
 EOF
 
         _write_cmd "$cmd_dir/component.md" << 'EOF'
-Create a new React component. Ask for:
-1. Component name
-2. Props interface
-3. Whether it's a server or client component
+새로운 React 컴포넌트를 생성한다. 다음을 확인:
+1. 컴포넌트 이름
+2. Props 인터페이스
+3. 서버 컴포넌트인지 클라이언트 컴포넌트인지
 
-Follow the project's existing patterns for:
-- Component file structure
-- Props typing
-- Styling approach (CSS modules, Tailwind, styled-components)
-- Test file co-location
+프로젝트의 기존 패턴을 따를 것:
+- 컴포넌트 파일 구조
+- Props 타이핑 방식
+- 스타일링 접근 방식 (CSS modules, Tailwind, styled-components)
+- 테스트 파일 공동 배치
 EOF
     fi
 
-    # Django specific commands
+    # Django 전용 커맨드
     # shellcheck disable=SC2076
     if [[ " ${PROJ_TECH[*]} " =~ " Django " ]]; then
         _write_cmd "$cmd_dir/model.md" << 'EOF'
-Create a new Django model. Ask for:
-1. Model name
-2. Fields (name, type, constraints)
-3. Which app it belongs to
+새로운 Django 모델을 생성한다. 다음을 확인:
+1. 모델 이름
+2. 필드 (이름, 타입, 제약 조건)
+3. 소속 앱
 
-Follow the project's existing patterns:
-- Model naming and field conventions
-- Meta class configuration
-- Generate and apply migration
-- Register in admin if admin is used
+프로젝트의 기존 패턴을 따를 것:
+- 모델 네이밍 및 필드 컨벤션
+- Meta 클래스 설정
+- 마이그레이션 생성 및 적용
+- admin을 사용하는 경우 admin에 등록
 EOF
     fi
 
-    # FastAPI specific commands
+    # FastAPI 전용 커맨드
     # shellcheck disable=SC2076
     if [[ " ${PROJ_TECH[*]} " =~ " FastAPI " ]]; then
         _write_cmd "$cmd_dir/endpoint.md" << 'EOF'
-Create a new FastAPI endpoint. Ask for:
-1. Path and HTTP method
-2. Request/response schemas (Pydantic models)
-3. Dependencies
+새로운 FastAPI 엔드포인트를 생성한다. 다음을 확인:
+1. 경로 및 HTTP 메서드
+2. 요청/응답 스키마 (Pydantic 모델)
+3. 의존성
 
-Follow the project's existing patterns:
-- Router organization
-- Pydantic model conventions
-- Dependency injection patterns
-- Error handling approach
+프로젝트의 기존 패턴을 따를 것:
+- 라우터 구성 방식
+- Pydantic 모델 컨벤션
+- 의존성 주입 패턴
+- 에러 처리 방식
 EOF
     fi
 }
@@ -1340,55 +1307,25 @@ api_routes=${PROJ_API_ROUTES:-0}"
     # Read existing CLAUDE.md and update specific sections
 
     # Generate fresh auto-content
+    local ver_str
+    ver_str=$(printf '%s, ' "${PROJ_VERSIONS[@]}" | sed 's/, $//')
+
     local auto_content=""
     auto_content="<!-- mangolove:auto-start -->
-## Tech Stack
+## 기술 스택
 - $(printf '%s, ' "${PROJ_TECH[@]}" | sed 's/, $//')
-$([ ${#PROJ_DB[@]} -gt 0 ] && echo "- Database: $(printf '%s, ' "${PROJ_DB[@]}" | sed 's/, $//')")
-$([ ${#PROJ_INFRA[@]} -gt 0 ] && echo "- Infrastructure: $(printf '%s, ' "${PROJ_INFRA[@]}" | sed 's/, $//')")
+$([ ${#PROJ_DB[@]} -gt 0 ] && echo "- 데이터베이스: $(printf '%s, ' "${PROJ_DB[@]}" | sed 's/, $//')")
+$([ ${#PROJ_INFRA[@]} -gt 0 ] && echo "- 인프라: $(printf '%s, ' "${PROJ_INFRA[@]}" | sed 's/, $//')")
+$([ -n "$ver_str" ] && echo "- 버전: ${ver_str}")
 
-## Commands
-- Build: \`${PROJ_BUILD}\`
-- Test: \`${PROJ_TEST}\`$([ -n "$PROJ_LINT" ] && echo "
-- Lint: \`${PROJ_LINT}\`")$([ -n "$PROJ_TYPECHECK" ] && echo "
-- Type Check: \`${PROJ_TYPECHECK}\`")$([ -n "$PROJ_MODULES" ] && echo "
+## 명령어
+- 빌드: \`${PROJ_BUILD}\`
+- 테스트: \`${PROJ_TEST}\`$([ -n "$PROJ_LINT" ] && echo "
+- 린트: \`${PROJ_LINT}\`")$([ -n "$PROJ_TYPECHECK" ] && echo "
+- 타입 체크: \`${PROJ_TYPECHECK}\`")$([ -n "$PROJ_MODULES" ] && echo "
 
-## Modules
+## 모듈
 $(echo "$PROJ_MODULES" | tr ',' '\n' | sed 's/^ */- /')")"
-
-    # Add architecture overview
-    if [ "${PROJ_CONTROLLERS:-0}" -gt 0 ] 2>/dev/null; then
-        auto_content="${auto_content}
-
-## Architecture Overview
-- Base package: \`${PROJ_BASE_PACKAGE}\`
-- Controllers: ${PROJ_CONTROLLERS}
-- Services: ${PROJ_SERVICES}
-- Repositories: ${PROJ_REPOSITORIES}
-- Entities: ${PROJ_ENTITIES}
-- Endpoints: ${PROJ_ENDPOINTS}"
-
-        if [ -n "$PROJ_API_PATHS" ]; then
-            auto_content="${auto_content}
-
-## API Endpoints
-\`\`\`
-$(echo "$PROJ_API_PATHS")
-\`\`\`"
-        fi
-    fi
-
-    if [ "${PROJ_COMPONENTS:-0}" -gt 0 ] || [ "${PROJ_PAGES:-0}" -gt 0 ] 2>/dev/null; then
-        auto_content="${auto_content}
-
-## Architecture Overview"
-        [ "${PROJ_COMPONENTS:-0}" -gt 0 ] && auto_content="${auto_content}
-- Components: ${PROJ_COMPONENTS}"
-        [ "${PROJ_PAGES:-0}" -gt 0 ] && auto_content="${auto_content}
-- Pages/Routes: ${PROJ_PAGES}"
-        [ "${PROJ_API_ROUTES:-0}" -gt 0 ] && auto_content="${auto_content}
-- API Routes: ${PROJ_API_ROUTES}"
-    fi
 
     auto_content="${auto_content}
 <!-- mangolove:auto-end -->"

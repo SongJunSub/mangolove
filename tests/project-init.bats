@@ -172,10 +172,10 @@ EOF
     cd "$proj"
     run bash "$MANGOLOVE_DIR/lib/project-init.sh" init --strict
     [ "$status" -eq 0 ]
-    grep -q "Mandatory Workflow" "$proj/CLAUDE.md"
-    grep -q "Phase 1: Analysis" "$proj/CLAUDE.md"
-    grep -q "Phase 3: Self-Review" "$proj/CLAUDE.md"
-    grep -q "Security" "$proj/CLAUDE.md"
+    grep -q "필수 워크플로우" "$proj/CLAUDE.md"
+    grep -q "1단계: 분석" "$proj/CLAUDE.md"
+    grep -q "3단계: 셀프 리뷰" "$proj/CLAUDE.md"
+    grep -q "보안" "$proj/CLAUDE.md"
 }
 
 # ─────────────────────────────────────────────
@@ -201,7 +201,7 @@ EOF
 
     cd "$proj"
     bash "$MANGOLOVE_DIR/lib/project-init.sh" init
-    grep -q "Code style:" "$proj/CLAUDE.md"
+    grep -q "코드 스타일:" "$proj/CLAUDE.md"
     grep -q "any" "$proj/CLAUDE.md"
 }
 
@@ -242,29 +242,21 @@ EOF
     [ "$count" -eq 1 ]
 }
 
-@test "init: detects Spring Boot controllers and endpoints" {
-    local proj=$(create_fake_project "spring-deep")
+@test "init: detects Spring Boot version" {
+    local proj=$(create_fake_project "spring-ver")
     cat > "$proj/build.gradle" << 'EOF'
 plugins { id 'org.springframework.boot' version '3.2.0' }
+ext { set('springBootVersion', '3.2.0') }
+sourceCompatibility = JavaVersion.VERSION_21
 EOF
-    mkdir -p "$proj/src/main/java/com/example/controller"
-    cat > "$proj/src/main/java/com/example/controller/UserController.java" << 'JAVA'
-@RestController
-@RequestMapping("/v1/users")
-public class UserController {
-    @GetMapping
-    public List<User> list() {}
-    @PostMapping
-    public User create() {}
-}
-JAVA
+    mkdir -p "$proj/src/main/java"
+    touch "$proj/src/main/java/App.java"
     touch "$proj/gradlew"
 
     cd "$proj"
     bash "$MANGOLOVE_DIR/lib/project-init.sh" init
-    grep -q "Controllers: 1" "$proj/CLAUDE.md"
-    grep -q "/v1/users" "$proj/CLAUDE.md"
-    grep -q "GET:1" "$proj/CLAUDE.md"
+    grep -q "Java 21" "$proj/CLAUDE.md"
+    grep -q "Spring Boot 3.2.0" "$proj/CLAUDE.md"
 }
 
 @test "init: detects eslint config" {
@@ -274,6 +266,6 @@ JAVA
 
     cd "$proj"
     bash "$MANGOLOVE_DIR/lib/project-init.sh" init
-    grep -q "Lint" "$proj/CLAUDE.md"
+    grep -q "린트" "$proj/CLAUDE.md"
     [ -f "$proj/.claude/commands/lint.md" ]
 }

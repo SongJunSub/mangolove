@@ -199,7 +199,70 @@ EOF
 
     cd "$proj"
     bash "$MANGOLOVE_DIR/lib/project-init.sh" init
-    grep -q "Google TypeScript Style Guide" "$proj/CLAUDE.md"
+    grep -q "Code style:" "$proj/CLAUDE.md"
+    grep -q "any" "$proj/CLAUDE.md"
+}
+
+@test "init: generates framework-specific commands for Spring Boot" {
+    local proj=$(create_fake_project "spring-cmd")
+    cat > "$proj/build.gradle" << 'EOF'
+plugins { id 'org.springframework.boot' version '3.2.0' }
+EOF
+    mkdir -p "$proj/src/main/java"
+    touch "$proj/src/main/java/App.java"
+    touch "$proj/gradlew"
+
+    cd "$proj"
+    bash "$MANGOLOVE_DIR/lib/project-init.sh" init
+    [ -f "$proj/.claude/commands/entity.md" ]
+    [ -f "$proj/.claude/commands/api.md" ]
+    [ -f "$proj/.claude/commands/migration.md" ]
+}
+
+@test "init: updates .gitignore with .claude/" {
+    local proj=$(create_fake_project "gitignore-test")
+    echo '{"name":"app"}' > "$proj/package.json"
+    echo "node_modules/" > "$proj/.gitignore"
+
+    cd "$proj"
+    bash "$MANGOLOVE_DIR/lib/project-init.sh" init
+    grep -q ".claude/" "$proj/.gitignore"
+}
+
+@test "init: skips .gitignore if .claude/ already present" {
+    local proj=$(create_fake_project "gitignore-skip")
+    echo '{"name":"app"}' > "$proj/package.json"
+    printf "node_modules/\n.claude/\n" > "$proj/.gitignore"
+
+    cd "$proj"
+    bash "$MANGOLOVE_DIR/lib/project-init.sh" init
+    local count=$(grep -c ".claude/" "$proj/.gitignore")
+    [ "$count" -eq 1 ]
+}
+
+@test "init: detects Spring Boot controllers and endpoints" {
+    local proj=$(create_fake_project "spring-deep")
+    cat > "$proj/build.gradle" << 'EOF'
+plugins { id 'org.springframework.boot' version '3.2.0' }
+EOF
+    mkdir -p "$proj/src/main/java/com/example/controller"
+    cat > "$proj/src/main/java/com/example/controller/UserController.java" << 'JAVA'
+@RestController
+@RequestMapping("/v1/users")
+public class UserController {
+    @GetMapping
+    public List<User> list() {}
+    @PostMapping
+    public User create() {}
+}
+JAVA
+    touch "$proj/gradlew"
+
+    cd "$proj"
+    bash "$MANGOLOVE_DIR/lib/project-init.sh" init
+    grep -q "Controllers: 1" "$proj/CLAUDE.md"
+    grep -q "/v1/users" "$proj/CLAUDE.md"
+    grep -q "GET:1" "$proj/CLAUDE.md"
 }
 
 @test "init: detects eslint config" {

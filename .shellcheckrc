@@ -8,3 +8,9 @@ disable=SC1090
 disable=SC2001
 # SC2016: Single quotes in sed patterns are intentional
 disable=SC2016
+# SC2038: find | xargs without -print0 — paths are controlled, no special chars
+disable=SC2038
+# SC2116: useless echo in subshell — used for variable expansion in heredoc
+disable=SC2116
+# SC2129: grouped redirects — individual redirects are clearer for appending
+disable=SC2129

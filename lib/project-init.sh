@@ -214,6 +214,136 @@ detect_directories() {
 }
 
 # ─────────────────────────────────────────────
+# Deep source code analysis
+# ─────────────────────────────────────────────
+analyze_spring_boot() {
+    local dir="$1"
+
+    PROJ_CONTROLLERS=0
+    PROJ_SERVICES=0
+    PROJ_REPOSITORIES=0
+    PROJ_ENTITIES=0
+    PROJ_ENDPOINTS=""
+    PROJ_API_PATHS=""
+    PROJ_BASE_PACKAGE=""
+
+    # Find all Java/Kotlin source files (exclude build/generated)
+    local src_files
+    src_files=$(find "$dir" -path "*/src/main/*" \( -name "*.java" -o -name "*.kt" \) \
+        -not -path "*/build/*" -not -path "*/target/*" 2>/dev/null)
+
+    [ -z "$src_files" ] && return
+
+    # Count components
+    PROJ_CONTROLLERS=$(echo "$src_files" | xargs grep -l "@RestController\|@Controller" 2>/dev/null | wc -l | tr -d ' ')
+    PROJ_SERVICES=$(echo "$src_files" | xargs grep -l "@Service" 2>/dev/null | wc -l | tr -d ' ')
+    PROJ_REPOSITORIES=$(echo "$src_files" | xargs grep -l "@Repository\|extends.*Repository" 2>/dev/null | wc -l | tr -d ' ')
+    PROJ_ENTITIES=$(echo "$src_files" | xargs grep -l "@Entity" 2>/dev/null | wc -l | tr -d ' ')
+
+    # Extract API paths from @RequestMapping
+    PROJ_API_PATHS=$(echo "$src_files" | xargs grep -h '@RequestMapping.*"' 2>/dev/null | \
+        sed 's/.*"\(\/[^"]*\)".*/\1/' | sort -u | head -25)
+
+    # Count endpoints by method
+    local get_count post_count put_count delete_count
+    get_count=$(echo "$src_files" | xargs grep -h "@GetMapping" 2>/dev/null | wc -l | tr -d ' ')
+    post_count=$(echo "$src_files" | xargs grep -h "@PostMapping" 2>/dev/null | wc -l | tr -d ' ')
+    put_count=$(echo "$src_files" | xargs grep -h "@PutMapping" 2>/dev/null | wc -l | tr -d ' ')
+    delete_count=$(echo "$src_files" | xargs grep -h "@DeleteMapping" 2>/dev/null | wc -l | tr -d ' ')
+    PROJ_ENDPOINTS="GET:${get_count} POST:${post_count} PUT:${put_count} DELETE:${delete_count}"
+
+    # Detect base package
+    PROJ_BASE_PACKAGE=$(echo "$src_files" | head -1 | sed 's|.*/src/main/[^/]*/||;s|/[^/]*$||;s|/|.|g' | \
+        awk -F. '{print $1"."$2"."$3}')
+}
+
+analyze_node_project() {
+    local dir="$1"
+
+    PROJ_COMPONENTS=0
+    PROJ_PAGES=0
+    PROJ_API_ROUTES=0
+    PROJ_HOOKS=0
+
+    # React/Next.js components
+    if [ -d "$dir/src/components" ] || [ -d "$dir/components" ]; then
+        PROJ_COMPONENTS=$(find "$dir" -path "*/components/*" \( -name "*.tsx" -o -name "*.jsx" -o -name "*.vue" \) \
+            -not -path "*/node_modules/*" 2>/dev/null | wc -l | tr -d ' ')
+    fi
+
+    # Next.js pages/app routes
+    if [ -d "$dir/src/app" ] || [ -d "$dir/app" ]; then
+        PROJ_PAGES=$(find "$dir" -path "*/app/*" -name "page.tsx" -o -name "page.jsx" \
+            -not -path "*/node_modules/*" 2>/dev/null | wc -l | tr -d ' ')
+    elif [ -d "$dir/src/pages" ] || [ -d "$dir/pages" ]; then
+        PROJ_PAGES=$(find "$dir" -path "*/pages/*" \( -name "*.tsx" -o -name "*.jsx" \) \
+            -not -path "*/node_modules/*" -not -name "_*" 2>/dev/null | wc -l | tr -d ' ')
+    fi
+
+    # API routes
+    if [ -d "$dir/src/app/api" ] || [ -d "$dir/app/api" ] || [ -d "$dir/pages/api" ]; then
+        PROJ_API_ROUTES=$(find "$dir" -path "*/api/*" -name "route.ts" -o -name "route.js" -o -name "*.ts" -path "*/pages/api/*" \
+            -not -path "*/node_modules/*" 2>/dev/null | wc -l | tr -d ' ')
+    fi
+
+    # Custom hooks
+    PROJ_HOOKS=$(find "$dir" -path "*/hooks/*" -o -name "use*.ts" -o -name "use*.tsx" \
+        -not -path "*/node_modules/*" 2>/dev/null | wc -l | tr -d ' ')
+}
+
+analyze_python_project() {
+    local dir="$1"
+
+    PROJ_PY_MODELS=0
+    PROJ_PY_VIEWS=0
+    PROJ_PY_ROUTES=0
+
+    # Django models
+    PROJ_PY_MODELS=$(find "$dir" -name "models.py" -not -path "*/venv/*" -not -path "*/.venv/*" 2>/dev/null | \
+        xargs grep -c "class.*Model" 2>/dev/null | awk -F: '{s+=$2}END{print s+0}')
+
+    # Django views / FastAPI routes
+    PROJ_PY_VIEWS=$(find "$dir" -name "views.py" -not -path "*/venv/*" 2>/dev/null | \
+        xargs grep -c "def " 2>/dev/null | awk -F: '{s+=$2}END{print s+0}')
+
+    # FastAPI/Flask routes
+    PROJ_PY_ROUTES=$(find "$dir" \( -name "*.py" \) -not -path "*/venv/*" -not -path "*/.venv/*" 2>/dev/null | \
+        xargs grep -c "@app\.\(get\|post\|put\|delete\)\|@router\.\(get\|post\|put\|delete\)" 2>/dev/null | \
+        awk -F: '{s+=$2}END{print s+0}')
+}
+
+# ─────────────────────────────────────────────
+# Detect naming conventions from existing code
+# ─────────────────────────────────────────────
+detect_conventions() {
+    local dir="$1"
+
+    PROJ_INDENT=""
+    PROJ_QUOTE_STYLE=""
+    PROJ_SEMICOLONS=""
+
+    # For TypeScript/JavaScript
+    if [ -f "$dir/package.json" ]; then
+        # Check .editorconfig
+        if [ -f "$dir/.editorconfig" ]; then
+            local indent
+            indent=$(grep "indent_size" "$dir/.editorconfig" 2>/dev/null | head -1 | sed 's/.*= *//') || true
+            [ -n "$indent" ] && PROJ_INDENT="${indent}-space"
+        fi
+
+        # Check prettier config
+        if [ -f "$dir/.prettierrc" ] || [ -f "$dir/.prettierrc.json" ]; then
+            local prettier_file="$dir/.prettierrc"
+            [ -f "$dir/.prettierrc.json" ] && prettier_file="$dir/.prettierrc.json"
+            grep -q "singleQuote.*true" "$prettier_file" 2>/dev/null && PROJ_QUOTE_STYLE="single quotes"
+            grep -q "singleQuote.*false" "$prettier_file" 2>/dev/null && PROJ_QUOTE_STYLE="double quotes"
+            grep -q "semi.*false" "$prettier_file" 2>/dev/null && PROJ_SEMICOLONS="no semicolons"
+            grep -q "semi.*true" "$prettier_file" 2>/dev/null && PROJ_SEMICOLONS="semicolons required"
+        fi
+    fi
+}
+
+# ─────────────────────────────────────────────
 # Generate CLAUDE.md
 # ─────────────────────────────────────────────
 generate_claude_md() {
@@ -259,6 +389,56 @@ $(echo "$dirs" | head -20)
 \`\`\`"
     fi
 
+    # Add deep analysis results for Spring Boot
+    if [ "${PROJ_CONTROLLERS:-0}" -gt 0 ] 2>/dev/null; then
+        content="${content}
+
+## Architecture Overview
+- Base package: \`${PROJ_BASE_PACKAGE}\`
+- Controllers: ${PROJ_CONTROLLERS}
+- Services: ${PROJ_SERVICES}
+- Repositories: ${PROJ_REPOSITORIES}
+- Entities: ${PROJ_ENTITIES}
+- Endpoints: ${PROJ_ENDPOINTS}"
+
+        if [ -n "$PROJ_API_PATHS" ]; then
+            content="${content}
+
+## API Endpoints
+\`\`\`
+$(echo "$PROJ_API_PATHS")
+\`\`\`"
+        fi
+    fi
+
+    # Add deep analysis results for Node.js
+    if [ "${PROJ_COMPONENTS:-0}" -gt 0 ] || [ "${PROJ_PAGES:-0}" -gt 0 ] 2>/dev/null; then
+        content="${content}
+
+## Architecture Overview"
+        [ "${PROJ_COMPONENTS:-0}" -gt 0 ] && content="${content}
+- Components: ${PROJ_COMPONENTS}"
+        [ "${PROJ_PAGES:-0}" -gt 0 ] && content="${content}
+- Pages/Routes: ${PROJ_PAGES}"
+        [ "${PROJ_API_ROUTES:-0}" -gt 0 ] && content="${content}
+- API Routes: ${PROJ_API_ROUTES}"
+        [ "${PROJ_HOOKS:-0}" -gt 0 ] && content="${content}
+- Custom Hooks: ${PROJ_HOOKS}"
+    fi
+
+    # Add deep analysis results for Python
+    if [ "${PROJ_PY_MODELS:-0}" -gt 0 ] || [ "${PROJ_PY_ROUTES:-0}" -gt 0 ] 2>/dev/null; then
+        content="${content}
+
+## Architecture Overview"
+        [ "${PROJ_PY_MODELS:-0}" -gt 0 ] && content="${content}
+- Models: ${PROJ_PY_MODELS}"
+        [ "${PROJ_PY_VIEWS:-0}" -gt 0 ] && content="${content}
+- Views: ${PROJ_PY_VIEWS}"
+        [ "${PROJ_PY_ROUTES:-0}" -gt 0 ] && content="${content}
+- API Routes: ${PROJ_PY_ROUTES}"
+    fi
+
     # Add conventions based on detected stack
     content="${content}
 
@@ -274,8 +454,12 @@ $(echo "$dirs" | head -20)
 
     # shellcheck disable=SC2076
     if [[ " ${PROJ_TECH[*]} " =~ " TypeScript " ]] || [[ " ${PROJ_TECH[*]} " =~ " Node.js " ]]; then
+        local ts_style="2-space indent"
+        [ -n "${PROJ_INDENT:-}" ] && ts_style="${PROJ_INDENT} indent"
+        [ -n "${PROJ_QUOTE_STYLE:-}" ] && ts_style="${ts_style}, ${PROJ_QUOTE_STYLE}"
+        [ -n "${PROJ_SEMICOLONS:-}" ] && ts_style="${ts_style}, ${PROJ_SEMICOLONS}"
         content="${content}
-- Follow Google TypeScript Style Guide (2-space indent, single quotes)
+- Code style: ${ts_style}
 - Use Conventional Commits for commit messages
 - No \`any\` type — use \`unknown\` or specific types"
     fi
@@ -486,15 +670,45 @@ do_init() {
         return 1
     fi
 
+    # Deep analysis based on detected stack
+    echo -e "  ${DIM}Analyzing source code...${R}"
+    # shellcheck disable=SC2076
+    if [[ " ${PROJ_TECH[*]} " =~ " Spring Boot " ]] || [[ " ${PROJ_TECH[*]} " =~ " Java " ]]; then
+        analyze_spring_boot "$target_dir"
+    fi
+    # shellcheck disable=SC2076
+    if [[ " ${PROJ_TECH[*]} " =~ " Node.js " ]]; then
+        analyze_node_project "$target_dir"
+    fi
+    # shellcheck disable=SC2076
+    if [[ " ${PROJ_TECH[*]} " =~ " Python " ]]; then
+        analyze_python_project "$target_dir"
+    fi
+    detect_conventions "$target_dir"
+
     # Report detection
+    local tech_display
+    tech_display=$(printf '%s, ' "${PROJ_TECH[@]}" | sed 's/, $//')
     echo -e "  ${G}Detected:${R}"
-    echo -e "    Tech Stack : ${C}$(IFS=', '; echo "${PROJ_TECH[*]}")${R}"
-    [ ${#PROJ_DB[@]} -gt 0 ] && echo -e "    Database   : ${C}$(IFS=', '; echo "${PROJ_DB[*]}")${R}"
-    [ ${#PROJ_INFRA[@]} -gt 0 ] && echo -e "    Infra      : ${C}$(IFS=', '; echo "${PROJ_INFRA[*]}")${R}"
+    echo -e "    Tech Stack : ${C}${tech_display}${R}"
+    [ ${#PROJ_DB[@]} -gt 0 ] && echo -e "    Database   : ${C}$(printf '%s, ' "${PROJ_DB[@]}" | sed 's/, $//')${R}"
+    [ ${#PROJ_INFRA[@]} -gt 0 ] && echo -e "    Infra      : ${C}$(printf '%s, ' "${PROJ_INFRA[@]}" | sed 's/, $//')${R}"
     echo -e "    Build      : ${DIM}${PROJ_BUILD}${R}"
     echo -e "    Test       : ${DIM}${PROJ_TEST}${R}"
     [ -n "$PROJ_LINT" ] && echo -e "    Lint       : ${DIM}${PROJ_LINT}${R}"
     [ -n "$PROJ_MODULES" ] && echo -e "    Modules    : ${DIM}${PROJ_MODULES}${R}"
+
+    # Show deep analysis results
+    if [ "${PROJ_CONTROLLERS:-0}" -gt 0 ] 2>/dev/null; then
+        echo -e "    Controllers: ${DIM}${PROJ_CONTROLLERS}${R}"
+        echo -e "    Services   : ${DIM}${PROJ_SERVICES}${R}"
+        echo -e "    Entities   : ${DIM}${PROJ_ENTITIES}${R}"
+        echo -e "    Endpoints  : ${DIM}${PROJ_ENDPOINTS}${R}"
+    fi
+    if [ "${PROJ_COMPONENTS:-0}" -gt 0 ] 2>/dev/null; then
+        echo -e "    Components : ${DIM}${PROJ_COMPONENTS}${R}"
+        [ "${PROJ_PAGES:-0}" -gt 0 ] && echo -e "    Pages      : ${DIM}${PROJ_PAGES}${R}"
+    fi
     echo ""
 
     # Generate files
@@ -508,6 +722,7 @@ do_init() {
 
     # 2. .claude/commands/
     generate_commands "$target_dir"
+    generate_framework_commands "$target_dir"
     local cmd_count
     cmd_count=$(find "$target_dir/.claude/commands" -name "*.md" 2>/dev/null | wc -l | tr -d ' ')
     echo -e "    ${G}+${R} .claude/commands/ (${cmd_count} commands)"
@@ -515,6 +730,9 @@ do_init() {
     # 3. .claude/settings.json
     generate_settings "$target_dir" "$strict"
     echo -e "    ${G}+${R} .claude/settings.json"
+
+    # 4. Update .gitignore
+    update_gitignore "$target_dir"
 
     echo ""
     echo -e "${DIM}──────────────────────────────────────${R}"
@@ -529,6 +747,142 @@ do_init() {
     if [ "$strict" = "true" ]; then
         echo -e "  ${Y}Strict mode active:${R} Quality rules added to CLAUDE.md"
         echo ""
+    fi
+}
+
+# ─────────────────────────────────────────────
+# Update .gitignore to include .claude/
+# ─────────────────────────────────────────────
+update_gitignore() {
+    local dir="$1"
+    local gitignore="$dir/.gitignore"
+
+    if [ ! -f "$gitignore" ]; then
+        return 0
+    fi
+
+    # Check if .claude/ is already in .gitignore
+    if grep -q "^\.claude/" "$gitignore" 2>/dev/null || grep -q "^\.claude$" "$gitignore" 2>/dev/null; then
+        return 0
+    fi
+
+    # Append .claude/ to .gitignore
+    echo "" >> "$gitignore"
+    echo "# Claude Code local settings" >> "$gitignore"
+    echo ".claude/" >> "$gitignore"
+    echo -e "    ${G}+${R} .gitignore (added .claude/)"
+}
+
+# ─────────────────────────────────────────────
+# Generate framework-specific commands
+# ─────────────────────────────────────────────
+generate_framework_commands() {
+    local dir="$1"
+    local cmd_dir="$dir/.claude/commands"
+
+    # Spring Boot specific commands
+    # shellcheck disable=SC2076
+    if [[ " ${PROJ_TECH[*]} " =~ " Spring Boot " ]]; then
+        cat > "$cmd_dir/entity.md" << 'EOF'
+Create a new JPA entity class. Ask for:
+1. Entity name
+2. Table name
+3. Fields (name, type, constraints)
+
+Follow the project's existing entity patterns:
+- Extend base entity class if one exists
+- Add proper JPA annotations (@Entity, @Table, @Column)
+- Add audit fields if the project uses auditing
+- Create the corresponding Repository interface
+- Place in the correct package following project structure
+EOF
+
+        cat > "$cmd_dir/api.md" << 'EOF'
+Create a new REST API endpoint. Ask for:
+1. Resource name
+2. HTTP method and path
+3. Request/response DTOs
+
+Follow the project's existing patterns:
+- Controller -> Service -> Repository layering
+- Consistent naming: {Resource}Controller, {Resource}Service
+- Use existing DTO conventions (RequestDto, ResponseDto)
+- Add proper validation annotations
+- Follow the project's API versioning pattern
+EOF
+
+        cat > "$cmd_dir/migration.md" << 'EOF'
+Analyze the current JPA entities and generate a database migration.
+
+1. Compare entity definitions with the current schema
+2. Generate the appropriate migration script (SQL or Flyway/Liquibase)
+3. Include both UP and DOWN migrations
+4. Flag any destructive changes (column drops, type changes)
+EOF
+    fi
+
+    # Next.js specific commands
+    # shellcheck disable=SC2076
+    if [[ " ${PROJ_TECH[*]} " =~ " Next.js " ]]; then
+        cat > "$cmd_dir/page.md" << 'EOF'
+Create a new Next.js page/route. Ask for:
+1. Route path
+2. Whether it needs server-side data fetching
+3. Whether it needs client-side interactivity
+
+Follow the project's existing patterns for:
+- File-based routing structure (app/ or pages/)
+- Layout usage
+- Data fetching patterns (Server Components vs Client)
+- Styling approach
+EOF
+
+        cat > "$cmd_dir/component.md" << 'EOF'
+Create a new React component. Ask for:
+1. Component name
+2. Props interface
+3. Whether it's a server or client component
+
+Follow the project's existing patterns for:
+- Component file structure
+- Props typing
+- Styling approach (CSS modules, Tailwind, styled-components)
+- Test file co-location
+EOF
+    fi
+
+    # Django specific commands
+    # shellcheck disable=SC2076
+    if [[ " ${PROJ_TECH[*]} " =~ " Django " ]]; then
+        cat > "$cmd_dir/model.md" << 'EOF'
+Create a new Django model. Ask for:
+1. Model name
+2. Fields (name, type, constraints)
+3. Which app it belongs to
+
+Follow the project's existing patterns:
+- Model naming and field conventions
+- Meta class configuration
+- Generate and apply migration
+- Register in admin if admin is used
+EOF
+    fi
+
+    # FastAPI specific commands
+    # shellcheck disable=SC2076
+    if [[ " ${PROJ_TECH[*]} " =~ " FastAPI " ]]; then
+        cat > "$cmd_dir/endpoint.md" << 'EOF'
+Create a new FastAPI endpoint. Ask for:
+1. Path and HTTP method
+2. Request/response schemas (Pydantic models)
+3. Dependencies
+
+Follow the project's existing patterns:
+- Router organization
+- Pydantic model conventions
+- Dependency injection patterns
+- Error handling approach
+EOF
     fi
 }
 

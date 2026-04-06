@@ -357,6 +357,7 @@ generate_claude_md() {
 
     local content="# ${PROJ_NAME}
 
+<!-- mangolove:auto-start -->
 ## Tech Stack
 - ${tech_str}
 $([ ${#PROJ_DB[@]} -gt 0 ] && echo "- Database: ${db_str}")
@@ -439,8 +440,8 @@ $(echo "$PROJ_API_PATHS")
 - API Routes: ${PROJ_PY_ROUTES}"
     fi
 
-    # Add conventions based on detected stack
     content="${content}
+<!-- mangolove:auto-end -->
 
 ## Conventions"
 
@@ -731,7 +732,28 @@ do_init() {
     generate_settings "$target_dir" "$strict"
     echo -e "    ${G}+${R} .claude/settings.json"
 
-    # 4. Update .gitignore
+    # 4. Save snapshot for future sync
+    local snapshot_file="$target_dir/.claude/.mangolove_snapshot"
+    mkdir -p "$target_dir/.claude"
+    cat > "$snapshot_file" << SNAPSHOT
+tech=$(printf '%s, ' "${PROJ_TECH[@]}" | sed 's/, $//')
+db=$(printf '%s, ' "${PROJ_DB[@]}" | sed 's/, $//')
+infra=$(printf '%s, ' "${PROJ_INFRA[@]}" | sed 's/, $//')
+build=${PROJ_BUILD}
+test=${PROJ_TEST}
+lint=${PROJ_LINT}
+modules=${PROJ_MODULES}
+controllers=${PROJ_CONTROLLERS:-0}
+services=${PROJ_SERVICES:-0}
+repositories=${PROJ_REPOSITORIES:-0}
+entities=${PROJ_ENTITIES:-0}
+endpoints=${PROJ_ENDPOINTS:-}
+components=${PROJ_COMPONENTS:-0}
+pages=${PROJ_PAGES:-0}
+api_routes=${PROJ_API_ROUTES:-0}
+SNAPSHOT
+
+    # 5. Update .gitignore
     update_gitignore "$target_dir"
 
     echo ""
@@ -887,9 +909,239 @@ EOF
 }
 
 # ─────────────────────────────────────────────
+# Main: mangolove sync
+# Update CLAUDE.md with current project state
+# without overwriting user-added content
+# ─────────────────────────────────────────────
+do_sync() {
+    local target_dir
+    target_dir=$(pwd)
+
+    if ! target_dir=$(cd "$target_dir" 2>/dev/null && pwd); then
+        echo -e "  ${RED}Directory not found${R}"
+        return 1
+    fi
+
+    if [ ! -f "$target_dir/CLAUDE.md" ]; then
+        echo -e "  ${Y}No CLAUDE.md found.${R} Run ${B}mangolove init${R} first."
+        return 1
+    fi
+
+    echo ""
+    echo -e "${O}${B}MangoLove Sync${R}"
+    echo -e "${DIM}──────────────────────────────────────${R}"
+    echo -e "  Scanning: ${B}${target_dir}${R}"
+    echo ""
+
+    # Save snapshot of previous state for comparison
+    local prev_file="$target_dir/.claude/.mangolove_snapshot"
+    mkdir -p "$target_dir/.claude"
+
+    # Scan current project
+    scan_project "$target_dir"
+
+    if [ ${#PROJ_TECH[@]} -eq 0 ]; then
+        echo -e "  ${Y}No recognized project structure.${R}"
+        return 1
+    fi
+
+    # Deep analysis
+    # shellcheck disable=SC2076
+    if [[ " ${PROJ_TECH[*]} " =~ " Spring Boot " ]] || [[ " ${PROJ_TECH[*]} " =~ " Java " ]]; then
+        analyze_spring_boot "$target_dir"
+    fi
+    # shellcheck disable=SC2076
+    if [[ " ${PROJ_TECH[*]} " =~ " Node.js " ]]; then
+        analyze_node_project "$target_dir"
+    fi
+    # shellcheck disable=SC2076
+    if [[ " ${PROJ_TECH[*]} " =~ " Python " ]]; then
+        analyze_python_project "$target_dir"
+    fi
+    detect_conventions "$target_dir"
+
+    # Build current snapshot for diff
+    local current_snapshot=""
+    current_snapshot="tech=$(printf '%s, ' "${PROJ_TECH[@]}" | sed 's/, $//')
+db=$(printf '%s, ' "${PROJ_DB[@]}" | sed 's/, $//')
+infra=$(printf '%s, ' "${PROJ_INFRA[@]}" | sed 's/, $//')
+build=${PROJ_BUILD}
+test=${PROJ_TEST}
+lint=${PROJ_LINT}
+modules=${PROJ_MODULES}
+controllers=${PROJ_CONTROLLERS:-0}
+services=${PROJ_SERVICES:-0}
+repositories=${PROJ_REPOSITORIES:-0}
+entities=${PROJ_ENTITIES:-0}
+endpoints=${PROJ_ENDPOINTS:-}
+components=${PROJ_COMPONENTS:-0}
+pages=${PROJ_PAGES:-0}
+api_routes=${PROJ_API_ROUTES:-0}"
+
+    # Compare with previous snapshot
+    local changes=()
+    if [ -f "$prev_file" ]; then
+        local prev_controllers prev_services prev_entities prev_endpoints prev_components prev_pages
+        prev_controllers=$(grep "^controllers=" "$prev_file" 2>/dev/null | cut -d= -f2) || true
+        prev_services=$(grep "^services=" "$prev_file" 2>/dev/null | cut -d= -f2) || true
+        prev_entities=$(grep "^entities=" "$prev_file" 2>/dev/null | cut -d= -f2) || true
+        prev_endpoints=$(grep "^endpoints=" "$prev_file" 2>/dev/null | cut -d= -f2) || true
+        prev_components=$(grep "^components=" "$prev_file" 2>/dev/null | cut -d= -f2) || true
+        prev_pages=$(grep "^pages=" "$prev_file" 2>/dev/null | cut -d= -f2) || true
+
+        # Detect changes
+        local curr_c="${PROJ_CONTROLLERS:-0}" curr_s="${PROJ_SERVICES:-0}" curr_e="${PROJ_ENTITIES:-0}"
+        local curr_comp="${PROJ_COMPONENTS:-0}" curr_p="${PROJ_PAGES:-0}"
+
+        [ "${prev_controllers:-0}" != "$curr_c" ] && changes+=("Controllers: ${prev_controllers:-0} -> ${curr_c}")
+        [ "${prev_services:-0}" != "$curr_s" ] && changes+=("Services: ${prev_services:-0} -> ${curr_s}")
+        [ "${prev_entities:-0}" != "$curr_e" ] && changes+=("Entities: ${prev_entities:-0} -> ${curr_e}")
+        [ "${prev_endpoints:-}" != "${PROJ_ENDPOINTS:-}" ] && [ -n "${PROJ_ENDPOINTS:-}" ] && changes+=("Endpoints: ${prev_endpoints:-N/A} -> ${PROJ_ENDPOINTS}")
+        [ "${prev_components:-0}" != "$curr_comp" ] && [ "$curr_comp" -gt 0 ] && changes+=("Components: ${prev_components:-0} -> ${curr_comp}")
+        [ "${prev_pages:-0}" != "$curr_p" ] && [ "$curr_p" -gt 0 ] && changes+=("Pages: ${prev_pages:-0} -> ${curr_p}")
+    else
+        changes+=("First sync — full snapshot created")
+    fi
+
+    # Save new snapshot
+    echo "$current_snapshot" > "$prev_file"
+
+    # Update only the auto-generated sections of CLAUDE.md
+    # Strategy: replace sections between markers, preserve everything else
+    local claude_md="$target_dir/CLAUDE.md"
+    local temp_file
+    temp_file=$(mktemp)
+
+    # Read existing CLAUDE.md and update specific sections
+
+    # Generate fresh auto-content
+    local auto_content=""
+    auto_content="<!-- mangolove:auto-start -->
+## Tech Stack
+- $(printf '%s, ' "${PROJ_TECH[@]}" | sed 's/, $//')
+$([ ${#PROJ_DB[@]} -gt 0 ] && echo "- Database: $(printf '%s, ' "${PROJ_DB[@]}" | sed 's/, $//')")
+$([ ${#PROJ_INFRA[@]} -gt 0 ] && echo "- Infrastructure: $(printf '%s, ' "${PROJ_INFRA[@]}" | sed 's/, $//')")
+
+## Commands
+- Build: \`${PROJ_BUILD}\`
+- Test: \`${PROJ_TEST}\`$([ -n "$PROJ_LINT" ] && echo "
+- Lint: \`${PROJ_LINT}\`")$([ -n "$PROJ_TYPECHECK" ] && echo "
+- Type Check: \`${PROJ_TYPECHECK}\`")$([ -n "$PROJ_MODULES" ] && echo "
+
+## Modules
+$(echo "$PROJ_MODULES" | tr ',' '\n' | sed 's/^ */- /')")"
+
+    # Add architecture overview
+    if [ "${PROJ_CONTROLLERS:-0}" -gt 0 ] 2>/dev/null; then
+        auto_content="${auto_content}
+
+## Architecture Overview
+- Base package: \`${PROJ_BASE_PACKAGE}\`
+- Controllers: ${PROJ_CONTROLLERS}
+- Services: ${PROJ_SERVICES}
+- Repositories: ${PROJ_REPOSITORIES}
+- Entities: ${PROJ_ENTITIES}
+- Endpoints: ${PROJ_ENDPOINTS}"
+
+        if [ -n "$PROJ_API_PATHS" ]; then
+            auto_content="${auto_content}
+
+## API Endpoints
+\`\`\`
+$(echo "$PROJ_API_PATHS")
+\`\`\`"
+        fi
+    fi
+
+    if [ "${PROJ_COMPONENTS:-0}" -gt 0 ] || [ "${PROJ_PAGES:-0}" -gt 0 ] 2>/dev/null; then
+        auto_content="${auto_content}
+
+## Architecture Overview"
+        [ "${PROJ_COMPONENTS:-0}" -gt 0 ] && auto_content="${auto_content}
+- Components: ${PROJ_COMPONENTS}"
+        [ "${PROJ_PAGES:-0}" -gt 0 ] && auto_content="${auto_content}
+- Pages/Routes: ${PROJ_PAGES}"
+        [ "${PROJ_API_ROUTES:-0}" -gt 0 ] && auto_content="${auto_content}
+- API Routes: ${PROJ_API_ROUTES}"
+    fi
+
+    auto_content="${auto_content}
+<!-- mangolove:auto-end -->"
+
+    # Check if CLAUDE.md has markers
+    if grep -q "mangolove:auto-start" "$claude_md" 2>/dev/null; then
+        # Replace content between markers
+        awk '
+            /<!-- mangolove:auto-start -->/ { skip=1; next }
+            /<!-- mangolove:auto-end -->/ { skip=0; next }
+            !skip { print }
+        ' "$claude_md" > "$temp_file"
+
+        # Find where to insert (after title line)
+        local title_line
+        title_line=$(head -1 "$claude_md")
+
+        {
+            echo "$title_line"
+            echo ""
+            echo "$auto_content"
+            tail -n +2 "$temp_file" | sed '/^$/{ N; /^\n$/d; }'
+        } > "$claude_md"
+        : # updated
+    else
+        # No markers — add them. Preserve title + any user content after conventions
+        local title_line
+        title_line=$(head -1 "$claude_md")
+
+        # Extract user-added content (everything after ## Conventions section)
+        local user_content=""
+        user_content=$(awk '/^## Conventions/,0' "$claude_md") || true
+
+        {
+            echo "$title_line"
+            echo ""
+            echo "$auto_content"
+            echo ""
+            [ -n "$user_content" ] && echo "$user_content"
+        } > "$claude_md"
+        : # updated
+    fi
+
+    rm -f "$temp_file"
+
+    # Also update commands if new frameworks detected
+    generate_commands "$target_dir"
+    generate_framework_commands "$target_dir"
+
+    # Report
+    local cmd_count
+    cmd_count=$(find "$target_dir/.claude/commands" -name "*.md" 2>/dev/null | wc -l | tr -d ' ')
+
+    echo -e "  ${G}Synced:${R}"
+    echo -e "    CLAUDE.md   : updated"
+    echo -e "    Commands    : ${cmd_count}"
+
+    if [ ${#changes[@]} -gt 0 ]; then
+        echo ""
+        echo -e "  ${C}Changes detected:${R}"
+        for change in "${changes[@]}"; do
+            echo -e "    - ${change}"
+        done
+    else
+        echo ""
+        echo -e "  ${DIM}No changes since last sync.${R}"
+    fi
+
+    echo ""
+    echo -e "${DIM}──────────────────────────────────────${R}"
+    echo ""
+}
+
+# ─────────────────────────────────────────────
 # Entrypoint
 # ─────────────────────────────────────────────
 case "${1:-}" in
     init) shift; do_init "$@" ;;
+    sync) shift; do_sync "$@" ;;
     *)    do_init "$@" ;;
 esac

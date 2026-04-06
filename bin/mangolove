@@ -176,6 +176,7 @@ show_help() {
     echo "  mangolove init                Generate CLAUDE.md + commands + hooks"
     echo "  mangolove init --strict       Same + quality gates (auto lint/test)"
     echo "  mangolove init --force        Regenerate even if CLAUDE.md exists"
+    echo "  mangolove sync                Update CLAUDE.md with current project state"
     echo "  mangolove resume              Show last session context and continue"
     echo "  mangolove sessions            List all saved sessions"
     echo "  mangolove stats [period]      Productivity stats (today/week/month)"
@@ -398,6 +399,10 @@ main() {
         init)
             shift
             bash "$PROJECT_INIT" init "$@"
+            exit 0
+            ;;
+        sync)
+            bash "$PROJECT_INIT" sync
             exit 0
             ;;
         resume)

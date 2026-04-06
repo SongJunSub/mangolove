@@ -489,15 +489,17 @@ $(echo "$PROJ_API_PATHS")
 - Use Conventional Commits for commit messages"
     fi
 
-    # Strict mode additions
     if [ "$strict" = "true" ]; then
         content="${content}
 
-## Quality Rules
-- NEVER skip tests. Run \`${PROJ_TEST}\` after every code change.
-- NEVER commit without passing lint. Run \`${PROJ_LINT:-echo 'no linter configured'}\` first.
+## Quality Rules (Strict Mode)
+- After EVERY code change, run: \`${PROJ_TEST}\`
+- Before EVERY commit, run: \`${PROJ_LINT:-echo 'no linter configured'}\`$([ -n "$PROJ_TYPECHECK" ] && echo "
+- Type check: \`${PROJ_TYPECHECK}\`")
 - Write tests for all new functions and bug fixes.
-- All PRs must include test coverage for changed code."
+- If tests fail, fix them before writing more code.
+- Use \`/check\` to run the full validation pipeline.
+- NEVER mark a task as done without all checks passing."
     fi
 
     echo "$content"
@@ -597,16 +599,42 @@ generate_settings() {
     fi
 
     if [ "$strict" = "true" ] && [ -n "$PROJ_TEST" ]; then
+        # Build lint command for hook
+        local lint_hook=""
+        if [ -n "$PROJ_LINT" ]; then
+            lint_hook=",
+      {
+        \"matcher\": \"Write|Edit\",
+        \"hooks\": [
+          {
+            \"type\": \"command\",
+            \"command\": \"${PROJ_LINT} 2>&1 | tail -20 || echo 'LINT FAILED: fix before continuing'\"
+          }
+        ]
+      }"
+        fi
+
         cat > "$settings_file" << SETTINGSEOF
 {
   "hooks": {
     "PostToolUse": [
       {
-        "matcher": "Write|Edit",
+        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "echo 'Remember: run tests after code changes'"
+            "command": "echo ''"
+          }
+        ]
+      }${lint_hook}
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo ''"
           }
         ]
       }

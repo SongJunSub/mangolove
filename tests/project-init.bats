@@ -173,7 +173,7 @@ EOF
     run bash "$MANGOLOVE_DIR/lib/project-init.sh" init --strict
     [ "$status" -eq 0 ]
     grep -q "Quality Rules" "$proj/CLAUDE.md"
-    grep -q "NEVER skip tests" "$proj/CLAUDE.md"
+    grep -q "EVERY code change" "$proj/CLAUDE.md"
 }
 
 # ─────────────────────────────────────────────

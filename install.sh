@@ -110,6 +110,7 @@ chmod +x "$MANGOLOVE_DIR/lib/"*.sh
 # ─── Symlink to PATH ───
 mkdir -p "$BIN_DIR"
 ln -sf "$MANGOLOVE_DIR/bin/mangolove" "$BIN_DIR/mangolove"
+ln -sf "$MANGOLOVE_DIR/bin/mangolove" "$BIN_DIR/MangoLove"
 
 # ─── Install shell completions ───
 SHELL_NAME=$(basename "$SHELL")

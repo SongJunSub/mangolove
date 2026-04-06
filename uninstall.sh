@@ -26,10 +26,15 @@ fi
 
 echo ""
 
-# Remove symlink
+# Remove symlinks
 if [ -L "$BIN_LINK" ]; then
     rm "$BIN_LINK"
     echo -e "  ${G}✓${R} Removed symlink: $BIN_LINK"
+fi
+BIN_LINK_UPPER="$HOME/.local/bin/MangoLove"
+if [ -L "$BIN_LINK_UPPER" ]; then
+    rm "$BIN_LINK_UPPER"
+    echo -e "  ${G}✓${R} Removed symlink: $BIN_LINK_UPPER"
 fi
 
 # Remove shell completions

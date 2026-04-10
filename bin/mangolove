@@ -231,11 +231,40 @@ show_help() {
 }
 
 do_update() {
-    echo "🔄 Updating MangoLove..."
+    local current_version
+    current_version=$(cat "$MANGOLOVE_DIR/.version" 2>/dev/null || echo "unknown")
+    echo "🔄 Updating MangoLove... (current: v${current_version})"
+
     if [ -d "$MANGOLOVE_DIR/.git" ]; then
         cd "$MANGOLOVE_DIR"
+        local before_commit
+        before_commit=$(git rev-parse HEAD)
+
         git pull origin main
-        echo "✅ Updated to latest version."
+
+        local after_commit
+        after_commit=$(git rev-parse HEAD)
+
+        # Sync .version with MANGOLOVE_VERSION from the updated script
+        local new_version
+        new_version=$(grep -m1 '^MANGOLOVE_VERSION=' "$MANGOLOVE_DIR/bin/mangolove" | cut -d'"' -f2)
+        if [ -n "$new_version" ]; then
+            echo "$new_version" > "$MANGOLOVE_DIR/.version"
+        fi
+
+        # Make scripts executable
+        chmod +x "$MANGOLOVE_DIR/bin/mangolove"
+        find "$MANGOLOVE_DIR/lib" -name "*.sh" -exec chmod +x {} \;
+
+        if [ "$before_commit" = "$after_commit" ]; then
+            echo "✅ Already up to date. (v${new_version:-$current_version})"
+        else
+            echo ""
+            echo "📋 Changes:"
+            git log --oneline "${before_commit}..${after_commit}"
+            echo ""
+            echo "✅ Updated: v${current_version} → v${new_version:-$current_version}"
+        fi
     else
         echo "⚠️  MangoLove was not installed via git."
         echo "   Re-install: curl -fsSL https://raw.githubusercontent.com/SongJunSub/mangolove/main/install.sh | bash"

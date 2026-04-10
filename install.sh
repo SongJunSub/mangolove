@@ -153,7 +153,9 @@ if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
 fi
 
 # ─── Version file ───
-echo "0.2.0" > "$MANGOLOVE_DIR/.version"
+# Extract version from the main script
+INSTALL_VERSION=$(grep -m1 '^MANGOLOVE_VERSION=' "$MANGOLOVE_DIR/bin/mangolove" | cut -d'"' -f2)
+echo "${INSTALL_VERSION:-0.5.0}" > "$MANGOLOVE_DIR/.version"
 
 # ─── Done ───
 echo ""

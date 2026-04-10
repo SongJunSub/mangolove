@@ -2,6 +2,7 @@
 logs/repo/
 config.sh
 .version
+.last_update_check
 
 # OS
 .DS_Store

@@ -230,13 +230,30 @@ show_help() {
     echo ""
 }
 
+_sync_after_pull() {
+    local new_version
+    new_version=$(grep -m1 '^MANGOLOVE_VERSION=' "$MANGOLOVE_DIR/bin/mangolove" | cut -d'"' -f2)
+    if [ -n "$new_version" ]; then
+        echo "$new_version" > "$MANGOLOVE_DIR/.version"
+    fi
+    chmod +x "$MANGOLOVE_DIR/bin/mangolove"
+    find "$MANGOLOVE_DIR/lib" -name "*.sh" -exec chmod +x {} +
+    echo "$new_version"
+}
+
 do_update() {
     local current_version
     current_version=$(cat "$MANGOLOVE_DIR/.version" 2>/dev/null || echo "unknown")
     echo "🔄 Updating MangoLove... (current: v${current_version})"
 
-    if [ -d "$MANGOLOVE_DIR/.git" ]; then
-        cd "$MANGOLOVE_DIR"
+    if [ ! -d "$MANGOLOVE_DIR/.git" ]; then
+        echo "⚠️  MangoLove was not installed via git."
+        echo "   Re-install: curl -fsSL https://raw.githubusercontent.com/SongJunSub/mangolove/main/install.sh | bash"
+        return 0
+    fi
+
+    (
+        cd "$MANGOLOVE_DIR" || exit 1
         local before_commit
         before_commit=$(git rev-parse HEAD)
 
@@ -245,16 +262,8 @@ do_update() {
         local after_commit
         after_commit=$(git rev-parse HEAD)
 
-        # Sync .version with MANGOLOVE_VERSION from the updated script
         local new_version
-        new_version=$(grep -m1 '^MANGOLOVE_VERSION=' "$MANGOLOVE_DIR/bin/mangolove" | cut -d'"' -f2)
-        if [ -n "$new_version" ]; then
-            echo "$new_version" > "$MANGOLOVE_DIR/.version"
-        fi
-
-        # Make scripts executable
-        chmod +x "$MANGOLOVE_DIR/bin/mangolove"
-        find "$MANGOLOVE_DIR/lib" -name "*.sh" -exec chmod +x {} \;
+        new_version=$(_sync_after_pull)
 
         if [ "$before_commit" = "$after_commit" ]; then
             echo "✅ Already up to date. (v${new_version:-$current_version})"
@@ -265,10 +274,54 @@ do_update() {
             echo ""
             echo "✅ Updated: v${current_version} → v${new_version:-$current_version}"
         fi
-    else
-        echo "⚠️  MangoLove was not installed via git."
-        echo "   Re-install: curl -fsSL https://raw.githubusercontent.com/SongJunSub/mangolove/main/install.sh | bash"
+    )
+}
+
+auto_update_check() {
+    [ ! -d "$MANGOLOVE_DIR/.git" ] && return 0
+
+    local check_file="$MANGOLOVE_DIR/.last_update_check"
+    local now
+    now=$(date +%s)
+    local last_check=0
+
+    if [ -f "$check_file" ]; then
+        last_check=$(<"$check_file")
     fi
+
+    local elapsed=$((now - last_check))
+    if [ "$elapsed" -lt 86400 ]; then
+        return 0
+    fi
+
+    (
+        cd "$MANGOLOVE_DIR" || exit 1
+
+        git fetch origin main --quiet 2>/dev/null || exit 0
+
+        local local_head remote_head
+        local_head=$(git rev-parse HEAD)
+        remote_head=$(git rev-parse origin/main 2>/dev/null)
+
+        [ "$local_head" = "$remote_head" ] && exit 0
+
+        local current_version
+        current_version=$(cat "$MANGOLOVE_DIR/.version" 2>/dev/null || echo "unknown")
+
+        echo ""
+        echo -e "\033[38;5;208m⬆ MangoLove 업데이트가 있습니다 (현재: v${current_version})\033[0m"
+
+        git pull origin main --quiet 2>/dev/null
+
+        local new_version
+        new_version=$(_sync_after_pull)
+
+        echo -e "\033[38;5;113m✅ v${current_version} → v${new_version:-unknown} 업데이트 완료\033[0m"
+        echo ""
+    )
+
+    # Record check time only after successful fetch
+    echo "$now" > "$check_file"
 }
 
 do_doctor() {
@@ -603,6 +656,9 @@ Continue from where you left off. Summarize the previous session state and ask w
 
     # Preflight
     check_dependencies
+
+    # Auto-update check (once per 24h, non-blocking)
+    auto_update_check
 
     # Detect multi-project root (directory with multiple sub-projects, each with their own .git)
     local sub_project_count=0

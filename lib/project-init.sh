@@ -133,10 +133,10 @@ scan_project() {
         [ -n "$next_ver" ] && PROJ_VERSIONS+=("Next.js ${next_ver}")
         [ -n "$ts_ver" ] && PROJ_VERSIONS+=("TypeScript ${ts_ver}")
         if [ -f "$dir/.node-version" ]; then
-            node_ver=$(cat "$dir/.node-version" 2>/dev/null | tr -d '[:space:]') || true
+            node_ver=$(tr -d '[:space:]' < "$dir/.node-version" 2>/dev/null) || true
             [ -n "$node_ver" ] && PROJ_VERSIONS+=("Node.js ${node_ver}")
         elif [ -f "$dir/.nvmrc" ]; then
-            node_ver=$(cat "$dir/.nvmrc" 2>/dev/null | tr -d '[:space:]') || true
+            node_ver=$(tr -d '[:space:]' < "$dir/.nvmrc" 2>/dev/null) || true
             [ -n "$node_ver" ] && PROJ_VERSIONS+=("Node.js ${node_ver}")
         fi
 

@@ -29,10 +29,18 @@ safe_git() {
 
 # Determine repo name
 get_repo_info() {
-    if [ -n "$MANGOLOVE_LOG_REPO" ] && [ "$MANGOLOVE_LOG_REPO" != "disabled" ]; then
+    # Disabled mode: skip all external calls (gh auth not required)
+    if [ "$MANGOLOVE_LOG_REPO" = "disabled" ]; then
+        REPO_FULL="disabled"
+        LOCAL_REPO="$LOG_DIR/repo"
+        return 0
+    fi
+
+    if [ -n "$MANGOLOVE_LOG_REPO" ]; then
         REPO_FULL="$MANGOLOVE_LOG_REPO"
     else
-        local gh_user=$(gh api user --jq '.login' 2>/dev/null)
+        local gh_user
+        gh_user=$(gh api user --jq '.login' 2>/dev/null)
         if [ -z "$gh_user" ]; then
             echo "⚠️  GitHub CLI not authenticated. Run: gh auth login"
             return 1

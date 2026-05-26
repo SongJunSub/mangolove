@@ -506,6 +506,7 @@ Trivial/Small Track도 구현 착수 전에 **DoD를 한 줄로 선언**한다 (
   빌드:                  ✅ PASS / ❌ FAIL
   린트:                  ✅ PASS / ❌ FAIL
   테스트:                ✅ PASS (N passed) / ❌ FAIL
+  DoD 항목별 검증:       ✅ N/N PASS / ❌ M/N PASS
 ─────────────────────────────────────
   결론: ✅ 커밋 가능 / ❌ 커밋 보류 (미통과: ...)
 ```
@@ -519,34 +520,50 @@ Trivial/Small Track도 구현 착수 전에 **DoD를 한 줄로 선언**한다 (
   빌드:                  ✅ PASS / ❌ FAIL
   린트:                  ✅ PASS / ❌ FAIL
   테스트:                ✅ PASS (N passed) / ❌ FAIL
+  DoD 항목별 검증:       ✅ N/N PASS / ❌ M/N PASS
 ─────────────────────────────────────
   결론: ✅ 커밋 가능 / ❌ 커밋 보류 (미통과: ...)
 ```
 
-Trivial/Small Track은 Dashboard 없이 빌드/린트/테스트 통과 여부만 확인.
+Trivial/Small Track은 Dashboard 없이 빌드/린트/테스트 + DoD 한 줄 검증만 확인.
 
 **모든 항목이 PASS일 때만 커밋 & 푸시 가능.**
 하나라도 FAIL이면 해당 단계로 돌아가서 수정 → 재리뷰 → Dashboard 재출력.
 
 ### 10단계: 완료 보고
-해당 트랙의 워크플로우 전항목 통과 후 보고:
+해당 트랙의 워크플로우 전항목 통과 후 보고. **"PASS"만 보고하지 않는다 — 사람이 검증할 수 있는 산출물 경로/링크를 함께 제시한다.**
+
+#### 산출물(Verification Artifact) 원칙
+- "PASS" 같은 boolean 결과만 적지 말고, 누구나 열어볼 수 있는 **실물 경로 또는 URL**을 함께 제시한다
+- 산출물이 없는 PASS는 PASS로 인정하지 않는다 (테스트 PASS면 리포트 경로, 빌드 PASS면 로그 경로, PR이면 URL, UI면 스크린샷 경로)
+- 산출물은 가능한 한 실행 환경에서 그대로 접근 가능해야 한다 (로컬 절대경로/Git 호스팅 URL/CI artifact URL)
 
 **Large Track:**
 ```
 변경 사항:
   - [수정된 파일 목록과 변경 내용]
 
-검증 결과:
-  - 빌드: PASS
-  - 린트: PASS
-  - 테스트: PASS (N개 통과, N개 신규)
+검증 결과 (산출물 포함):
+  - 빌드: PASS  →  build/reports/build.log
+  - 린트: PASS  →  build/reports/checkstyle/main.html
+  - 테스트: PASS (N개 통과, N개 신규)  →  build/reports/tests/test/index.html
+  - DB 마이그레이션 dry-run (해당 시): logs/migration-dryrun.sql
+  - UI 변경 (해당 시): screenshots/before.png, screenshots/after.png
 
-리뷰 결과:
-  - Spec 리뷰: PASS
+리뷰 결과 (산출물 포함):
+  - Spec 리뷰: PASS  →  [세션 대화 또는 PR 코멘트 위치]
   - Product 리뷰: PASS
   - Engineering 리뷰: PASS
   - 셀프 리뷰: PASS
   - 3인 독립 리뷰: PASS (3/3)
+
+DoD 검증:
+  - [DoD 1]: PASS  →  [검증 산출물 경로]
+  - [DoD 2]: PASS  →  [검증 산출물 경로]
+
+PR / CI:
+  - PR: https://github.com/<org>/<repo>/pull/<n>
+  - CI checks: https://github.com/<org>/<repo>/pull/<n>/checks
 ```
 
 **Medium Track:**
@@ -554,14 +571,20 @@ Trivial/Small Track은 Dashboard 없이 빌드/린트/테스트 통과 여부만
 변경 사항:
   - [수정된 파일 목록과 변경 내용]
 
-검증 결과:
-  - 빌드: PASS
-  - 린트: PASS
-  - 테스트: PASS (N개 통과, N개 신규)
+검증 결과 (산출물 포함):
+  - 빌드: PASS  →  build/reports/build.log
+  - 린트: PASS  →  build/reports/checkstyle/main.html
+  - 테스트: PASS (N개 통과, N개 신규)  →  build/reports/tests/test/index.html
 
 리뷰 결과:
   - 셀프 리뷰: PASS
   - 1인 코드 리뷰: PASS
+
+DoD 검증:
+  - [DoD 1]: PASS  →  [검증 산출물 경로]
+
+PR / CI:
+  - PR: https://github.com/<org>/<repo>/pull/<n>
 ```
 
 **Trivial/Small Track:**
@@ -569,10 +592,13 @@ Trivial/Small Track은 Dashboard 없이 빌드/린트/테스트 통과 여부만
 변경 사항:
   - [수정된 파일 목록과 변경 내용]
 
-검증 결과:
-  - 빌드: PASS
-  - 린트: PASS
-  - 테스트: PASS (N개 통과)
+검증 결과 (산출물 포함):
+  - 빌드: PASS  →  [로그 경로]
+  - 린트: PASS  →  [리포트 경로]
+  - 테스트: PASS (N개 통과)  →  [리포트 경로]
+
+DoD 검증:
+  - [DoD 한 줄]: PASS  →  [검증 산출물]
 ```
 
 ## 스마트 리뷰 라우팅

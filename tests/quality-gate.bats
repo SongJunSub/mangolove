@@ -58,9 +58,9 @@ _strict_node_project() {
     [ ! -d "$proj/.mangolove/hooks" ]
 }
 
-@test "gate: installs MangoLove-managed git pre-commit when .git exists" {
+@test "gate: installs MangoLove-managed git pre-commit in a git repo" {
     local proj; proj=$(_strict_node_project "gate-precommit")
-    mkdir -p "$proj/.git"
+    git -C "$proj" init -q
     cd "$proj"
     bash "$MANGOLOVE_DIR/lib/project-init.sh" init --strict
     [ -f "$proj/.git/hooks/pre-commit" ]
@@ -70,12 +70,41 @@ _strict_node_project() {
 
 @test "gate: preserves an existing non-MangoLove pre-commit" {
     local proj; proj=$(_strict_node_project "gate-precommit-existing")
-    mkdir -p "$proj/.git/hooks"
+    git -C "$proj" init -q
     printf '#!/bin/sh\necho mine\n' > "$proj/.git/hooks/pre-commit"
     cd "$proj"
     bash "$MANGOLOVE_DIR/lib/project-init.sh" init --strict
     grep -q "echo mine" "$proj/.git/hooks/pre-commit"
     ! grep -q "MangoLove" "$proj/.git/hooks/pre-commit"
+}
+
+@test "gate: installs pre-commit in a git worktree (.git is a file)" {
+    local main; main=$(create_fake_project "gate-wt-main")
+    git -C "$main" init -q
+    git -C "$main" -c user.email=t@t.com -c user.name=t commit -q --allow-empty -m init
+    local wt="$TEST_DIR/gate-wt-linked"
+    git -C "$main" worktree add -q "$wt" -b wtbranch
+    echo '{"name":"app","scripts":{"test":"jest","lint":"eslint ."}}' > "$wt/package.json"
+    echo '{}' > "$wt/.eslintrc.json"
+    cd "$wt"
+    bash "$MANGOLOVE_DIR/lib/project-init.sh" init --strict
+    local hd; hd="$(git -C "$wt" rev-parse --git-path hooks)"
+    case "$hd" in /*) : ;; *) hd="$wt/$hd" ;; esac
+    [ -f "$hd/pre-commit" ]
+    grep -q "MangoLove" "$hd/pre-commit"
+}
+
+@test "gate: --strict wires PreToolUse into a pre-existing settings.json" {
+    command -v python3 >/dev/null 2>&1 || skip "needs python3 for merge"
+    local proj; proj=$(_strict_node_project "gate-upgrade")
+    mkdir -p "$proj/.claude"
+    printf '{\n  "hooks": {}\n}\n' > "$proj/.claude/settings.json"
+    cd "$proj"
+    bash "$MANGOLOVE_DIR/lib/project-init.sh" init --strict
+    grep -q "PreToolUse" "$proj/.claude/settings.json"
+    grep -q "quality-gate.sh" "$proj/.claude/settings.json"
+    grep -q "irreversible-guard.sh" "$proj/.claude/settings.json"
+    python3 -c "import json; json.load(open('$proj/.claude/settings.json'))"
 }
 
 # ── 동작 (controlled gate.conf) ──
@@ -106,6 +135,20 @@ _gate_with_conf() {
     local g; g=$(_gate_with_conf "g-noncommit" 'GATE_LINT=block' 'LINT_CMD=false' 'GATE_TEST=off')
     run bash "$g/quality-gate.sh" pretooluse <<< '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}'
     [ "$status" -eq 0 ]
+}
+
+@test "gate: pretooluse allows read-only git that merely mentions commit" {
+    local g; g=$(_gate_with_conf "g-gitlog" 'GATE_LINT=block' 'LINT_CMD=false' 'GATE_TEST=off')
+    run bash "$g/quality-gate.sh" pretooluse <<< '{"tool_name":"Bash","tool_input":{"command":"git log --grep=commit --oneline"}}'
+    [ "$status" -eq 0 ]
+    run bash "$g/quality-gate.sh" pretooluse <<< '{"tool_name":"Bash","tool_input":{"command":"git config commit.gpgsign true"}}'
+    [ "$status" -eq 0 ]
+}
+
+@test "gate: pretooluse still gates git -C <dir> commit" {
+    local g; g=$(_gate_with_conf "g-gitc" 'GATE_LINT=block' 'LINT_CMD=false' 'GATE_TEST=off')
+    run bash "$g/quality-gate.sh" pretooluse <<< '{"tool_name":"Bash","tool_input":{"command":"git -C /repo commit -m x"}}'
+    [ "$status" -eq 2 ]
 }
 
 @test "gate: warn step failure does not block (exit 0)" {
@@ -225,6 +268,28 @@ _secret_repo() {
     git -C "$repo" add ok.js
     cd "$repo"
     run bash "$repo/.mangolove/hooks/quality-gate.sh" precommit
+    [ "$status" -eq 0 ]
+}
+
+@test "gate: pretooluse commit -am scans unstaged tracked changes for secrets" {
+    local repo; repo=$(_secret_repo "sec-commit-a")
+    printf 'x = 1\n' > "$repo/app.py"
+    git -C "$repo" add app.py
+    git -C "$repo" commit -qm init
+    printf 'KEY = "AKIAIOSFODNN7EXAMPLE"\n' >> "$repo/app.py"   # unstaged 수정
+    cd "$repo"
+    run bash "$repo/.mangolove/hooks/quality-gate.sh" pretooluse <<< '{"tool_name":"Bash","tool_input":{"command":"git commit -am wip"}}'
+    [ "$status" -eq 2 ]
+}
+
+@test "gate: pretooluse commit -m (no -a) does not scan unstaged changes" {
+    local repo; repo=$(_secret_repo "sec-commit-m")
+    printf 'x = 1\n' > "$repo/app.py"
+    git -C "$repo" add app.py
+    git -C "$repo" commit -qm init
+    printf 'KEY = "AKIAIOSFODNN7EXAMPLE"\n' >> "$repo/app.py"   # unstaged (커밋되지 않음)
+    cd "$repo"
+    run bash "$repo/.mangolove/hooks/quality-gate.sh" pretooluse <<< '{"tool_name":"Bash","tool_input":{"command":"git commit -m wip"}}'
     [ "$status" -eq 0 ]
 }
 

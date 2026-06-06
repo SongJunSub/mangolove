@@ -18,15 +18,21 @@ set -uo pipefail
 GATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODE="${1:-precommit}"
 
-# PreToolUse 모드: stdin 의 JSON 명령을 보고 git commit 일 때만 게이트한다.
-# (matcher 가 Bash 전체라, 커밋이 아닌 명령은 즉시 통과시킨다.)
+# PreToolUse 모드: stdin JSON 에서 bare 명령을 추출해 git ... commit 서브커맨드일 때만 게이트.
+# (matcher 가 Bash 전체라, git log --grep=commit / git config commit.x 같은 비커밋은 통과시킨다.)
 if [ "$MODE" = "pretooluse" ]; then
     input="$(cat)"
-    cmd="$(printf '%s' "$input" | grep -oE '"command"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"' | head -1)"
-    case "$cmd" in
-        *git*commit*) : ;;   # 커밋 명령 → 게이트 진행
-        *) exit 0 ;;          # 그 외 → 허용
-    esac
+    raw="$(printf '%s' "$input" | grep -oE '"command"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"' | head -1)"
+    cmd="${raw#*\"command\"*:*\"}"
+    cmd="${cmd%\"}"
+    # git 을 단어 경계로 잡고, 옵션 토큰(-C dir 등 인자 동반 포함)을 건너뛴 뒤 commit 서브커맨드만 매칭
+    if ! printf '%s' "$cmd" | grep -qE '(^|[^[:alnum:]_])git([[:space:]]+-[^[:space:]]+([[:space:]]+[^-][^[:space:]]*)?)*[[:space:]]+commit([[:space:]]|$)'; then
+        exit 0
+    fi
+    # git commit -a/-am 은 tracked 변경을 자동 스테이징하므로 시크릿 스캔을 인덱스+워킹트리(HEAD)로 확대
+    if printf '%s' "$cmd" | grep -qE 'commit[[:space:]]+(-[a-zA-Z]*a|--all)'; then
+        SECRET_DIFF_REF="HEAD"
+    fi
 fi
 
 # 감사되는 우회구 — strict.md 는 우회를 금지하나 물리적으로는 존재한다.

@@ -446,12 +446,6 @@ generate_settings() {
 
     local settings_file="$settings_dir/settings.json"
 
-    # Don't overwrite existing settings
-    if [ -f "$settings_file" ]; then
-        echo -e "  ${Y}Skipped:${R} .claude/settings.json already exists"
-        return 0
-    fi
-
     # Sync script path
     local mangolove_dir="${MANGOLOVE_DIR:-$HOME/.mangolove}"
     local sync_cmd="bash '${mangolove_dir}/lib/project-init.sh' sync --quiet 2>/dev/null; exit 0"
@@ -487,13 +481,62 @@ generate_settings() {
         joined="${joined}${e}"
     done
 
-    cat > "$settings_file" << SETTINGSEOF
-{
-  "hooks": {
+    local hooks_obj="{
     ${joined}
-  }
+  }"
+
+    # 새 파일이면 그대로 작성한다.
+    if [ ! -f "$settings_file" ]; then
+        cat > "$settings_file" << SETTINGSEOF
+{
+  "hooks": ${hooks_obj}
 }
 SETTINGSEOF
+        SETTINGS_RESULT="created"
+        return 0
+    fi
+
+    # 기존 settings.json 이 있다 — 이미 게이트가 연결됐거나 비-strict 면 손대지 않는다.
+    if [ "$strict" != "true" ] || grep -q "quality-gate.sh" "$settings_file" 2>/dev/null; then
+        SETTINGS_RESULT="skipped"
+        return 0
+    fi
+
+    # strict 인데 게이트가 없다 — 기존 hook 을 보존하며 게이트/가드 hook 을 병합한다 (덮어쓰지 않음).
+    if command -v python3 >/dev/null 2>&1 && _merge_settings_hooks "$settings_file" "$hooks_obj"; then
+        SETTINGS_RESULT="merged"
+    else
+        SETTINGS_RESULT="manual"
+        echo -e "  ${Y}수동 조치 필요:${R} 기존 .claude/settings.json 에 게이트 hook 을 자동 병합하지 못했습니다 (python3 필요)."
+        echo -e "  ${DIM}PreToolUse(Bash)에 quality-gate.sh + irreversible-guard.sh 를 추가하세요.${R}"
+    fi
+}
+
+# 기존 settings.json 에 mango hook 객체를 병합한다 (기존 hook 보존). 성공 시 0.
+_merge_settings_hooks() {
+    local file="$1" hooks_obj="$2"
+    python3 - "$file" "$hooks_obj" << 'PYEOF'
+import json, sys
+path = sys.argv[1]
+try:
+    mango = json.loads(sys.argv[2])
+    with open(path) as fh:
+        data = json.load(fh)
+except Exception:
+    sys.exit(1)
+if not isinstance(data, dict):
+    sys.exit(1)
+hooks = data.setdefault("hooks", {})
+if not isinstance(hooks, dict):
+    sys.exit(1)
+for event, entries in mango.items():
+    cur = hooks.setdefault(event, [])
+    if isinstance(cur, list):
+        cur.extend(entries)
+with open(path, "w") as fh:
+    json.dump(data, fh, indent=2, ensure_ascii=False)
+    fh.write("\n")
+PYEOF
 }
 
 # ─────────────────────────────────────────────
@@ -524,7 +567,7 @@ generate_gate() {
     if [ ! -f "$conf" ]; then
         local lint_mode="off" test_mode="off"
         [ -n "$PROJ_LINT" ] && lint_mode="block"
-        [ -n "$PROJ_TEST" ] && test_mode="warn"
+        # 테스트는 기본 off — 전체 스위트를 매 커밋 동기 실행하면 마찰이 크다 (gate.conf 에서 켜라).
         cat > "$conf" << CONFEOF
 # MangoLove quality gate 설정 — 커밋 경계 차단 게이트 (버전관리 대상)
 # 경고: LINT_CMD/TEST_CMD 는 커밋 시 실행되는 셸 명령(신뢰 표면)이다. 신뢰하지 않는
@@ -542,10 +585,16 @@ TEST_CMD="${PROJ_TEST}"
 CONFEOF
     fi
 
-    # 3. git pre-commit — 있을 때만, 기존 hook 보존 (사람 커밋까지 막는 심층 방어)
-    if [ -d "$dir/.git" ]; then
-        local pc="$dir/.git/hooks/pre-commit"
-        mkdir -p "$dir/.git/hooks"
+    # 3. git pre-commit — 워크트리/서브모듈(.git 가 파일)과 core.hooksPath 도 지원 (사람 커밋까지 막는 심층 방어)
+    if git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        local hooks_rel hooks_dir pc
+        hooks_rel="$(git -C "$dir" rev-parse --git-path hooks 2>/dev/null)"
+        case "$hooks_rel" in
+            /*) hooks_dir="$hooks_rel" ;;
+            *)  hooks_dir="$dir/$hooks_rel" ;;
+        esac
+        mkdir -p "$hooks_dir"
+        pc="$hooks_dir/pre-commit"
         if [ ! -f "$pc" ]; then
             cat > "$pc" << 'PCEOF'
 #!/usr/bin/env bash
@@ -728,7 +777,11 @@ ${team_onboarding}"
     echo -e "  ${G}+${R} .claude/commands/ (${cmd_count} commands)"
 
     generate_settings "$target_dir" "$strict"
-    echo -e "  ${G}+${R} .claude/settings.json"
+    case "${SETTINGS_RESULT:-}" in
+        created) echo -e "  ${G}+${R} .claude/settings.json" ;;
+        merged)  echo -e "  ${G}+${R} .claude/settings.json (게이트 hook 병합)" ;;
+        skipped) echo -e "  ${DIM}= .claude/settings.json (이미 존재)${R}" ;;
+    esac
 
     generate_gate "$target_dir" "$strict"
     [ -d "$target_dir/.mangolove/hooks" ] && echo -e "  ${G}+${R} .mangolove/hooks/ (커밋 차단 게이트)"
@@ -837,7 +890,11 @@ do_init() {
 
     # 3. .claude/settings.json
     generate_settings "$target_dir" "$strict"
-    echo -e "    ${G}+${R} .claude/settings.json"
+    case "${SETTINGS_RESULT:-}" in
+        created) echo -e "    ${G}+${R} .claude/settings.json" ;;
+        merged)  echo -e "    ${G}+${R} .claude/settings.json (게이트 hook 병합)" ;;
+        skipped) echo -e "    ${DIM}= .claude/settings.json (이미 존재)${R}" ;;
+    esac
 
     # 3-1. 커밋 경계 차단 게이트 (.mangolove/hooks/)
     generate_gate "$target_dir" "$strict"

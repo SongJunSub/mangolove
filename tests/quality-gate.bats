@@ -168,3 +168,16 @@ _secret_repo() {
     run bash "$repo/.mangolove/hooks/quality-gate.sh" precommit
     [ "$status" -eq 0 ]
 }
+
+# ── 게이트가 추적되는 위치에 설치되는지 (D4: 버전관리/감사 가능) ──
+
+@test "gate: .mangolove gate dir stays tracked while .claude is gitignored" {
+    local proj; proj=$(_strict_node_project "gate-tracked")
+    echo "node_modules/" > "$proj/.gitignore"
+    cd "$proj"
+    bash "$MANGOLOVE_DIR/lib/project-init.sh" init --strict
+    # .claude/ 는 ignore 되지만 게이트가 사는 .mangolove/ 는 추적되어야 한다
+    grep -qE "^\.claude/" "$proj/.gitignore"
+    ! grep -q ".mangolove" "$proj/.gitignore"
+    [ -f "$proj/.mangolove/hooks/quality-gate.sh" ]
+}

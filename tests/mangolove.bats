@@ -112,6 +112,17 @@ teardown() {
     [[ "$output" == *"Modes"* ]]
 }
 
+@test "doctor: reports installed project quality gate in cwd" {
+    local proj="$TEST_DIR/doctor-gate"
+    mkdir -p "$proj/.mangolove/hooks"
+    cp "$MANGOLOVE_DIR/lib/quality-gate.sh" "$proj/.mangolove/hooks/quality-gate.sh"
+    cd "$proj"
+    run bash "$MANGOLOVE_DIR/bin/mangolove" doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Project gate"* ]]
+    [[ "$output" == *"Quality gate installed"* ]]
+}
+
 # ─────────────────────────────────────────────
 # mode validation
 # ─────────────────────────────────────────────

@@ -402,6 +402,11 @@ do_doctor() {
         echo ""
         echo -e "  \033[2mProject gate (cwd):\033[0m"
         echo -e "  \033[38;5;113m✓\033[0m Quality gate installed (.mangolove/hooks/)"
+        if [ -f "$(pwd)/.mangolove/hooks/irreversible-guard.sh" ]; then
+            echo -e "  \033[38;5;113m✓\033[0m Irreversible-command guard installed"
+        else
+            echo -e "  \033[38;5;220m△\033[0m irreversible-guard.sh missing — PreToolUse 가드가 fail-open(미차단)됩니다."
+        fi
         if git rev-parse --git-dir > /dev/null 2>&1; then
             if git ls-files --error-unmatch .mangolove/hooks/quality-gate.sh > /dev/null 2>&1; then
                 echo -e "  \033[38;5;113m✓\033[0m Gate is version-controlled (변조/누락이 diff 로 감사됨)"

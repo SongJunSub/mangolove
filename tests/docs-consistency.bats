@@ -15,12 +15,17 @@ setup() {
     ! grep -qi "5-phase" "$REPO/README.md"
     ! grep -qi "4-phase" "$REPO/README.md"
     ! grep -q "5단계 품질 워크플로우" "$REPO/README.md"
+    # 3인 리뷰는 Large 트랙 전용 — '자동으로 ... 3인 병렬 리뷰' 무조건 흐름 표현은 드리프트다.
+    ! grep -qE 'automatically follows.*3-agent parallel review' "$REPO/README.md"
+    ! grep -qE '자동으로.*3인 병렬 리뷰' "$REPO/README.md"
 }
 
 @test "methodology: strict.md defines all four tracks (single source of truth)" {
+    # 단어 출현이 아니라 트랙 정의 블록(워크플로우 헤더)과 점수 매핑 표의 존재를 강제한다.
     for track in Trivial Small Medium Large; do
-        grep -q "$track" "$REPO/methodology/strict.md"
+        grep -qE "^#+ +${track} Track" "$REPO/methodology/strict.md"
     done
+    grep -qE '\| 합산 점수 \| 규모 \| 트랙 \|' "$REPO/methodology/strict.md"
 }
 
 @test "version: bin/mangolove MANGOLOVE_VERSION matches .version" {
@@ -32,7 +37,9 @@ setup() {
 }
 
 @test "version: README footer version matches .version" {
-    local file_ver
+    local file_ver esc
     file_ver=$(tr -d '[:space:]' < "$REPO/.version")
-    grep -q "v${file_ver}" "$REPO/README.md"
+    [ -n "$file_ver" ]
+    esc=$(printf '%s' "$file_ver" | sed 's/[.]/\\./g')
+    grep -qE "^\*\*MangoLove\*\* v${esc}\$" "$REPO/README.md"
 }

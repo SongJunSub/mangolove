@@ -123,6 +123,39 @@ teardown() {
     [[ "$output" == *"Quality gate installed"* ]]
 }
 
+@test "doctor: reports a committed gate as version-controlled" {
+    local proj="$TEST_DIR/doctor-gate-tracked"
+    mkdir -p "$proj/.mangolove/hooks"
+    cp "$MANGOLOVE_DIR/lib/quality-gate.sh" "$proj/.mangolove/hooks/quality-gate.sh"
+    git -C "$proj" init -q
+    git -C "$proj" -c user.email=t@t.com -c user.name=t add .mangolove
+    git -C "$proj" -c user.email=t@t.com -c user.name=t commit -qm gate
+    cd "$proj"
+    run bash "$MANGOLOVE_DIR/bin/mangolove" doctor
+    [[ "$output" == *"version-controlled"* ]]
+}
+
+@test "doctor: warns when the gate is not committed" {
+    local proj="$TEST_DIR/doctor-gate-uncommitted"
+    mkdir -p "$proj/.mangolove/hooks"
+    cp "$MANGOLOVE_DIR/lib/quality-gate.sh" "$proj/.mangolove/hooks/quality-gate.sh"
+    git -C "$proj" init -q
+    cd "$proj"
+    run bash "$MANGOLOVE_DIR/bin/mangolove" doctor
+    [[ "$output" == *"not committed"* ]]
+}
+
+@test "doctor: warns when .mangolove is gitignored (silently disabled)" {
+    local proj="$TEST_DIR/doctor-gate-ignored"
+    mkdir -p "$proj/.mangolove/hooks"
+    cp "$MANGOLOVE_DIR/lib/quality-gate.sh" "$proj/.mangolove/hooks/quality-gate.sh"
+    git -C "$proj" init -q
+    echo '.mangolove/' > "$proj/.gitignore"
+    cd "$proj"
+    run bash "$MANGOLOVE_DIR/bin/mangolove" doctor
+    [[ "$output" == *"gitignored"* ]]
+}
+
 # ─────────────────────────────────────────────
 # mode validation
 # ─────────────────────────────────────────────

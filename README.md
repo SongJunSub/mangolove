@@ -21,7 +21,7 @@ This single command:
 4. **Configures** `.claude/settings.json` with PostToolUse hooks that run your linter after every code change
 5. **Updates** `.gitignore` to exclude `.claude/` local settings
 
-Now when you run `claude`, it automatically follows: **Plan first, implement with quality checks, self-review, 3-agent parallel review, then report** — no manual commands needed.
+Now when you run `claude`, it **auto-classifies each task by risk** and runs a proportional workflow — from a quick implement → build/lint → report for Trivial changes, up to Spec + adversarial review + 3-agent review for Large ones — no manual commands needed.
 
 ## Why MangoLove
 
@@ -44,7 +44,7 @@ mangolove init --strict
 
 In strict mode, every task is auto-classified by a **Change Impact Score** into one of four tracks — **Trivial / Small / Medium / Large** — and each track runs a proportional workflow (heavier tracks add Spec writing, adversarial Spec review, and multi-agent review). The methodology is the single source of truth in [`methodology/strict.md`](methodology/strict.md) and is **injected into the system prompt at runtime** — it is not copied into `CLAUDE.md`, so it never goes stale.
 
-The phases below are the **full (Large-track) workflow**; lighter tracks run a subset (Trivial is just implement → build/lint → report):
+The phases below show the **core review loop**. The Large track additionally front-loads Spec writing, adversarial Spec review, and Product/Engineering review before implementation — see [`methodology/strict.md`](methodology/strict.md) for the full 10-step Large track:
 
 ### Phase 1: Analysis (Always First)
 When you describe a problem, Claude automatically:
@@ -259,11 +259,11 @@ mangolove init --strict
 4. `.claude/settings.json`에 PostToolUse 훅을 **설정** (코드 변경 시 자동 린터 실행)
 5. `.gitignore`를 **업데이트** (`.claude/` 로컬 설정 제외)
 
-`claude`를 실행하면 자동으로: **분석 -> 구현 -> 셀프 리뷰 -> 3인 병렬 리뷰 -> 완료 보고** — 별도 명령 불필요.
+`claude`를 실행하면 **작업 위험도에 따라 트랙을 자동 분류**해 비례하는 워크플로우(Trivial은 구현 → 빌드/린트 → 보고, Large는 Spec + 적대적 리뷰 + 3인 리뷰)를 적용합니다 — 별도 명령 불필요.
 
 ## Strict Mode: 위험도 기반 품질 워크플로우
 
-strict 모드에서는 모든 작업이 **Change Impact Score**로 4개 트랙(**Trivial / Small / Medium / Large**)으로 자동 분류되고, 트랙별로 비례하는 워크플로우가 적용됩니다. 방법론의 단일 출처는 [`methodology/strict.md`](methodology/strict.md)이며 **런타임에 시스템 프롬프트로 주입**됩니다(`CLAUDE.md`에 복제하지 않으므로 낡지 않음). 아래 단계는 **전체(Large 트랙) 워크플로우**이고, 가벼운 트랙은 그 부분집합만 수행합니다.
+strict 모드에서는 모든 작업이 **Change Impact Score**로 4개 트랙(**Trivial / Small / Medium / Large**)으로 자동 분류되고, 트랙별로 비례하는 워크플로우가 적용됩니다. 방법론의 단일 출처는 [`methodology/strict.md`](methodology/strict.md)이며 **런타임에 시스템 프롬프트로 주입**됩니다(`CLAUDE.md`에 복제하지 않으므로 낡지 않음). 아래 단계는 **핵심 리뷰 루프**이며, Large 트랙은 구현 이전에 Spec 작성·적대적 Spec 리뷰·Product/Engineering 리뷰를 추가로 수행합니다(전체 10단계는 strict.md 참조).
 
 ### 1단계: 분석 (항상 먼저)
 - 관련 파일을 모두 읽고 전체 호출 체인을 추적

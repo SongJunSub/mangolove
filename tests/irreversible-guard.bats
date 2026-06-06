@@ -88,6 +88,56 @@ _json() {
     [ "$status" -eq 0 ]
 }
 
+@test "guard: blocks --force even with --force-with-lease=ref present" {
+    run bash "$(_guard)" <<< "$(_json 'git push --force-with-lease=main --force origin main')"
+    [ "$status" -eq 2 ]
+}
+
+@test "guard: blocks rm -rf with a quoted root path" {
+    run bash "$(_guard)" <<< "$(_json 'rm -rf "/"')"
+    [ "$status" -eq 2 ]
+}
+
+@test "guard: blocks rm with separated flags" {
+    run bash "$(_guard)" <<< "$(_json 'rm -r -f /')"
+    [ "$status" -eq 2 ]
+}
+
+@test "guard: blocks rm with long flags" {
+    run bash "$(_guard)" <<< "$(_json 'rm --recursive --force /')"
+    [ "$status" -eq 2 ]
+}
+
+@test "guard: allows rm -rf on a relative project dir" {
+    run bash "$(_guard)" <<< "$(_json 'rm -rf node_modules')"
+    [ "$status" -eq 0 ]
+}
+
+@test "guard: blocks TRUNCATE without TABLE via a sql client" {
+    run bash "$(_guard)" <<< "$(_json 'psql -c "TRUNCATE users"')"
+    [ "$status" -eq 2 ]
+}
+
+@test "guard: blocks DELETE without WHERE when WHERE is in another statement" {
+    run bash "$(_guard)" <<< "$(_json 'psql -c "DELETE FROM logs; SELECT 1 FROM t WHERE id=1"')"
+    [ "$status" -eq 2 ]
+}
+
+@test "guard: allows echo containing SQL keywords" {
+    run bash "$(_guard)" <<< "$(_json 'echo "next step: DROP TABLE staging"')"
+    [ "$status" -eq 0 ]
+}
+
+@test "guard: allows a commit message mentioning DROP TABLE" {
+    run bash "$(_guard)" <<< "$(_json 'git commit -m "fix: handle DROP TABLE in parser"')"
+    [ "$status" -eq 0 ]
+}
+
+@test "guard: allows grep for a SQL keyword" {
+    run bash "$(_guard)" <<< "$(_json 'grep -rn "DROP TABLE" migrations/')"
+    [ "$status" -eq 0 ]
+}
+
 @test "guard: --strict installs irreversible-guard and wires it into PreToolUse" {
     local proj; proj=$(create_fake_project "guard-install")
     echo '{"name":"app","scripts":{"test":"jest","lint":"eslint ."}}' > "$proj/package.json"

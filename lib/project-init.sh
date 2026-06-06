@@ -456,53 +456,100 @@ generate_settings() {
     local mangolove_dir="${MANGOLOVE_DIR:-$HOME/.mangolove}"
     local sync_cmd="bash '${mangolove_dir}/lib/project-init.sh' sync --quiet 2>/dev/null; exit 0"
 
-    if [ "$strict" = "true" ] && [ -n "$PROJ_LINT" ]; then
-        local lint_cmd="${PROJ_LINT} 2>&1 | tail -30; exit 0"
+    # hook 이벤트별 JSON 조각을 조립한다 (SessionStart 항상 + 조건부 PostToolUse/PreToolUse).
+    local entries=()
 
-        cat > "$settings_file" << SETTINGSEOF
+    entries+=("\"SessionStart\": [
+      { \"hooks\": [ { \"type\": \"command\", \"command\": \"${sync_cmd}\" } ] }
+    ]")
+
+    if [ "$strict" = "true" ] && [ -n "$PROJ_LINT" ]; then
+        # 편집 시점 린트 — 비차단 조언 (빠른 피드백, 흐름을 끊지 않음)
+        local lint_cmd="${PROJ_LINT} 2>&1 | tail -30; exit 0"
+        entries+=("\"PostToolUse\": [
+      { \"matcher\": \"Write|Edit\", \"hooks\": [ { \"type\": \"command\", \"command\": \"${lint_cmd}\" } ] }
+    ]")
+    fi
+
+    if [ "$strict" = "true" ] && { [ -n "$PROJ_LINT" ] || [ -n "$PROJ_TEST" ]; }; then
+        # 커밋 시점 결정적 차단 게이트 — git commit 호출을 가로채 품질 게이트 실행 (실패 시 exit 2)
+        local gate_cmd="bash \\\"\${CLAUDE_PROJECT_DIR}/.mangolove/hooks/quality-gate.sh\\\" pretooluse"
+        entries+=("\"PreToolUse\": [
+      { \"matcher\": \"Bash\", \"hooks\": [ { \"type\": \"command\", \"command\": \"${gate_cmd}\" } ] }
+    ]")
+    fi
+
+    local joined="" e
+    for e in "${entries[@]}"; do
+        [ -n "$joined" ] && joined="${joined},
+    "
+        joined="${joined}${e}"
+    done
+
+    cat > "$settings_file" << SETTINGSEOF
 {
   "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${sync_cmd}"
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Write|Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${lint_cmd}"
-          }
-        ]
-      }
-    ]
+    ${joined}
   }
 }
 SETTINGSEOF
-    else
-        cat > "$settings_file" << SETTINGSEOF
-{
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${sync_cmd}"
-          }
-        ]
-      }
-    ]
-  }
 }
-SETTINGSEOF
+
+# ─────────────────────────────────────────────
+# Generate commit-boundary quality gate (.mangolove/hooks/)
+# 산문 강제를 결정적 차단 게이트로 인코딩: git pre-commit(사람 커밋까지) + Claude PreToolUse(피드백).
+# 게이트 로직은 .mangolove/ 아래에 두어 버전관리/감사 대상으로 만든다 (.claude/ 와 달리 추적됨).
+# ─────────────────────────────────────────────
+generate_gate() {
+    local dir="$1"
+    local strict="$2"
+
+    [ "$strict" = "true" ] || return 0
+    { [ -n "$PROJ_LINT" ] || [ -n "$PROJ_TEST" ]; } || return 0
+
+    local gate_dir="$dir/.mangolove/hooks"
+    mkdir -p "$gate_dir"
+
+    # 1. 게이트 러너 — 항상 최신 템플릿으로 설치 (버전관리 대상)
+    local template="${MANGOLOVE_DIR}/lib/quality-gate.sh"
+    if [ -f "$template" ]; then
+        cp "$template" "$gate_dir/quality-gate.sh"
+        chmod +x "$gate_dir/quality-gate.sh"
+    fi
+
+    # 2. gate.conf — 사용자 커스터마이즈 보존 (있으면 덮어쓰지 않음)
+    local conf="$gate_dir/gate.conf"
+    if [ ! -f "$conf" ]; then
+        local lint_mode="off" test_mode="off"
+        [ -n "$PROJ_LINT" ] && lint_mode="block"
+        [ -n "$PROJ_TEST" ] && test_mode="warn"
+        cat > "$conf" << CONFEOF
+# MangoLove quality gate 설정 — 커밋 경계 차단 게이트 (버전관리 대상)
+# 단계 모드: block(실패 시 커밋 차단) | warn(경고만, 비차단) | off
+# 린트 부채가 많으면 GATE_LINT=warn 로, 테스트가 빠르면 GATE_TEST=block 로 조정.
+GATE_LINT=${lint_mode}
+GATE_TEST=${test_mode}
+LINT_CMD="${PROJ_LINT}"
+TEST_CMD="${PROJ_TEST}"
+CONFEOF
+    fi
+
+    # 3. git pre-commit — 있을 때만, 기존 hook 보존 (사람 커밋까지 막는 심층 방어)
+    if [ -d "$dir/.git" ]; then
+        local pc="$dir/.git/hooks/pre-commit"
+        mkdir -p "$dir/.git/hooks"
+        if [ ! -f "$pc" ]; then
+            cat > "$pc" << 'PCEOF'
+#!/usr/bin/env bash
+# Installed by MangoLove — delegates to the tracked quality gate.
+root="$(git rev-parse --show-toplevel)"
+[ -f "$root/.mangolove/hooks/quality-gate.sh" ] || exit 0
+exec bash "$root/.mangolove/hooks/quality-gate.sh" precommit
+PCEOF
+            chmod +x "$pc"
+        elif ! grep -q "MangoLove" "$pc" 2>/dev/null; then
+            echo -e "  ${Y}Skipped:${R} .git/hooks/pre-commit already exists (not MangoLove-managed)"
+        fi
     fi
 }
 
@@ -675,6 +722,9 @@ ${team_onboarding}"
     generate_settings "$target_dir" "$strict"
     echo -e "  ${G}+${R} .claude/settings.json"
 
+    generate_gate "$target_dir" "$strict"
+    [ -d "$target_dir/.mangolove/hooks" ] && echo -e "  ${G}+${R} .mangolove/hooks/ (커밋 차단 게이트)"
+
     update_gitignore "$target_dir"
 
     echo ""
@@ -780,6 +830,10 @@ do_init() {
     # 3. .claude/settings.json
     generate_settings "$target_dir" "$strict"
     echo -e "    ${G}+${R} .claude/settings.json"
+
+    # 3-1. 커밋 경계 차단 게이트 (.mangolove/hooks/)
+    generate_gate "$target_dir" "$strict"
+    [ -d "$target_dir/.mangolove/hooks" ] && echo -e "    ${G}+${R} .mangolove/hooks/ (커밋 차단 게이트)"
 
     # 4. Create learnings file
     local learnings_file="$target_dir/.claude/learnings.md"

@@ -35,8 +35,17 @@ if [ "${MANGOLOVE_SKIP_GATE:-}" = "1" ]; then
     exit 0
 fi
 
-# shellcheck source=/dev/null
-[ -f "$GATE_DIR/gate.conf" ] && . "$GATE_DIR/gate.conf"
+# gate.conf 를 셸로 source 하지 않는다 — 클론/공유된 레포의 악성 gate.conf 가 source
+# 시점에 임의 코드를 실행하는 공급망 위험(RCE)을 차단. 화이트리스트 KEY=VALUE 만 파싱한다.
+if [ -f "$GATE_DIR/gate.conf" ]; then
+    while IFS='=' read -r _k _v; do
+        case "$_k" in
+            GATE_LINT|GATE_TEST|GATE_SECRET|SECRET_SCANNER|LINT_CMD|TEST_CMD)
+                _v="${_v%\"}"; _v="${_v#\"}"   # 값 양끝 큰따옴표 제거
+                printf -v "$_k" '%s' "$_v" ;;
+        esac
+    done < <(grep -E '^(GATE_LINT|GATE_TEST|GATE_SECRET|SECRET_SCANNER|LINT_CMD|TEST_CMD)=' "$GATE_DIR/gate.conf")
+fi
 
 GATE_LINT="${GATE_LINT:-off}"
 GATE_TEST="${GATE_TEST:-off}"
@@ -67,37 +76,72 @@ run_step() {
 }
 
 # 스테이징된 변경에서 시크릿/자격증명 의심 패턴을 스캔한다 (값은 절대 출력하지 않음).
-# 기본은 내장 정규식(이식성·무의존). SECRET_SCANNER=gitleaks 면 gitleaks 사용(설치 시).
-# 시크릿은 한 번 커밋되면 코드에서 지워도 회수 불가 — 비가역 표면이라 결정적으로 막는다.
-scan_secrets() {
+# 시크릿은 한 번 커밋되면 회수 불가 — 비가역 표면이라 고신뢰 패턴은 결정적으로 막는다.
+# 고신뢰 prefix 패턴(오탐 거의 없음)은 차단, 제네릭 keyword=value 휴리스틱은 오탐 위험이 커 경고만.
+# SECRET_SCANNER=gitleaks 면 gitleaks 로 위임(설치 시).
+
+# 추가(+)된 스테이징 라인을 stdout 으로 (없으면 빈 출력). SECRET_DIFF_REF 로 범위 조정.
+_staged_added() {
     git rev-parse --git-dir >/dev/null 2>&1 || return 0
-    local staged added
-    staged="$(git diff --cached --no-color 2>/dev/null)"
+    local staged
+    staged="$(git diff "${SECRET_DIFF_REF:---cached}" --no-color 2>/dev/null)"
     [ -z "$staged" ] && return 0
-    if [ "$SECRET_SCANNER" = "gitleaks" ] && command -v gitleaks >/dev/null 2>&1; then
-        gitleaks protect --staged --no-banner >/dev/null 2>&1 && return 0
-        return 1
-    fi
-    added="$(printf '%s\n' "$staged" | grep -E '^\+' | grep -vE '^\+\+\+' || true)"
-    [ -z "$added" ] && return 0
-    printf '%s\n' "$added" | grep -qE 'BEGIN [A-Z ]*PRIVATE KEY' && return 1
-    printf '%s\n' "$added" | grep -qE 'AKIA[0-9A-Z]{16}' && return 1
-    printf '%s\n' "$added" | grep -qE 'gh[pousr]_[A-Za-z0-9]{36}' && return 1
-    printf '%s\n' "$added" | grep -qE 'xox[baprs]-[A-Za-z0-9-]{10,}' && return 1
-    printf '%s\n' "$added" | grep -qiE '(secret|api[_-]?key|access[_-]?token|password)[^A-Za-z0-9]{1,4}[A-Za-z0-9/_+.-]{20,}' && return 1
-    return 0
+    printf '%s\n' "$staged" | grep -E '^\+' | grep -vE '^\+\+\+'
+}
+
+# 고신뢰: 매치 시 0(found). private key / 클라우드·서비스 토큰 / 비밀번호 포함 접속 URL.
+_secret_definite() {
+    local a="$1"
+    printf '%s\n' "$a" | grep -qE 'BEGIN [A-Z ]*PRIVATE KEY' && return 0
+    printf '%s\n' "$a" | grep -qE 'AKIA[0-9A-Z]{16}' && return 0
+    printf '%s\n' "$a" | grep -qE 'gh[pousr]_[A-Za-z0-9]{36}' && return 0
+    printf '%s\n' "$a" | grep -qE 'github_pat_[0-9A-Za-z_]{22,}' && return 0
+    printf '%s\n' "$a" | grep -qE 'xox[baprs]-[A-Za-z0-9-]{10,}' && return 0
+    printf '%s\n' "$a" | grep -qE 'AIza[0-9A-Za-z_-]{35}' && return 0
+    printf '%s\n' "$a" | grep -qE 'sk_(live|test)_[0-9A-Za-z]{24,}' && return 0
+    printf '%s\n' "$a" | grep -qE 'npm_[A-Za-z0-9]{36}' && return 0
+    printf '%s\n' "$a" | grep -qE 'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}' && return 0
+    printf '%s\n' "$a" | grep -qE '://[^:/@[:space:]]+:[^@/[:space:]]+@' && return 0
+    return 1
+}
+
+# 제네릭 휴리스틱: keyword 뒤 긴 값. 오탐 위험이 커 경고 전용. 매치 시 0(found).
+_secret_heuristic() {
+    printf '%s\n' "$1" | grep -qiE '(secret|api[_-]?key|access[_-]?token|password)[^A-Za-z0-9]{1,4}[A-Za-z0-9/_+.=-]{20,}' && return 0
+    return 1
 }
 
 run_step "lint" "$GATE_LINT" "$LINT_CMD"
 run_step "test" "$GATE_TEST" "$TEST_CMD"
 
-if [ "$GATE_SECRET" != "off" ] && ! scan_secrets; then
-    if [ "$GATE_SECRET" = "block" ]; then
-        failures="${failures} secret"
-        echo "--- MangoLove gate: secret 의심 (값은 표시하지 않음) — 노출 시 즉시 회전(rotate) 필요 ---" >&2
+if [ "$GATE_SECRET" != "off" ]; then
+    secret_hit=""
+    if [ "$SECRET_SCANNER" = "gitleaks" ] && command -v gitleaks >/dev/null 2>&1; then
+        if git rev-parse --git-dir >/dev/null 2>&1 && ! gitleaks protect --staged --no-banner >/dev/null 2>&1; then
+            secret_hit="definite"
+        fi
     else
-        warnings="${warnings} secret"
+        secret_added="$(_staged_added)"
+        if [ -n "$secret_added" ]; then
+            if _secret_definite "$secret_added"; then
+                secret_hit="definite"
+            elif _secret_heuristic "$secret_added"; then
+                secret_hit="heuristic"
+            fi
+        fi
     fi
+    case "$secret_hit" in
+        definite)
+            if [ "$GATE_SECRET" = "block" ]; then
+                failures="${failures} secret"
+                echo "--- MangoLove gate: secret 의심 (값은 표시하지 않음) — 노출 시 즉시 회전(rotate) 필요 ---" >&2
+            else
+                warnings="${warnings} secret"
+            fi ;;
+        heuristic)
+            warnings="${warnings} secret?"
+            echo "--- MangoLove gate 경고: 시크릿 의심(휴리스틱, 비차단) — 확인 권장. 정밀 검사는 gitleaks ---" >&2 ;;
+    esac
 fi
 
 [ -n "$warnings" ] && echo "MangoLove gate 경고(비차단):${warnings}" >&2

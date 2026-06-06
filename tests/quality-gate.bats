@@ -169,6 +169,65 @@ _secret_repo() {
     [ "$status" -eq 0 ]
 }
 
+@test "gate: secret scan blocks staged private key" {
+    local repo; repo=$(_secret_repo "sec-pk")
+    printf -- '-----BEGIN RSA PRIVATE KEY-----\nMIIEabcdef\n-----END RSA PRIVATE KEY-----\n' > "$repo/key.pem"
+    git -C "$repo" add key.pem
+    cd "$repo"
+    run bash "$repo/.mangolove/hooks/quality-gate.sh" precommit
+    [ "$status" -eq 1 ]
+}
+
+@test "gate: secret scan blocks staged GitHub token" {
+    local repo; repo=$(_secret_repo "sec-ghp")
+    # 토큰을 런타임 조립한다 — GitHub 푸시 보호가 .bats 파일의 리터럴을 시크릿으로 막지 않도록.
+    local tok="ghp""_$(printf '0%.0s' $(seq 36))"
+    printf 'const t = "%s";\n' "$tok" > "$repo/leak.js"
+    git -C "$repo" add leak.js
+    cd "$repo"
+    run bash "$repo/.mangolove/hooks/quality-gate.sh" precommit
+    [ "$status" -eq 1 ]
+}
+
+@test "gate: secret scan blocks staged Stripe live key" {
+    local repo; repo=$(_secret_repo "sec-stripe")
+    local tok="sk""_live_zz0000000000000000000000zz"
+    printf 'KEY=%s\n' "$tok" > "$repo/conf.env"
+    git -C "$repo" add conf.env
+    cd "$repo"
+    run bash "$repo/.mangolove/hooks/quality-gate.sh" precommit
+    [ "$status" -eq 1 ]
+}
+
+@test "gate: secret scan blocks staged JWT" {
+    local repo; repo=$(_secret_repo "sec-jwt")
+    local tok="ey""J0eXAiOiJKV1abcdef.eyJzdWIiOiIxMjabcdef.SflKxwRJSMeKabcdef"
+    printf 'token=%s\n' "$tok" > "$repo/t.txt"
+    git -C "$repo" add t.txt
+    cd "$repo"
+    run bash "$repo/.mangolove/hooks/quality-gate.sh" precommit
+    [ "$status" -eq 1 ]
+}
+
+@test "gate: generic keyword=value warns but does not block (heuristic)" {
+    local repo; repo=$(_secret_repo "sec-generic")
+    printf 'password = "abcdefghij1234567890XYZ"\n' > "$repo/conf.txt"
+    git -C "$repo" add conf.txt
+    cd "$repo"
+    run bash "$repo/.mangolove/hooks/quality-gate.sh" precommit
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"휴리스틱"* ]]
+}
+
+@test "gate: secret scan does not flag a benign password length check" {
+    local repo; repo=$(_secret_repo "sec-fp")
+    printf 'if (password.length >= 8) { ok(); }\n' > "$repo/ok.js"
+    git -C "$repo" add ok.js
+    cd "$repo"
+    run bash "$repo/.mangolove/hooks/quality-gate.sh" precommit
+    [ "$status" -eq 0 ]
+}
+
 # ── 게이트가 추적되는 위치에 설치되는지 (D4: 버전관리/감사 가능) ──
 
 @test "gate: .mangolove gate dir stays tracked while .claude is gitignored" {

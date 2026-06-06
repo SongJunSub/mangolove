@@ -527,6 +527,9 @@ generate_gate() {
         [ -n "$PROJ_TEST" ] && test_mode="warn"
         cat > "$conf" << CONFEOF
 # MangoLove quality gate 설정 — 커밋 경계 차단 게이트 (버전관리 대상)
+# 경고: LINT_CMD/TEST_CMD 는 커밋 시 실행되는 셸 명령(신뢰 표면)이다. 신뢰하지 않는
+#       레포의 gate.conf 는 실행 전 반드시 검토하라. (이 파일은 KEY=VALUE 로만 파싱되며
+#       source 되지 않으므로, 비대입 라인이 실행되지는 않는다.)
 # 단계 모드: block(실패 시 커밋 차단) | warn(경고만, 비차단) | off
 # 린트 부채가 많으면 GATE_LINT=warn 로, 테스트가 빠르면 GATE_TEST=block 로 조정.
 GATE_LINT=${lint_mode}

@@ -126,3 +126,45 @@ _gate_with_conf() {
     run bash "$g/quality-gate.sh" precommit
     [ "$status" -eq 0 ]
 }
+
+# ── 시크릿 스캔 ──
+
+# git 레포에 게이트를 설치하고 (시크릿 스캔만 켠) gate.conf 를 둔 디렉토리를 echo
+_secret_repo() {
+    local repo="$TEST_DIR/$1"
+    mkdir -p "$repo/.mangolove/hooks"
+    cp "$MANGOLOVE_DIR/lib/quality-gate.sh" "$repo/.mangolove/hooks/quality-gate.sh"
+    printf '%s\n' 'GATE_LINT=off' 'GATE_TEST=off' 'GATE_SECRET=block' 'SECRET_SCANNER=builtin' \
+        > "$repo/.mangolove/hooks/gate.conf"
+    git -C "$repo" init -q
+    git -C "$repo" config user.email t@t.com
+    git -C "$repo" config user.name tester
+    echo "$repo"
+}
+
+@test "gate: secret scan blocks staged AWS-key-like content" {
+    local repo; repo=$(_secret_repo "sec-block")
+    printf 'const k = "AKIAIOSFODNN7EXAMPLE";\n' > "$repo/leak.js"
+    git -C "$repo" add leak.js
+    cd "$repo"
+    run bash "$repo/.mangolove/hooks/quality-gate.sh" precommit
+    [ "$status" -eq 1 ]
+}
+
+@test "gate: secret scan never prints the secret value" {
+    local repo; repo=$(_secret_repo "sec-mask")
+    printf 'const k = "AKIAIOSFODNN7EXAMPLE";\n' > "$repo/leak.js"
+    git -C "$repo" add leak.js
+    cd "$repo"
+    run bash "$repo/.mangolove/hooks/quality-gate.sh" precommit
+    [[ "$output" != *"AKIAIOSFODNN7EXAMPLE"* ]]
+}
+
+@test "gate: secret scan passes clean staged content" {
+    local repo; repo=$(_secret_repo "sec-clean")
+    printf 'export const greeting = "hello world";\n' > "$repo/ok.js"
+    git -C "$repo" add ok.js
+    cd "$repo"
+    run bash "$repo/.mangolove/hooks/quality-gate.sh" precommit
+    [ "$status" -eq 0 ]
+}

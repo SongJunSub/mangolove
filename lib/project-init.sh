@@ -529,6 +529,9 @@ generate_gate() {
 # 린트 부채가 많으면 GATE_LINT=warn 로, 테스트가 빠르면 GATE_TEST=block 로 조정.
 GATE_LINT=${lint_mode}
 GATE_TEST=${test_mode}
+# 시크릿 스캔: block(의심 시 커밋 차단) | warn | off. 스캐너: builtin | gitleaks
+GATE_SECRET=block
+SECRET_SCANNER=builtin
 LINT_CMD="${PROJ_LINT}"
 TEST_CMD="${PROJ_TEST}"
 CONFEOF

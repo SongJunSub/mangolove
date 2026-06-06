@@ -40,6 +40,8 @@ fi
 
 GATE_LINT="${GATE_LINT:-off}"
 GATE_TEST="${GATE_TEST:-off}"
+GATE_SECRET="${GATE_SECRET:-off}"
+SECRET_SCANNER="${SECRET_SCANNER:-builtin}"
 LINT_CMD="${LINT_CMD:-}"
 TEST_CMD="${TEST_CMD:-}"
 
@@ -64,8 +66,39 @@ run_step() {
     fi
 }
 
+# 스테이징된 변경에서 시크릿/자격증명 의심 패턴을 스캔한다 (값은 절대 출력하지 않음).
+# 기본은 내장 정규식(이식성·무의존). SECRET_SCANNER=gitleaks 면 gitleaks 사용(설치 시).
+# 시크릿은 한 번 커밋되면 코드에서 지워도 회수 불가 — 비가역 표면이라 결정적으로 막는다.
+scan_secrets() {
+    git rev-parse --git-dir >/dev/null 2>&1 || return 0
+    local staged added
+    staged="$(git diff --cached --no-color 2>/dev/null)"
+    [ -z "$staged" ] && return 0
+    if [ "$SECRET_SCANNER" = "gitleaks" ] && command -v gitleaks >/dev/null 2>&1; then
+        gitleaks protect --staged --no-banner >/dev/null 2>&1 && return 0
+        return 1
+    fi
+    added="$(printf '%s\n' "$staged" | grep -E '^\+' | grep -vE '^\+\+\+' || true)"
+    [ -z "$added" ] && return 0
+    printf '%s\n' "$added" | grep -qE 'BEGIN [A-Z ]*PRIVATE KEY' && return 1
+    printf '%s\n' "$added" | grep -qE 'AKIA[0-9A-Z]{16}' && return 1
+    printf '%s\n' "$added" | grep -qE 'gh[pousr]_[A-Za-z0-9]{36}' && return 1
+    printf '%s\n' "$added" | grep -qE 'xox[baprs]-[A-Za-z0-9-]{10,}' && return 1
+    printf '%s\n' "$added" | grep -qiE '(secret|api[_-]?key|access[_-]?token|password)[^A-Za-z0-9]{1,4}[A-Za-z0-9/_+.-]{20,}' && return 1
+    return 0
+}
+
 run_step "lint" "$GATE_LINT" "$LINT_CMD"
 run_step "test" "$GATE_TEST" "$TEST_CMD"
+
+if [ "$GATE_SECRET" != "off" ] && ! scan_secrets; then
+    if [ "$GATE_SECRET" = "block" ]; then
+        failures="${failures} secret"
+        echo "--- MangoLove gate: secret 의심 (값은 표시하지 않음) — 노출 시 즉시 회전(rotate) 필요 ---" >&2
+    else
+        warnings="${warnings} secret"
+    fi
+fi
 
 [ -n "$warnings" ] && echo "MangoLove gate 경고(비차단):${warnings}" >&2
 

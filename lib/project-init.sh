@@ -471,11 +471,12 @@ generate_settings() {
     ]")
     fi
 
-    if [ "$strict" = "true" ] && { [ -n "$PROJ_LINT" ] || [ -n "$PROJ_TEST" ]; }; then
-        # 커밋 시점 결정적 차단 게이트 — git commit 호출을 가로채 품질 게이트 실행 (실패 시 exit 2)
+    if [ "$strict" = "true" ]; then
+        # 커밋 차단 게이트 + 비가역 명령 가드 — 둘 다 Bash 실행 전 PreToolUse 로 검사 (실패 시 exit 2)
         local gate_cmd="bash \\\"\${CLAUDE_PROJECT_DIR}/.mangolove/hooks/quality-gate.sh\\\" pretooluse"
+        local guard_cmd="bash \\\"\${CLAUDE_PROJECT_DIR}/.mangolove/hooks/irreversible-guard.sh\\\""
         entries+=("\"PreToolUse\": [
-      { \"matcher\": \"Bash\", \"hooks\": [ { \"type\": \"command\", \"command\": \"${gate_cmd}\" } ] }
+      { \"matcher\": \"Bash\", \"hooks\": [ { \"type\": \"command\", \"command\": \"${guard_cmd}\" }, { \"type\": \"command\", \"command\": \"${gate_cmd}\" } ] }
     ]")
     fi
 
@@ -505,17 +506,18 @@ generate_gate() {
     local strict="$2"
 
     [ "$strict" = "true" ] || return 0
-    { [ -n "$PROJ_LINT" ] || [ -n "$PROJ_TEST" ]; } || return 0
 
     local gate_dir="$dir/.mangolove/hooks"
     mkdir -p "$gate_dir"
 
-    # 1. 게이트 러너 — 항상 최신 템플릿으로 설치 (버전관리 대상)
-    local template="${MANGOLOVE_DIR}/lib/quality-gate.sh"
-    if [ -f "$template" ]; then
-        cp "$template" "$gate_dir/quality-gate.sh"
-        chmod +x "$gate_dir/quality-gate.sh"
-    fi
+    # 1. 게이트 러너 + 비가역 가드 — 항상 최신 템플릿으로 설치 (버전관리 대상)
+    local template
+    for template in quality-gate.sh irreversible-guard.sh; do
+        if [ -f "${MANGOLOVE_DIR}/lib/${template}" ]; then
+            cp "${MANGOLOVE_DIR}/lib/${template}" "$gate_dir/${template}"
+            chmod +x "$gate_dir/${template}"
+        fi
+    done
 
     # 2. gate.conf — 사용자 커스터마이즈 보존 (있으면 덮어쓰지 않음)
     local conf="$gate_dir/gate.conf"

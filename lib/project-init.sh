@@ -342,6 +342,10 @@ $(echo "$PROJ_MODULES" | tr ',' '\n' | sed 's/^ */- /')"
 - Conventional Commits 형식으로 커밋 메시지 작성"
     fi
 
+    # 품질 방법론은 CLAUDE.md에 복제하지 않고 런타임 주입한다 (단일 출처 = methodology/strict.md)
+    content="${content}
+
+<!-- 품질 방법론(트랙 분류·리뷰 워크플로우)은 mangolove 실행 시 methodology/strict.md에서 런타임 주입됩니다. CLAUDE.md에 복제하지 않습니다. -->"
 
     echo "$content"
 }

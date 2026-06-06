@@ -16,7 +16,7 @@ mangolove init --strict
 
 This single command:
 1. **Scans** your project (tech stack, dependencies, architecture, API endpoints)
-2. **Generates** `CLAUDE.md` with full project context and a 5-phase quality workflow
+2. **Generates** `CLAUDE.md` with full project context (the quality methodology itself is injected at runtime, not baked into `CLAUDE.md`)
 3. **Creates** `.claude/commands/` with `/test`, `/build`, `/lint`, `/review`, `/check` + framework-specific commands
 4. **Configures** `.claude/settings.json` with PostToolUse hooks that run your linter after every code change
 5. **Updates** `.gitignore` to exclude `.claude/` local settings
@@ -29,7 +29,7 @@ Now when you run `claude`, it automatically follows: **Plan first, implement wit
 |---|---|---|
 | Project setup | Write CLAUDE.md manually (30-60 min) | `mangolove init` (5 seconds) |
 | Architecture context | Claude reads files each time | 22 controllers, 115 endpoints known instantly |
-| Quality workflow | Depends on your prompt | Mandatory 5-phase: Analyze -> Implement -> Self-Review -> 3-Agent Review -> Report |
+| Quality workflow | Depends on your prompt | Risk-scaled tracks (Trivial→Large) with adversarial spec review + multi-agent review |
 | Post-edit linting | Manual | Automatic via PostToolUse hooks |
 | Context freshness | CLAUDE.md gets stale | `mangolove sync` detects changes |
 | Team onboarding | Documentation + tribal knowledge | `--export` / `--from-team` one-command setup |
@@ -42,7 +42,9 @@ Now when you run `claude`, it automatically follows: **Plan first, implement wit
 mangolove init --strict
 ```
 
-This generates a CLAUDE.md that enforces a 5-phase workflow for every task:
+In strict mode, every task is auto-classified by a **Change Impact Score** into one of four tracks — **Trivial / Small / Medium / Large** — and each track runs a proportional workflow (heavier tracks add Spec writing, adversarial Spec review, and multi-agent review). The methodology is the single source of truth in [`methodology/strict.md`](methodology/strict.md) and is **injected into the system prompt at runtime** — it is not copied into `CLAUDE.md`, so it never goes stale.
+
+The phases below are the **full (Large-track) workflow**; lighter tracks run a subset (Trivial is just implement → build/lint → report):
 
 ### Phase 1: Analysis (Always First)
 When you describe a problem, Claude automatically:
@@ -97,7 +99,7 @@ Self-Review:
 ### Project Setup
 ```bash
 mangolove init                # Generate CLAUDE.md + commands + hooks
-mangolove init --strict       # Same + 4-phase quality workflow
+mangolove init --strict       # Same + risk-scaled quality methodology (strict.md)
 mangolove init --force        # Regenerate even if CLAUDE.md exists
 mangolove init --export       # Export .mangolove.md for team sharing
 mangolove init --from-team    # Setup from team's .mangolove.md
@@ -252,14 +254,16 @@ mangolove init --strict
 
 이 한 줄의 명령이:
 1. 프로젝트를 **분석** (기술 스택, 의존성, 아키텍처, API 엔드포인트)
-2. `CLAUDE.md`를 **생성** (전체 프로젝트 컨텍스트 + 5단계 품질 워크플로우)
+2. `CLAUDE.md`를 **생성** (전체 프로젝트 컨텍스트 — 품질 방법론은 런타임에 주입되며 `CLAUDE.md`에 복제되지 않음)
 3. `.claude/commands/`에 슬래시 커맨드를 **생성** (`/test`, `/build`, `/lint`, `/review`, `/check` + 프레임워크별 커맨드)
 4. `.claude/settings.json`에 PostToolUse 훅을 **설정** (코드 변경 시 자동 린터 실행)
 5. `.gitignore`를 **업데이트** (`.claude/` 로컬 설정 제외)
 
 `claude`를 실행하면 자동으로: **분석 -> 구현 -> 셀프 리뷰 -> 3인 병렬 리뷰 -> 완료 보고** — 별도 명령 불필요.
 
-## Strict Mode: 5단계 품질 워크플로우
+## Strict Mode: 위험도 기반 품질 워크플로우
+
+strict 모드에서는 모든 작업이 **Change Impact Score**로 4개 트랙(**Trivial / Small / Medium / Large**)으로 자동 분류되고, 트랙별로 비례하는 워크플로우가 적용됩니다. 방법론의 단일 출처는 [`methodology/strict.md`](methodology/strict.md)이며 **런타임에 시스템 프롬프트로 주입**됩니다(`CLAUDE.md`에 복제하지 않으므로 낡지 않음). 아래 단계는 **전체(Large 트랙) 워크플로우**이고, 가벼운 트랙은 그 부분집합만 수행합니다.
 
 ### 1단계: 분석 (항상 먼저)
 - 관련 파일을 모두 읽고 전체 호출 체인을 추적
@@ -303,4 +307,4 @@ mangolove init --strict
 
 ---
 
-**MangoLove** v0.6.0
+**MangoLove** v0.5.0

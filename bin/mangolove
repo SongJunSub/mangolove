@@ -397,6 +397,28 @@ do_doctor() {
     done
     echo -e "  \033[38;5;113m✓\033[0m Skills: ${skill_count}"
 
+    # Project quality gate — 현재 디렉토리가 게이트 설치된 프로젝트면 무결성/추적을 감사한다.
+    if [ -f "$(pwd)/.mangolove/hooks/quality-gate.sh" ]; then
+        echo ""
+        echo -e "  \033[2mProject gate (cwd):\033[0m"
+        echo -e "  \033[38;5;113m✓\033[0m Quality gate installed (.mangolove/hooks/)"
+        if [ -f "$(pwd)/.mangolove/hooks/irreversible-guard.sh" ]; then
+            echo -e "  \033[38;5;113m✓\033[0m Irreversible-command guard installed"
+        else
+            echo -e "  \033[38;5;220m△\033[0m irreversible-guard.sh missing — PreToolUse 가드가 fail-open(미차단)됩니다."
+        fi
+        if git rev-parse --git-dir > /dev/null 2>&1; then
+            if git ls-files --error-unmatch .mangolove/hooks/quality-gate.sh > /dev/null 2>&1; then
+                echo -e "  \033[38;5;113m✓\033[0m Gate is version-controlled (변조/누락이 diff 로 감사됨)"
+            else
+                echo -e "  \033[38;5;220m△\033[0m Gate not committed — run 'git add .mangolove/' to track it (감사 가능하도록)"
+            fi
+            if git check-ignore -q .mangolove > /dev/null 2>&1 || git check-ignore -q .mangolove/hooks > /dev/null 2>&1; then
+                echo -e "  \033[38;5;203m✗\033[0m .mangolove/ is gitignored — 게이트가 조용히 무력화됩니다. ignore 에서 제외하세요."
+            fi
+        fi
+    fi
+
     echo ""
     echo -e "\033[2m──────────────────────────────────────\033[0m"
     echo ""

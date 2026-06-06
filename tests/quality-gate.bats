@@ -1,0 +1,307 @@
+#!/usr/bin/env bats
+# ─────────────────────────────────────────────
+# MangoLove — Commit-boundary Quality Gate (D2)
+# 산문 강제 -> 결정적 차단 게이트. 설치 + 동작(block/warn/bypass)을 검증한다.
+# ─────────────────────────────────────────────
+
+load test_helper
+
+setup() {
+    setup_test_env
+}
+
+teardown() {
+    teardown_test_env
+}
+
+# lint + test 둘 다 있는 strict 노드 프로젝트를 만든다.
+_strict_node_project() {
+    local proj
+    proj=$(create_fake_project "$1")
+    echo '{"name":"app","scripts":{"test":"jest","lint":"eslint ."}}' > "$proj/package.json"
+    echo '{}' > "$proj/.eslintrc.json"
+    echo "$proj"
+}
+
+# ── 설치 ──
+
+@test "gate: --strict installs executable quality-gate.sh and gate.conf" {
+    local proj; proj=$(_strict_node_project "gate-install")
+    cd "$proj"
+    run bash "$MANGOLOVE_DIR/lib/project-init.sh" init --strict
+    [ "$status" -eq 0 ]
+    [ -f "$proj/.mangolove/hooks/quality-gate.sh" ]
+    [ -x "$proj/.mangolove/hooks/quality-gate.sh" ]
+    [ -f "$proj/.mangolove/hooks/gate.conf" ]
+    grep -q "LINT_CMD=" "$proj/.mangolove/hooks/gate.conf"
+    grep -q "TEST_CMD=" "$proj/.mangolove/hooks/gate.conf"
+}
+
+@test "gate: settings.json adds PreToolUse gate and stays valid JSON" {
+    local proj; proj=$(_strict_node_project "gate-settings")
+    cd "$proj"
+    bash "$MANGOLOVE_DIR/lib/project-init.sh" init --strict
+    grep -q "PreToolUse" "$proj/.claude/settings.json"
+    grep -q "PostToolUse" "$proj/.claude/settings.json"
+    grep -q "SessionStart" "$proj/.claude/settings.json"
+    grep -q "quality-gate.sh" "$proj/.claude/settings.json"
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -c "import json; json.load(open('$proj/.claude/settings.json'))"
+    fi
+}
+
+@test "gate: non-strict init installs no gate" {
+    local proj; proj=$(create_fake_project "gate-nonstrict")
+    echo '{"name":"app","scripts":{"test":"jest"}}' > "$proj/package.json"
+    cd "$proj"
+    bash "$MANGOLOVE_DIR/lib/project-init.sh" init
+    [ ! -d "$proj/.mangolove/hooks" ]
+}
+
+@test "gate: installs MangoLove-managed git pre-commit in a git repo" {
+    local proj; proj=$(_strict_node_project "gate-precommit")
+    git -C "$proj" init -q
+    cd "$proj"
+    bash "$MANGOLOVE_DIR/lib/project-init.sh" init --strict
+    [ -f "$proj/.git/hooks/pre-commit" ]
+    [ -x "$proj/.git/hooks/pre-commit" ]
+    grep -q "MangoLove" "$proj/.git/hooks/pre-commit"
+}
+
+@test "gate: preserves an existing non-MangoLove pre-commit" {
+    local proj; proj=$(_strict_node_project "gate-precommit-existing")
+    git -C "$proj" init -q
+    printf '#!/bin/sh\necho mine\n' > "$proj/.git/hooks/pre-commit"
+    cd "$proj"
+    bash "$MANGOLOVE_DIR/lib/project-init.sh" init --strict
+    grep -q "echo mine" "$proj/.git/hooks/pre-commit"
+    ! grep -q "MangoLove" "$proj/.git/hooks/pre-commit"
+}
+
+@test "gate: installs pre-commit in a git worktree (.git is a file)" {
+    local main; main=$(create_fake_project "gate-wt-main")
+    git -C "$main" init -q
+    git -C "$main" -c user.email=t@t.com -c user.name=t commit -q --allow-empty -m init
+    local wt="$TEST_DIR/gate-wt-linked"
+    git -C "$main" worktree add -q "$wt" -b wtbranch
+    echo '{"name":"app","scripts":{"test":"jest","lint":"eslint ."}}' > "$wt/package.json"
+    echo '{}' > "$wt/.eslintrc.json"
+    cd "$wt"
+    bash "$MANGOLOVE_DIR/lib/project-init.sh" init --strict
+    local hd; hd="$(git -C "$wt" rev-parse --git-path hooks)"
+    case "$hd" in /*) : ;; *) hd="$wt/$hd" ;; esac
+    [ -f "$hd/pre-commit" ]
+    grep -q "MangoLove" "$hd/pre-commit"
+}
+
+@test "gate: --strict wires PreToolUse into a pre-existing settings.json" {
+    command -v python3 >/dev/null 2>&1 || skip "needs python3 for merge"
+    local proj; proj=$(_strict_node_project "gate-upgrade")
+    mkdir -p "$proj/.claude"
+    printf '{\n  "hooks": {}\n}\n' > "$proj/.claude/settings.json"
+    cd "$proj"
+    bash "$MANGOLOVE_DIR/lib/project-init.sh" init --strict
+    grep -q "PreToolUse" "$proj/.claude/settings.json"
+    grep -q "quality-gate.sh" "$proj/.claude/settings.json"
+    grep -q "irreversible-guard.sh" "$proj/.claude/settings.json"
+    python3 -c "import json; json.load(open('$proj/.claude/settings.json'))"
+}
+
+# ── 동작 (controlled gate.conf) ──
+
+# $1=dir suffix, $2..=gate.conf 라인 -> 게이트 디렉토리 경로를 echo
+_gate_with_conf() {
+    local gdir="$TEST_DIR/$1/.mangolove/hooks"
+    mkdir -p "$gdir"
+    cp "$MANGOLOVE_DIR/lib/quality-gate.sh" "$gdir/quality-gate.sh"
+    shift
+    printf '%s\n' "$@" > "$gdir/gate.conf"
+    echo "$gdir"
+}
+
+@test "gate: precommit blocks (exit 1) when a block step fails" {
+    local g; g=$(_gate_with_conf "g-block" 'GATE_LINT=block' 'LINT_CMD=false' 'GATE_TEST=off')
+    run bash "$g/quality-gate.sh" precommit
+    [ "$status" -eq 1 ]
+}
+
+@test "gate: pretooluse blocks (exit 2) on git commit when block step fails" {
+    local g; g=$(_gate_with_conf "g-block2" 'GATE_LINT=block' 'LINT_CMD=false' 'GATE_TEST=off')
+    run bash "$g/quality-gate.sh" pretooluse <<< '{"tool_name":"Bash","tool_input":{"command":"git commit -m x"}}'
+    [ "$status" -eq 2 ]
+}
+
+@test "gate: pretooluse allows (exit 0) non-commit commands regardless" {
+    local g; g=$(_gate_with_conf "g-noncommit" 'GATE_LINT=block' 'LINT_CMD=false' 'GATE_TEST=off')
+    run bash "$g/quality-gate.sh" pretooluse <<< '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}'
+    [ "$status" -eq 0 ]
+}
+
+@test "gate: pretooluse allows read-only git that merely mentions commit" {
+    local g; g=$(_gate_with_conf "g-gitlog" 'GATE_LINT=block' 'LINT_CMD=false' 'GATE_TEST=off')
+    run bash "$g/quality-gate.sh" pretooluse <<< '{"tool_name":"Bash","tool_input":{"command":"git log --grep=commit --oneline"}}'
+    [ "$status" -eq 0 ]
+    run bash "$g/quality-gate.sh" pretooluse <<< '{"tool_name":"Bash","tool_input":{"command":"git config commit.gpgsign true"}}'
+    [ "$status" -eq 0 ]
+}
+
+@test "gate: pretooluse still gates git -C <dir> commit" {
+    local g; g=$(_gate_with_conf "g-gitc" 'GATE_LINT=block' 'LINT_CMD=false' 'GATE_TEST=off')
+    run bash "$g/quality-gate.sh" pretooluse <<< '{"tool_name":"Bash","tool_input":{"command":"git -C /repo commit -m x"}}'
+    [ "$status" -eq 2 ]
+}
+
+@test "gate: warn step failure does not block (exit 0)" {
+    local g; g=$(_gate_with_conf "g-warn" 'GATE_LINT=warn' 'LINT_CMD=false' 'GATE_TEST=off')
+    run bash "$g/quality-gate.sh" precommit
+    [ "$status" -eq 0 ]
+}
+
+@test "gate: passes (exit 0) when block step succeeds" {
+    local g; g=$(_gate_with_conf "g-pass" 'GATE_LINT=block' 'LINT_CMD=true' 'GATE_TEST=off')
+    run bash "$g/quality-gate.sh" precommit
+    [ "$status" -eq 0 ]
+}
+
+@test "gate: MANGOLOVE_SKIP_GATE=1 bypasses a failing block step (audited)" {
+    local g; g=$(_gate_with_conf "g-skip" 'GATE_LINT=block' 'LINT_CMD=false' 'GATE_TEST=off')
+    export MANGOLOVE_SKIP_GATE=1
+    run bash "$g/quality-gate.sh" precommit
+    [ "$status" -eq 0 ]
+}
+
+# ── 시크릿 스캔 ──
+
+# git 레포에 게이트를 설치하고 (시크릿 스캔만 켠) gate.conf 를 둔 디렉토리를 echo
+_secret_repo() {
+    local repo="$TEST_DIR/$1"
+    mkdir -p "$repo/.mangolove/hooks"
+    cp "$MANGOLOVE_DIR/lib/quality-gate.sh" "$repo/.mangolove/hooks/quality-gate.sh"
+    printf '%s\n' 'GATE_LINT=off' 'GATE_TEST=off' 'GATE_SECRET=block' 'SECRET_SCANNER=builtin' \
+        > "$repo/.mangolove/hooks/gate.conf"
+    git -C "$repo" init -q
+    git -C "$repo" config user.email t@t.com
+    git -C "$repo" config user.name tester
+    echo "$repo"
+}
+
+@test "gate: secret scan blocks staged AWS-key-like content" {
+    local repo; repo=$(_secret_repo "sec-block")
+    printf 'const k = "AKIAIOSFODNN7EXAMPLE";\n' > "$repo/leak.js"
+    git -C "$repo" add leak.js
+    cd "$repo"
+    run bash "$repo/.mangolove/hooks/quality-gate.sh" precommit
+    [ "$status" -eq 1 ]
+}
+
+@test "gate: secret scan never prints the secret value" {
+    local repo; repo=$(_secret_repo "sec-mask")
+    printf 'const k = "AKIAIOSFODNN7EXAMPLE";\n' > "$repo/leak.js"
+    git -C "$repo" add leak.js
+    cd "$repo"
+    run bash "$repo/.mangolove/hooks/quality-gate.sh" precommit
+    [[ "$output" != *"AKIAIOSFODNN7EXAMPLE"* ]]
+}
+
+@test "gate: secret scan passes clean staged content" {
+    local repo; repo=$(_secret_repo "sec-clean")
+    printf 'export const greeting = "hello world";\n' > "$repo/ok.js"
+    git -C "$repo" add ok.js
+    cd "$repo"
+    run bash "$repo/.mangolove/hooks/quality-gate.sh" precommit
+    [ "$status" -eq 0 ]
+}
+
+@test "gate: secret scan blocks staged private key" {
+    local repo; repo=$(_secret_repo "sec-pk")
+    printf -- '-----BEGIN RSA PRIVATE KEY-----\nMIIEabcdef\n-----END RSA PRIVATE KEY-----\n' > "$repo/key.pem"
+    git -C "$repo" add key.pem
+    cd "$repo"
+    run bash "$repo/.mangolove/hooks/quality-gate.sh" precommit
+    [ "$status" -eq 1 ]
+}
+
+@test "gate: secret scan blocks staged GitHub token" {
+    local repo; repo=$(_secret_repo "sec-ghp")
+    # 토큰을 런타임 조립한다 — GitHub 푸시 보호가 .bats 파일의 리터럴을 시크릿으로 막지 않도록.
+    local tok="ghp""_$(printf '0%.0s' $(seq 36))"
+    printf 'const t = "%s";\n' "$tok" > "$repo/leak.js"
+    git -C "$repo" add leak.js
+    cd "$repo"
+    run bash "$repo/.mangolove/hooks/quality-gate.sh" precommit
+    [ "$status" -eq 1 ]
+}
+
+@test "gate: secret scan blocks staged Stripe live key" {
+    local repo; repo=$(_secret_repo "sec-stripe")
+    local tok="sk""_live_zz0000000000000000000000zz"
+    printf 'KEY=%s\n' "$tok" > "$repo/conf.env"
+    git -C "$repo" add conf.env
+    cd "$repo"
+    run bash "$repo/.mangolove/hooks/quality-gate.sh" precommit
+    [ "$status" -eq 1 ]
+}
+
+@test "gate: secret scan blocks staged JWT" {
+    local repo; repo=$(_secret_repo "sec-jwt")
+    local tok="ey""J0eXAiOiJKV1abcdef.eyJzdWIiOiIxMjabcdef.SflKxwRJSMeKabcdef"
+    printf 'token=%s\n' "$tok" > "$repo/t.txt"
+    git -C "$repo" add t.txt
+    cd "$repo"
+    run bash "$repo/.mangolove/hooks/quality-gate.sh" precommit
+    [ "$status" -eq 1 ]
+}
+
+@test "gate: generic keyword=value warns but does not block (heuristic)" {
+    local repo; repo=$(_secret_repo "sec-generic")
+    printf 'password = "abcdefghij1234567890XYZ"\n' > "$repo/conf.txt"
+    git -C "$repo" add conf.txt
+    cd "$repo"
+    run bash "$repo/.mangolove/hooks/quality-gate.sh" precommit
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"휴리스틱"* ]]
+}
+
+@test "gate: secret scan does not flag a benign password length check" {
+    local repo; repo=$(_secret_repo "sec-fp")
+    printf 'if (password.length >= 8) { ok(); }\n' > "$repo/ok.js"
+    git -C "$repo" add ok.js
+    cd "$repo"
+    run bash "$repo/.mangolove/hooks/quality-gate.sh" precommit
+    [ "$status" -eq 0 ]
+}
+
+@test "gate: pretooluse commit -am scans unstaged tracked changes for secrets" {
+    local repo; repo=$(_secret_repo "sec-commit-a")
+    printf 'x = 1\n' > "$repo/app.py"
+    git -C "$repo" add app.py
+    git -C "$repo" commit -qm init
+    printf 'KEY = "AKIAIOSFODNN7EXAMPLE"\n' >> "$repo/app.py"   # unstaged 수정
+    cd "$repo"
+    run bash "$repo/.mangolove/hooks/quality-gate.sh" pretooluse <<< '{"tool_name":"Bash","tool_input":{"command":"git commit -am wip"}}'
+    [ "$status" -eq 2 ]
+}
+
+@test "gate: pretooluse commit -m (no -a) does not scan unstaged changes" {
+    local repo; repo=$(_secret_repo "sec-commit-m")
+    printf 'x = 1\n' > "$repo/app.py"
+    git -C "$repo" add app.py
+    git -C "$repo" commit -qm init
+    printf 'KEY = "AKIAIOSFODNN7EXAMPLE"\n' >> "$repo/app.py"   # unstaged (커밋되지 않음)
+    cd "$repo"
+    run bash "$repo/.mangolove/hooks/quality-gate.sh" pretooluse <<< '{"tool_name":"Bash","tool_input":{"command":"git commit -m wip"}}'
+    [ "$status" -eq 0 ]
+}
+
+# ── 게이트가 추적되는 위치에 설치되는지 (D4: 버전관리/감사 가능) ──
+
+@test "gate: .mangolove gate dir stays tracked while .claude is gitignored" {
+    local proj; proj=$(_strict_node_project "gate-tracked")
+    echo "node_modules/" > "$proj/.gitignore"
+    cd "$proj"
+    bash "$MANGOLOVE_DIR/lib/project-init.sh" init --strict
+    # .claude/ 는 ignore 되지만 게이트가 사는 .mangolove/ 는 추적되어야 한다
+    grep -qE "^\.claude/" "$proj/.gitignore"
+    ! grep -q ".mangolove" "$proj/.gitignore"
+    [ -f "$proj/.mangolove/hooks/quality-gate.sh" ]
+}

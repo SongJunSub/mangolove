@@ -147,3 +147,65 @@ _json() {
     [ -x "$proj/.mangolove/hooks/irreversible-guard.sh" ]
     grep -q "irreversible-guard.sh" "$proj/.claude/settings.json"
 }
+
+# ── Mongo 파괴 구문 + 동적 경로 rm (커버리지 갭 보강) ──
+
+@test "guard: blocks Mongo deleteMany with empty filter" {
+    run bash "$(_guard)" <<< "$(_json 'mongosh --eval "db.users.deleteMany({})"')"
+    [ "$status" -eq 2 ]
+}
+
+@test "guard: blocks Mongo dropDatabase" {
+    run bash "$(_guard)" <<< "$(_json 'mongosh mydb --eval "db.dropDatabase()"')"
+    [ "$status" -eq 2 ]
+}
+
+@test "guard: blocks Mongo collection drop" {
+    run bash "$(_guard)" <<< "$(_json 'mongosh --eval "db.sessions.drop()"')"
+    [ "$status" -eq 2 ]
+}
+
+@test "guard: allows Mongo deleteMany with a filter (precision)" {
+    run bash "$(_guard)" <<< "$(_json 'mongosh --eval "db.users.deleteMany({status:1})"')"
+    [ "$status" -eq 0 ]
+}
+
+@test "guard: allows Mongo find read" {
+    run bash "$(_guard)" <<< "$(_json 'mongosh --eval "db.users.find({})"')"
+    [ "$status" -eq 0 ]
+}
+
+@test "guard: blocks rm -rf on PWD env var" {
+    run bash "$(_guard)" <<< "$(_json 'rm -rf $PWD')"
+    [ "$status" -eq 2 ]
+}
+
+@test "guard: blocks rm -rf on HOME brace var" {
+    run bash "$(_guard)" <<< "$(_json 'rm -rf ${HOME}')"
+    [ "$status" -eq 2 ]
+}
+
+@test "guard: blocks rm -rf on pwd command substitution" {
+    run bash "$(_guard)" <<< "$(_json 'rm -rf $(pwd)')"
+    [ "$status" -eq 2 ]
+}
+
+@test "guard: allows rm -rf on a TMPDIR subpath (precision)" {
+    run bash "$(_guard)" <<< "$(_json 'rm -rf $TMPDIR/cache')"
+    [ "$status" -eq 0 ]
+}
+
+@test "guard: blocks Mongo deleteMany with escaped-whitespace empty filter" {
+    run bash "$(_guard)" <<< "$(_json 'mongosh --eval "db.users.deleteMany({\n})"')"
+    [ "$status" -eq 2 ]
+}
+
+@test "guard: blocks Mongo drop with escaped-whitespace args" {
+    run bash "$(_guard)" <<< "$(_json 'mongosh --eval "db.sessions.drop(\n)"')"
+    [ "$status" -eq 2 ]
+}
+
+@test "guard: allows Mongo deleteMany with a nested filter (precision)" {
+    run bash "$(_guard)" <<< "$(_json 'mongosh --eval "db.users.deleteMany({age:{gt:30}})"')"
+    [ "$status" -eq 0 ]
+}

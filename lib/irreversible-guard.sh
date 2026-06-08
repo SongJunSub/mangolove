@@ -51,11 +51,14 @@ fi
 
 has 'git[[:space:]]+reset[[:space:]]+--hard' && block "git reset --hard"
 
-# rm 위험 루트 — 분리/롱폼 플래그(-r -f, --recursive --force)와 따옴표 우회까지 차단
+# rm 위험 루트 — 분리/롱폼 플래그(-r -f, --recursive --force)와 따옴표 우회까지 차단.
+# 위험 루트엔 리터럴(/,~)·환경변수(\$HOME,\$PWD,\${HOME},\${PWD})·명령치환(\$(pwd))까지 포함.
+# 보수적: 이 루트 '아래 하위경로'(예: \$PWD/build, \$HOME/.ssh)도 함께 막는다 — 안전한 하위삭제와
+# 위험한 하위삭제(.ssh 등)를 정규식으로 구분할 수 없으므로 안전을 택한다. 의도된 삭제는 override.
 if has '(^|[[:space:]])rm[[:space:]]' \
    && has '(--recursive|[[:space:]]-[a-z]*r)' \
    && has '(--force|[[:space:]]-[a-z]*f)' \
-   && has '[[:space:]](/|~|\$HOME)'; then
+   && has '[[:space:]](/|~|\$HOME|\$PWD|\$\{HOME\}|\$\{PWD\}|\$\(pwd\))'; then
     block "rm -rf on dangerous root"
 fi
 
@@ -67,6 +70,17 @@ if has '(psql|mysql|mariadb|sqlite3|mongosh|mongo|clickhouse-client|cqlsh)([[:sp
         # 각 DELETE 문(;로 구분)에 WHERE 가 없으면 차단 — 다른 문의 WHERE 로 면제되지 않게
         printf '%s' "$cmd" | grep -oiE 'delete[[:space:]]+from[^;]*' | grep -qivE 'where' && block "SQL DELETE without WHERE"
     fi
+fi
+
+# 파괴적 Mongo — mongo/mongosh 호출에 앵커링 (SQL 구문이 아닌 문서 메서드라 위 블록이 못 잡음).
+# 조건 없는 전체 삭제·컬렉션/DB drop 만 차단; 필터가 있는 deleteMany 는 통과(정밀도 보존).
+if has '(mongosh|mongo)([[:space:]]|$)'; then
+    has 'dropDatabase[[:space:]]*\(' && block "destructive Mongo (dropDatabase)"
+    # drop( 은 인자 유무와 무관히 파괴적(컬렉션 제거). mongo 앵커라 list.drop(n) 등 오탐 없음; .dropIndex 는 제외됨.
+    has '\.drop[[:space:]]*\('        && block "destructive Mongo (collection.drop())"
+    # 필터에 필드(:)가 없으면 = 조건 없는 전체 삭제 → 차단. 필드가 있으면(: 포함) 통과(정밀도).
+    # 이스케이프(\n,\t)가 역슬래시 제거로 n,t 만 잔류해도 콜론이 없으므로 동일하게 잡힌다(우회 차단).
+    has '(deleteMany|remove)[[:space:]]*\([[:space:]]*\{[^:}]*\}' && block "destructive Mongo (no-filter deleteMany/remove)"
 fi
 
 has 'kubectl[[:space:]]+delete'    && block "kubectl delete"

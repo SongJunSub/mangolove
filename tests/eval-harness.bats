@@ -29,7 +29,7 @@ EVAL() { echo "$MANGOLOVE_DIR/lib/eval-harness.sh"; }
 @test "eval: impact calibration matches all spec fixtures" {
     run bash "$(EVAL)" impact
     [ "$status" -eq 0 ]
-    [[ "$output" == *"적합 8/8"* ]]
+    [[ "$output" == *"적합 12/12"* ]]
 }
 
 @test "eval: guard precision/recall is perfect on the labeled suite" {

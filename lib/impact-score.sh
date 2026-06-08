@@ -9,7 +9,8 @@
 #
 # 콘텐츠 패턴은 **실제 추가된 코드 라인**(diff 헤더/순수 주석/문서(.md 등) 제외)에만 적용해
 # 파일명·주석·산문에 의한 오탐을 막는다. 정규식 커버 스택: Java/Kotlin/Spring, JS/TS,
-# Python, Go, Rails/Django (그 밖 스택은 미커버 — track_floor 보장은 커버 스택 한정).
+# Python, Go, Rails/Django, C#/.NET(EF·[Authorize]), Rust(reqwest·tower/axum auth), PHP/Laravel(Schema),
+# Ruby/Elixir HTTP (그 밖 스택·관용구는 미커버 — track_floor 보장은 커버 스택 한정).
 #
 # 사용:
 #   impact-score.sh score          <sha|--working>             → JSON 1줄 (점수 분해 + track_floor)
@@ -102,14 +103,14 @@ compute() {
     # 결정적 플래그 — 경로(names) 또는 추가-코드-라인(added) 패턴
     local db=0 auth=0 ext=0 api=0
     if printf '%s' "$names" | grep -qiE '(^|/)(migrations?|db/(migration|migrate|changelog)|flyway|liquibase)/' \
-       || printf '%s' "$added" | grep -qiE '(CREATE[[:space:]]+TABLE|ALTER[[:space:]]+TABLE|@Entity|@Table([^A-Za-z]|$)|AutoMigrate|create_table|add_column|change_column|models\.Model|migrations\.(CreateModel|AddField))'; then
+       || printf '%s' "$added" | grep -qiE '(CREATE[[:space:]]+TABLE|ALTER[[:space:]]+TABLE|@Entity|@Table([^A-Za-z]|$)|AutoMigrate|create_table|add_column|change_column|models\.Model|migrations\.(CreateModel|AddField)|migrationBuilder\.(CreateTable|DropTable|AddColumn|RenameColumn)|(^|[^A-Za-z])Schema::(create|table|dropIfExists))'; then
         db=1
     fi
     if printf '%s' "$names" | grep -qiE '(^|/)(auth|authn|authz|security|oauth|jwt|rbac|permissions|login|signin)/' \
-       || printf '%s' "$added" | grep -qiE '(@PreAuthorize|@Secured|@RolesAllowed|@EnableWebSecurity|SecurityConfig|SecurityFilterChain|SecurityContextHolder|AuthenticationManager|UsernamePasswordAuthenticationToken|UserDetailsService|authenticate\(|authorize\(|bcrypt|argon2|scrypt|passport|next-auth|verifyPassword)'; then
+       || printf '%s' "$added" | grep -qiE '(@PreAuthorize|@Secured|@RolesAllowed|@EnableWebSecurity|SecurityConfig|SecurityFilterChain|SecurityContextHolder|AuthenticationManager|UsernamePasswordAuthenticationToken|UserDetailsService|authenticate\(|authorize\(|bcrypt|argon2|scrypt|passport|next-auth|verifyPassword|\[Authorize|RequireAuthorizationLayer|tower_http::auth|axum_login|HttpAuthentication)'; then
         auth=1
     fi
-    if printf '%s' "$added" | grep -qiE '(RestTemplate|WebClient|HttpClient|OkHttp|@FeignClient|RestClient|[^A-Za-z]axios[.(]|[^A-Za-z]fetch\(|requests\.(get|post|put|delete|patch|head)\(|httpx\.|urllib|http\.(Get|Post|NewRequest|Do)\()'; then
+    if printf '%s' "$added" | grep -qiE '(RestTemplate|WebClient|HttpClient|OkHttp|@FeignClient|RestClient|[^A-Za-z]axios[.(]|[^A-Za-z]fetch\(|requests\.(get|post|put|delete|patch|head)\(|httpx\.|urllib|http\.(Get|Post|NewRequest|Do)\(|reqwest::(get|post|put|delete|Client)|HTTPoison\.|Faraday\.)'; then
         ext=1
     fi
     # 라우팅 등록만 — getter 오탐 방지로 router/app 메서드는 첫 인자가 라우트 경로 리터럴("/...)일 때만.

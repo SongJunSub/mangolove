@@ -71,8 +71,10 @@ block|cqlsh -e "DROP TABLE users"
 block|psql -c "DELETE FROM accounts; -- WHERE id=1 was here"
 block|psql -c "DELETE FROM accounts; DELETE FROM logs WHERE id=5"
 block|mongosh --eval "db.users.deleteMany({})"
+block|mongosh --eval "db.users.deleteMany({\n})"
 block|mongosh mydb --eval "db.dropDatabase()"
 block|mongosh --eval "db.sessions.drop()"
+block|mongosh --eval "db.sessions.drop(\n)"
 block|kubectl delete deployment api
 block|terraform destroy -auto-approve
 pass|git push origin main

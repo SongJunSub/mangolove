@@ -194,3 +194,18 @@ _json() {
     run bash "$(_guard)" <<< "$(_json 'rm -rf $TMPDIR/cache')"
     [ "$status" -eq 0 ]
 }
+
+@test "guard: blocks Mongo deleteMany with escaped-whitespace empty filter" {
+    run bash "$(_guard)" <<< "$(_json 'mongosh --eval "db.users.deleteMany({\n})"')"
+    [ "$status" -eq 2 ]
+}
+
+@test "guard: blocks Mongo drop with escaped-whitespace args" {
+    run bash "$(_guard)" <<< "$(_json 'mongosh --eval "db.sessions.drop(\n)"')"
+    [ "$status" -eq 2 ]
+}
+
+@test "guard: allows Mongo deleteMany with a nested filter (precision)" {
+    run bash "$(_guard)" <<< "$(_json 'mongosh --eval "db.users.deleteMany({age:{gt:30}})"')"
+    [ "$status" -eq 0 ]
+}

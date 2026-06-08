@@ -103,7 +103,7 @@ compute() {
     # 결정적 플래그 — 경로(names) 또는 추가-코드-라인(added) 패턴
     local db=0 auth=0 ext=0 api=0
     if printf '%s' "$names" | grep -qiE '(^|/)(migrations?|db/(migration|migrate|changelog)|flyway|liquibase)/' \
-       || printf '%s' "$added" | grep -qiE '(CREATE[[:space:]]+TABLE|ALTER[[:space:]]+TABLE|@Entity|@Table([^A-Za-z]|$)|AutoMigrate|create_table|add_column|change_column|models\.Model|migrations\.(CreateModel|AddField)|migrationBuilder\.(CreateTable|DropTable|AddColumn|RenameColumn)|Schema::(create|table|dropIfExists))'; then
+       || printf '%s' "$added" | grep -qiE '(CREATE[[:space:]]+TABLE|ALTER[[:space:]]+TABLE|@Entity|@Table([^A-Za-z]|$)|AutoMigrate|create_table|add_column|change_column|models\.Model|migrations\.(CreateModel|AddField)|migrationBuilder\.(CreateTable|DropTable|AddColumn|RenameColumn)|(^|[^A-Za-z])Schema::(create|table|dropIfExists))'; then
         db=1
     fi
     if printf '%s' "$names" | grep -qiE '(^|/)(auth|authn|authz|security|oauth|jwt|rbac|permissions|login|signin)/' \

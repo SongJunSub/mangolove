@@ -3,6 +3,7 @@ logs/repo/
 config.sh
 .version
 .last_update_check
+session-settings.json
 
 # OS
 .DS_Store

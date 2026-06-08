@@ -293,6 +293,16 @@ _secret_repo() {
     [ "$status" -eq 0 ]
 }
 
+@test "gate: pretooluse uses stdin cwd to locate the project (session hook)" {
+    local repo; repo=$(_secret_repo "sec-cwd")
+    printf 'KEY = "AKIAIOSFODNN7EXAMPLE"\n' > "$repo/leak.py"
+    git -C "$repo" add leak.py
+    # 게이트를 repo 가 아닌 다른 cwd 에서 실행하되 stdin cwd 로 repo 를 지정 (세션 hook 시나리오)
+    cd "$TEST_DIR"
+    run bash "$repo/.mangolove/hooks/quality-gate.sh" pretooluse <<< "{\"tool_input\":{\"command\":\"git commit -m x\"},\"cwd\":\"$repo\"}"
+    [ "$status" -eq 2 ]
+}
+
 # ── 게이트가 추적되는 위치에 설치되는지 (D4: 버전관리/감사 가능) ──
 
 @test "gate: .mangolove gate dir stays tracked while .claude is gitignored" {

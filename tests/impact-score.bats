@@ -96,7 +96,7 @@ _mkcommit() {
     [[ "$output" == *'"track_floor":"Medium"'* ]]
 }
 
-@test "impact: empty/merge commit does not crash (set -u safe) -> Trivial" {
+@test "impact: empty commit does not crash (set -u safe) -> Trivial" {
     local r; r=$(_repo "imp-empty")
     echo seed > "$r/seed.txt"; _mkcommit "$r" "seed" >/dev/null
     git -C "$r" -c user.email=t@t.com -c user.name=t commit -q --allow-empty -m empty
@@ -179,4 +179,159 @@ _mkcommit() {
     cd "$d"
     run bash "$(IMPACT)" score --working
     [ "$status" -eq 1 ]
+}
+
+# ── 적대적 리뷰 회귀 (FP/FN/merge/입력검증/크로스스택/파일수밴드) ──
+
+@test "impact: merge commit with auth change -> floor Large (not Trivial)" {
+    local r; r=$(_repo "imp-merge")
+    echo seed > "$r/seed.txt"; _mkcommit "$r" seed >/dev/null
+    git -C "$r" checkout -q -b feat
+    mkdir -p "$r/src/security"; printf '@PreAuthorize("x")\n' > "$r/src/security/Sec.kt"
+    _mkcommit "$r" authchange >/dev/null
+    git -C "$r" checkout -q -
+    echo m > "$r/m.txt"; _mkcommit "$r" main2 >/dev/null
+    git -C "$r" -c user.email=t@t.com -c user.name=t merge --no-ff -m merge feat >/dev/null 2>&1
+    local sha; sha=$(git -C "$r" rev-parse HEAD)
+    cd "$r"
+    run bash "$(IMPACT)" score "$sha"
+    [[ "$output" == *'"auth":true'* ]]
+    [[ "$output" == *'"track_floor":"Large"'* ]]
+}
+
+@test "impact: invalid revision exits non-zero (not silent Trivial)" {
+    local r; r=$(_repo "imp-badref")
+    echo x > "$r/a.txt"; _mkcommit "$r" a >/dev/null
+    cd "$r"
+    run bash "$(IMPACT)" score deadbeefdeadbeef
+    [ "$status" -ne 0 ]
+}
+
+@test "impact: filename-only keyword does not flag (axios in filename)" {
+    local r; r=$(_repo "imp-fnfp")
+    mkdir -p "$r/src"; printf 'export const TIMEOUT = 5000\n' > "$r/src/axios-config.js"
+    local sha; sha=$(_mkcommit "$r" cfg)
+    cd "$r"
+    run bash "$(IMPACT)" score "$sha"
+    [[ "$output" == *'"ext":false'* ]]
+}
+
+@test "impact: keyword in a doc file does not flag (CREATE TABLE in .md)" {
+    local r; r=$(_repo "imp-docfp")
+    mkdir -p "$r/docs"; printf 'Run CREATE TABLE users manually.\n' > "$r/docs/notes.md"
+    local sha; sha=$(_mkcommit "$r" doc)
+    cd "$r"
+    run bash "$(IMPACT)" score "$sha"
+    [[ "$output" == *'"db":false'* ]]
+}
+
+@test "impact: keyword in a comment does not flag (axios in comment)" {
+    local r; r=$(_repo "imp-cmtfp")
+    mkdir -p "$r/src"; printf 'const x = 1 // TODO migrate from axios\n' > "$r/src/x.js"
+    local sha; sha=$(_mkcommit "$r" cmt)
+    cd "$r"
+    run bash "$(IMPACT)" score "$sha"
+    [[ "$output" == *'"ext":false'* ]]
+}
+
+@test "impact: auth path prefix collision does not flag (src/author)" {
+    local r; r=$(_repo "imp-authfp")
+    mkdir -p "$r/src/author"; printf 'class Bio {}\n' > "$r/src/author/Bio.kt"
+    local sha; sha=$(_mkcommit "$r" author)
+    cd "$r"
+    run bash "$(IMPACT)" score "$sha"
+    [[ "$output" == *'"auth":false'* ]]
+}
+
+@test "impact: domain authorization word does not flag (order authorization)" {
+    local r; r=$(_repo "imp-domainauth")
+    mkdir -p "$r/src"; printf 'fun checkAuthorization(o: Order) = o.isAuthorized()\n' > "$r/src/Order.kt"
+    local sha; sha=$(_mkcommit "$r" order)
+    cd "$r"
+    run bash "$(IMPACT)" score "$sha"
+    [[ "$output" == *'"auth":false'* ]]
+}
+
+@test "impact: config getter does not flag api (app.get env)" {
+    local r; r=$(_repo "imp-getter")
+    mkdir -p "$r/src"; printf 'const e = config.app.get("env")\n' > "$r/src/Cfg.js"
+    local sha; sha=$(_mkcommit "$r" getter)
+    cd "$r"
+    run bash "$(IMPACT)" score "$sha"
+    [[ "$output" == *'"api":false'* ]]
+}
+
+@test "impact: cross-stack ext (Go http.Get)" {
+    local r; r=$(_repo "imp-xext")
+    printf 'resp, _ := http.Get("https://x")\n' > "$r/main.go"
+    local sha; sha=$(_mkcommit "$r" goget)
+    cd "$r"
+    run bash "$(IMPACT)" score "$sha"
+    [[ "$output" == *'"ext":true'* ]]
+}
+
+@test "impact: cross-stack api (Flask app.route)" {
+    local r; r=$(_repo "imp-flask")
+    printf '@app.route("/users")\ndef users(): pass\n' > "$r/app.py"
+    local sha; sha=$(_mkcommit "$r" flask)
+    cd "$r"
+    run bash "$(IMPACT)" score "$sha"
+    [[ "$output" == *'"api":true'* ]]
+}
+
+@test "impact: cross-stack db (Rails create_table in db/migrate)" {
+    local r; r=$(_repo "imp-rails")
+    mkdir -p "$r/db/migrate"; printf 'create_table :users\n' > "$r/db/migrate/001_x.rb"
+    local sha; sha=$(_mkcommit "$r" rails)
+    cd "$r"
+    run bash "$(IMPACT)" score "$sha"
+    [[ "$output" == *'"db":true'* ]]
+    [[ "$output" == *'"track_floor":"Medium"'* ]]
+}
+
+@test "impact: untracked new file is scored in --working (new migration)" {
+    local r; r=$(_repo "imp-untracked")
+    echo base > "$r/a.txt"; _mkcommit "$r" base >/dev/null
+    mkdir -p "$r/db/migration"; printf 'CREATE TABLE x(id int);\n' > "$r/db/migration/V9.sql"
+    cd "$r"
+    run bash "$(IMPACT)" score --working
+    [[ "$output" == *'"db":true'* ]]
+    [[ "$output" == *'"track_floor":"Medium"'* ]]
+}
+
+@test "impact triage: unknown predicted track exits 2" {
+    local r; r=$(_repo "imp-tri-bad")
+    echo x > "$r/a.txt"; local sha; sha=$(_mkcommit "$r" a)
+    cd "$r"
+    run bash "$(IMPACT)" triage Huge "$sha"
+    [ "$status" -eq 2 ]
+}
+
+@test "impact triage: predicted track is case-insensitive" {
+    local r; r=$(_repo "imp-tri-case")
+    mkdir -p "$r/src/security"; printf '@Secured("x")\n' > "$r/src/security/S.kt"
+    local sha; sha=$(_mkcommit "$r" sec)
+    cd "$r"
+    run bash "$(IMPACT)" triage large "$sha"
+    [[ "$output" == *'"verdict":"ok"'* ]]
+}
+
+@test "impact: seven files -> file_pts 5 (band upper)" {
+    local r; r=$(_repo "imp-seven")
+    local i; for i in 1 2 3 4 5 6 7; do echo "x$i" > "$r/f$i.txt"; done
+    local sha; sha=$(_mkcommit "$r" seven)
+    cd "$r"
+    run bash "$(IMPACT)" score "$sha"
+    [[ "$output" == *'"files":7'* ]]
+    [[ "$output" == *'"file_pts":5'* ]]
+}
+
+@test "impact: twelve files -> file_pts 8 + Medium" {
+    local r; r=$(_repo "imp-twelve")
+    local i; for i in $(seq 1 12); do echo "x$i" > "$r/f$i.txt"; done
+    local sha; sha=$(_mkcommit "$r" twelve)
+    cd "$r"
+    run bash "$(IMPACT)" score "$sha"
+    [[ "$output" == *'"file_pts":8'* ]]
+    [[ "$output" == *'"track_from_score":"Medium"'* ]]
 }

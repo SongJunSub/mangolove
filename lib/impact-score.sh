@@ -4,8 +4,12 @@
 #
 # strict.md §44-76 Change Impact Score 의 "셀 수 있는 항목"을 LLM 추정이 아니라
 # git diff 로 코드가 계산한다. 핵심 출력은 track_floor — 경로/심볼 패턴에 따른
-# 트랙 하한으로 100% 결정적이다(DB→Medium, 외부API→Medium, 인증→Large).
+# 트랙 하한으로, 동일 변경에 대해 결정적이다(DB→Medium, 외부API→Medium, 인증→Large).
 # "새 로직 vs 기존 패턴 내 변경" 같은 의미론은 코드로 못 세므로 LLM 몫(이 스크립트 밖).
+#
+# 콘텐츠 패턴은 **실제 추가된 코드 라인**(diff 헤더/순수 주석/문서(.md 등) 제외)에만 적용해
+# 파일명·주석·산문에 의한 오탐을 막는다. 정규식 커버 스택: Java/Kotlin/Spring, JS/TS,
+# Python, Go, Rails/Django (그 밖 스택은 미커버 — track_floor 보장은 커버 스택 한정).
 #
 # 사용:
 #   impact-score.sh score  <sha|--working>             → JSON 1줄 (점수 분해 + track_floor)
@@ -14,30 +18,70 @@
 # ─────────────────────────────────────────────
 set -uo pipefail
 
-# diff 추출 — 커밋(sha) 과 워킹트리(--working) 양쪽 지원. 워크트리/서브모듈에서도 cwd git 으로 동작.
+# diff 추출 — 커밋(sha; 머지는 --first-parent 로 mainline 기준)과 워킹트리(--working) 지원.
+# --working 은 untracked(아직 git add 안 한) 신규 파일도 포함한다(인덱스 변경 없이).
 _ref_names() {
-    if [ "$1" = "--working" ]; then git diff --name-only HEAD 2>/dev/null
-    else git show --name-only --format='' "$1" 2>/dev/null; fi
+    if [ "$1" = "--working" ]; then
+        { git diff --name-only HEAD 2>/dev/null; git ls-files --others --exclude-standard 2>/dev/null; } | sort -u
+    else
+        git show --first-parent --name-only --format='' "$1" 2>/dev/null
+    fi
 }
 _ref_numstat() {
-    if [ "$1" = "--working" ]; then git diff --numstat HEAD 2>/dev/null
-    else git show --numstat --format='' "$1" 2>/dev/null; fi
+    if [ "$1" = "--working" ]; then
+        git diff --numstat HEAD 2>/dev/null
+        git ls-files --others --exclude-standard 2>/dev/null | awk 'NF{print "1\t0\t" $0}'
+    else
+        git show --first-parent --numstat --format='' "$1" 2>/dev/null
+    fi
 }
 _ref_diff() {
-    if [ "$1" = "--working" ]; then git diff HEAD 2>/dev/null
-    else git show --format='' "$1" 2>/dev/null; fi
+    if [ "$1" = "--working" ]; then
+        git diff HEAD 2>/dev/null
+        local f
+        git ls-files --others --exclude-standard 2>/dev/null | while IFS= read -r f; do
+            git diff --no-index --no-color -- /dev/null "$f" 2>/dev/null
+        done
+    else
+        git show --first-parent --format='' "$1" 2>/dev/null
+    fi
+}
+
+# diff 에서 "실제 추가된 코드 라인"만 추출한다:
+#  - diff 헤더(+++/---) 제외 (파일명-only 오탐 차단)
+#  - 문서 확장자(.md 등) hunk 제외 (산문 속 키워드 오탐 차단)
+#  - 순수 주석 라인(// # * <!--) 제외
+_added_code() {
+    printf '%s\n' "$1" | awk '
+        /^\+\+\+ / { p=$0; sub(/^\+\+\+ (b\/)?/, "", p); doc = (p ~ /\.(md|markdown|txt|rst|adoc)$/); next }
+        /^--- / { next }
+        /^\+/ {
+            t=$0; sub(/^\+[ \t]*/, "", t)
+            if (t ~ /^(\/\/|#|\*|<!--)/) next
+            if (!doc) print
+        }
+    '
 }
 
 _rank() { case "$1" in Small) echo 1;; Medium) echo 2;; Large) echo 3;; *) echo 0;; esac; }
 _track_from_rank() { case "$1" in 1) echo Small;; 2) echo Medium;; 3) echo Large;; *) echo Trivial;; esac; }
 _bool() { if [ "$1" -eq 1 ]; then echo true; else echo false; fi; }
 
+# 잘못된/없는 ref 는 조용히 Trivial 로 흐르지 않게 비-0 종료한다.
+_require_ref() {
+    [ "$1" = "--working" ] && return 0
+    git rev-parse --verify --quiet "${1}^{commit}" >/dev/null 2>&1 && return 0
+    echo "impact-score: unknown revision: $1" >&2
+    exit 1
+}
+
 # compute <ref> → JSON 1줄 (결정적)
 compute() {
-    local ref="$1" names numstat diff
+    local ref="$1" names numstat diff added
     names="$(_ref_names "$ref")"
     numstat="$(_ref_numstat "$ref")"
     diff="$(_ref_diff "$ref")"
+    added="$(_added_code "$diff")"
 
     # 변경 파일 수 (numstat 비어있지 않은 줄). 빈/머지 커밋은 0 → set -u 안전.
     local files=0
@@ -53,20 +97,23 @@ compute() {
     elif [ "$files" -ge 1 ];  then file_pts=1
     fi
 
-    # 결정적 플래그 (경로 또는 diff 추가라인 패턴)
+    # 결정적 플래그 — 경로(names) 또는 추가-코드-라인(added) 패턴
     local db=0 auth=0 ext=0 api=0
-    if printf '%s' "$names" | grep -qiE '(^|/)(migrations?|db/(migration|changelog)|flyway|liquibase)/' \
-       || printf '%s' "$diff" | grep -qiE '^\+.*(CREATE[[:space:]]+TABLE|ALTER[[:space:]]+TABLE|@Entity|@Table([^A-Za-z]|$))'; then
+    if printf '%s' "$names" | grep -qiE '(^|/)(migrations?|db/(migration|migrate|changelog)|flyway|liquibase)/' \
+       || printf '%s' "$added" | grep -qiE '(CREATE[[:space:]]+TABLE|ALTER[[:space:]]+TABLE|@Entity|@Table([^A-Za-z]|$)|AutoMigrate|create_table|add_column|change_column|models\.Model|migrations\.(CreateModel|AddField))'; then
         db=1
     fi
-    if printf '%s' "$names" | grep -qiE '(^|/)(auth|security|oauth|jwt|rbac|permission)' \
-       || printf '%s' "$diff" | grep -qiE '^\+.*(@PreAuthorize|@Secured|@RolesAllowed|SecurityConfig|authenticat|authoriz)'; then
+    if printf '%s' "$names" | grep -qiE '(^|/)(auth|authn|authz|security|oauth|jwt|rbac|permissions|login|signin)/' \
+       || printf '%s' "$added" | grep -qiE '(@PreAuthorize|@Secured|@RolesAllowed|@EnableWebSecurity|SecurityConfig|SecurityFilterChain|SecurityContextHolder|AuthenticationManager|UsernamePasswordAuthenticationToken|UserDetailsService|authenticate\(|authorize\(|bcrypt|argon2|scrypt|passport|next-auth|verifyPassword)'; then
         auth=1
     fi
-    if printf '%s' "$diff" | grep -qiE '^\+.*(RestTemplate|WebClient|HttpClient|OkHttp|@FeignClient|RestClient|axios|requests\.(get|post|put|delete))'; then
+    if printf '%s' "$added" | grep -qiE '(RestTemplate|WebClient|HttpClient|OkHttp|@FeignClient|RestClient|[^A-Za-z]axios[.(]|[^A-Za-z]fetch\(|requests\.(get|post|put|delete|patch|head)\(|httpx\.|urllib|http\.(Get|Post|NewRequest|Do)\()'; then
         ext=1
     fi
-    if printf '%s' "$diff" | grep -qiE '^\+.*(@(Get|Post|Put|Delete|Patch|Request)Mapping|router\.(get|post|put|delete)|app\.(get|post|put|delete))'; then
+    # 라우팅 등록만 — getter 오탐 방지로 router/app 메서드는 첫 인자가 라우트 경로 리터럴("/...)일 때만.
+    local api_q="['\"]" api_re
+    api_re="(@(Get|Post|Put|Delete|Patch|Request)Mapping|@app\\.route|HandleFunc|[a-zA-Z_]+\\.(get|post|put|delete|patch)\\([[:space:]]*${api_q}/)"
+    if printf '%s' "$added" | grep -qiE "$api_re"; then
         api=1
     fi
 
@@ -97,10 +144,17 @@ compute() {
 
 # triage <predicted> <ref> → 선언 트랙이 코드 floor 보다 낮으면 under_triage (가장 비싼 누수)
 triage() {
-    local predicted="$1" ref="$2" json floor pr fr verdict
+    local predicted="$1" ref="$2" json floor pr fr verdict norm
+    norm="$(printf '%s' "$predicted" | tr '[:upper:]' '[:lower:]')"
+    case "$norm" in
+        trivial) pr=0 ;;
+        small)   pr=1 ;;
+        medium)  pr=2 ;;
+        large)   pr=3 ;;
+        *) echo "impact-score: unknown predicted track '$predicted' (Trivial|Small|Medium|Large)" >&2; exit 2 ;;
+    esac
     json="$(compute "$ref")"
     floor="$(printf '%s' "$json" | sed -E 's/.*"track_floor":"([^"]+)".*/\1/')"
-    pr="$(_rank "$predicted")"
     fr="$(_rank "$floor")"
     if   [ "$pr" -lt "$fr" ]; then verdict="under_triage"
     elif [ "$pr" -gt "$fr" ]; then verdict="over_triage"
@@ -130,9 +184,9 @@ main() {
         echo "impact-score: not a git repository" >&2; exit 1
     fi
     case "${1:-}" in
-        score)  [ -n "${2:-}" ] || { echo "usage: impact-score.sh score <sha|--working>" >&2; exit 2; }; compute "$2" ;;
-        triage) [ -n "${3:-}" ] || { echo "usage: impact-score.sh triage <predicted> <sha|--working>" >&2; exit 2; }; triage "$2" "$3" ;;
-        report) [ -n "${2:-}" ] || { echo "usage: impact-score.sh report <sha|--working>" >&2; exit 2; }; report "$2" ;;
+        score)  [ -n "${2:-}" ] || { echo "usage: impact-score.sh score <sha|--working>" >&2; exit 2; }; _require_ref "$2"; compute "$2" ;;
+        triage) [ -n "${3:-}" ] || { echo "usage: impact-score.sh triage <predicted> <sha|--working>" >&2; exit 2; }; _require_ref "$3"; triage "$2" "$3" ;;
+        report) [ -n "${2:-}" ] || { echo "usage: impact-score.sh report <sha|--working>" >&2; exit 2; }; _require_ref "$2"; report "$2" ;;
         *) echo "usage: impact-score.sh {score|triage|report} ..." >&2; exit 2 ;;
     esac
 }

@@ -29,6 +29,9 @@ cmd="${cmd//\`/}"
 has() { printf '%s' "$cmd" | grep -qiE "$1"; }
 
 block() {
+    # 효능 원장에 차단 기록 (비차단·실패무시)
+    local rec; rec="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/efficacy-recorder.sh"
+    if [ -f "$rec" ]; then bash "$rec" record-block guard "$1" 2>/dev/null || true; fi
     echo "MangoLove guard 차단 — 비가역/파괴적 명령 의심: $1" >&2
     echo "  의도적이면 MANGOLOVE_ALLOW_DANGER=1 로 재실행하세요 (감사 대상)." >&2
     exit 2

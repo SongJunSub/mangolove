@@ -336,6 +336,48 @@ _mkcommit() {
     [[ "$output" == *'"track_from_score":"Medium"'* ]]
 }
 
+# ── 크로스스택 커버리지 보강 (C#/.NET, Rust, EF) ──
+
+@test "impact: C# Authorize attribute -> auth flag + floor Large" {
+    local r; r=$(_repo "imp-csauth")
+    mkdir -p "$r/src"; printf '[Authorize(Roles = "Admin")]\npublic class C {}\n' > "$r/src/UserController.cs"
+    local sha; sha=$(_mkcommit "$r" "csauth")
+    cd "$r"
+    run bash "$(IMPACT)" score "$sha"
+    [[ "$output" == *'"auth":true'* ]]
+    [[ "$output" == *'"track_floor":"Large"'* ]]
+}
+
+@test "impact: Rust reqwest -> ext flag + floor Medium" {
+    local r; r=$(_repo "imp-rustext")
+    mkdir -p "$r/src"; printf 'let b = reqwest::get("https://api.example.com").await?;\n' > "$r/src/client.rs"
+    local sha; sha=$(_mkcommit "$r" "rustext")
+    cd "$r"
+    run bash "$(IMPACT)" score "$sha"
+    [[ "$output" == *'"ext":true'* ]]
+    [[ "$output" == *'"track_floor":"Medium"'* ]]
+}
+
+@test "impact: EF migrationBuilder.CreateTable -> db flag + floor Medium" {
+    local r; r=$(_repo "imp-efdb")
+    mkdir -p "$r/src/Data"; printf 'migrationBuilder.CreateTable(name: "Users");\n' > "$r/src/Data/SchemaSetup.cs"
+    local sha; sha=$(_mkcommit "$r" "efdb")
+    cd "$r"
+    run bash "$(IMPACT)" score "$sha"
+    [[ "$output" == *'"db":true'* ]]
+    [[ "$output" == *'"track_floor":"Medium"'* ]]
+}
+
+@test "impact: Rust tower auth middleware -> auth flag + floor Large" {
+    local r; r=$(_repo "imp-rustauth")
+    mkdir -p "$r/src/net"; printf 'use tower_http::auth::RequireAuthorizationLayer;\n' > "$r/src/net/mw.rs"
+    local sha; sha=$(_mkcommit "$r" "rustauth")
+    cd "$r"
+    run bash "$(IMPACT)" score "$sha"
+    [[ "$output" == *'"auth":true'* ]]
+    [[ "$output" == *'"track_floor":"Large"'* ]]
+}
+
 # ── declared-track + triage-commit (Phase 2 잔여 / under_triage) ──
 
 # 트레일러 포함 커밋 생성 (subject + 빈 줄 + Change-Track) → SHA echo

@@ -38,17 +38,22 @@ Trivial|0|src/util.js|export const TIMEOUT = 5000
 Medium|0|db/migration/V1__init.sql|CREATE TABLE users (id INT);
 Medium|0|src/Client.kt|val c = WebClient.create("https://api.example.com")
 Medium|0|src/client.py|r = requests.get("https://api.example.com/v1")
+Medium|0|src/client.rs|let b = reqwest::get("https://api.example.com").await?;
+Medium|0|src/Data/SchemaSetup.cs|migrationBuilder.CreateTable(name: "Users");
 Large|0|src/security/SecurityConfig.kt|@PreAuthorize("hasRole(ADMIN)")
 Large|0|src/security/RoleSetup.kt|CREATE TABLE roles (id INT); auth=@PreAuthorize
+Large|0|src/Api/UserController.cs|[Authorize(Roles = "Admin")] public class C {}
+Large|0|src/net/mw.rs|use tower_http::auth::RequireAuthorizationLayer;
 Medium|0|db/migrate/001_users.rb|create_table :users
-Large|1|src/middleware/auth_layer.rs|fn require_role(u: User) -> bool { u.is_admin() }
+Large|1|src/handlers/access.rs|fn require_role(u: User) -> bool { u.is_admin() }
 EOF
 }
 
 # ── 가드 정밀도·재현율 픽스처 ──
 # 형식: "<block|pass>|<command>"
-# 가드 커버 범위(정직): SQL 클라이언트의 SQL 구문(DROP/TRUNCATE/WHERE 없는 DELETE)·리터럴 위험 루트(/,~,$HOME)
-# 한정. Mongo 문서 구문(deleteMany)·동적 변수 경로($PWD,${HOME})는 *미커버* — 이들 차단은 가드 후속 과제(여기 미포함).
+# 가드 커버 범위(정직): SQL 구문(DROP/TRUNCATE/WHERE 없는 DELETE)·Mongo 파괴 구문(dropDatabase/.drop()/
+# 빈 필터 deleteMany)·리터럴+환경변수 위험 루트(/,~,$HOME,$PWD,${HOME},$(pwd)). 잔여 미커버(정직):
+# 백틱 `pwd`(검사 전 제거됨)·base64/eval 난독화·새 CLI 도구 — 정규식 가드의 구조적 한계(잔여 위험).
 _guard_fixtures() {
     cat <<'EOF'
 block|git push --force origin main
@@ -56,20 +61,29 @@ block|git push -f origin main
 block|git reset --hard HEAD~3
 block|rm -rf /
 block|rm -rf $HOME/data
+block|rm -rf $PWD
+block|rm -rf ${HOME}
+block|rm -rf $(pwd)
 block|psql mydb -c "DROP TABLE users"
 block|mysql -e "TRUNCATE TABLE orders"
 block|psql -c "DELETE FROM accounts"
 block|cqlsh -e "DROP TABLE users"
 block|psql -c "DELETE FROM accounts; -- WHERE id=1 was here"
 block|psql -c "DELETE FROM accounts; DELETE FROM logs WHERE id=5"
+block|mongosh --eval "db.users.deleteMany({})"
+block|mongosh mydb --eval "db.dropDatabase()"
+block|mongosh --eval "db.sessions.drop()"
 block|kubectl delete deployment api
 block|terraform destroy -auto-approve
 pass|git push origin main
 pass|git push --force-with-lease origin feature
 pass|rm -rf ./build
 pass|rm -rf node_modules
+pass|rm -rf $TMPDIR/cache
 pass|psql -c "SELECT * FROM users WHERE id = 1"
 pass|psql -c "DELETE FROM accounts WHERE id = 5"
+pass|mongosh --eval "db.users.deleteMany({status:'old'})"
+pass|mongosh --eval "db.users.find({})"
 pass|git commit -m "drop table reference in a comment"
 pass|grep -rn "DROP TABLE" src/
 EOF

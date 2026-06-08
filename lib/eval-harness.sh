@@ -29,15 +29,17 @@ IMPACT="$SELF_DIR/impact-score.sh"
 GUARD="$SELF_DIR/irreversible-guard.sh"
 
 # ── impact 보정도 픽스처 ──
-# 형식: "<expect_track>|<known_gap?0/1>|<relpath>|<file_content>"
-# 단일 파일 신호 중심(파일수 밴드는 impact-score.bats 가 커버). content 의 \n 은 실제 줄바꿈으로 푼다.
+# 형식: "<expect_track>|<known_gap?0/1>|<relpath>|<file_content>"  (한 줄 = 픽스처 1개; 이 TSV 형식상 content 멀티라인 불가)
+# 단일 파일 신호 중심(파일수 밴드는 impact-score.bats 가 커버). db+auth 결합은 승격 우선순위(auth>db)를 검증.
 _impact_fixtures() {
     cat <<'EOF'
 Trivial|0|README.md|# docs only, no code
 Trivial|0|src/util.js|export const TIMEOUT = 5000
 Medium|0|db/migration/V1__init.sql|CREATE TABLE users (id INT);
 Medium|0|src/Client.kt|val c = WebClient.create("https://api.example.com")
+Medium|0|src/client.py|r = requests.get("https://api.example.com/v1")
 Large|0|src/security/SecurityConfig.kt|@PreAuthorize("hasRole(ADMIN)")
+Large|0|src/security/RoleSetup.kt|CREATE TABLE roles (id INT); auth=@PreAuthorize
 Medium|0|db/migrate/001_users.rb|create_table :users
 Large|1|src/middleware/auth_layer.rs|fn require_role(u: User) -> bool { u.is_admin() }
 EOF
@@ -45,6 +47,8 @@ EOF
 
 # ── 가드 정밀도·재현율 픽스처 ──
 # 형식: "<block|pass>|<command>"
+# 가드 커버 범위(정직): SQL 클라이언트의 SQL 구문(DROP/TRUNCATE/WHERE 없는 DELETE)·리터럴 위험 루트(/,~,$HOME)
+# 한정. Mongo 문서 구문(deleteMany)·동적 변수 경로($PWD,${HOME})는 *미커버* — 이들 차단은 가드 후속 과제(여기 미포함).
 _guard_fixtures() {
     cat <<'EOF'
 block|git push --force origin main
@@ -55,6 +59,9 @@ block|rm -rf $HOME/data
 block|psql mydb -c "DROP TABLE users"
 block|mysql -e "TRUNCATE TABLE orders"
 block|psql -c "DELETE FROM accounts"
+block|cqlsh -e "DROP TABLE users"
+block|psql -c "DELETE FROM accounts; -- WHERE id=1 was here"
+block|psql -c "DELETE FROM accounts; DELETE FROM logs WHERE id=5"
 block|kubectl delete deployment api
 block|terraform destroy -auto-approve
 pass|git push origin main
@@ -75,25 +82,26 @@ eval_impact() {
     local expect gap rel content repo got
     while IFS='|' read -r expect gap rel content; do
         [ -z "$expect" ] && continue
-        repo="$(mktemp -d 2>/dev/null)" || continue
-        git -C "$repo" init -q 2>/dev/null
-        mkdir -p "$repo/$(dirname "$rel")" 2>/dev/null
-        printf '%s\n' "$content" > "$repo/$rel"
-        git -C "$repo" add -A 2>/dev/null
-        git -C "$repo" -c user.email=e@e -c user.name=n commit -qm fixture >/dev/null 2>&1
-        got="$(cd "$repo" && bash "$IMPACT" score HEAD 2>/dev/null | sed -E 's/.*"track_floor":"([^"]+)".*/\1/')"
-        rm -rf "$repo" 2>/dev/null
+        # 분모를 측정 전에 센다 — mktemp/측정 실패가 분모를 조용히 줄여 점수를 부풀리지 않도록(침묵 캡 금지)
+        if [ "$gap" = "1" ]; then IMP_GAP_TOTAL=$((IMP_GAP_TOTAL + 1)); else IMP_TOTAL=$((IMP_TOTAL + 1)); fi
+        got=""
+        if repo="$(mktemp -d 2>/dev/null)"; then
+            git -C "$repo" init -q 2>/dev/null
+            mkdir -p "$repo/$(dirname "$rel")" 2>/dev/null
+            printf '%s\n' "$content" > "$repo/$rel"
+            git -C "$repo" add -A 2>/dev/null
+            git -C "$repo" -c user.email=e@e -c user.name=n commit -qm fixture >/dev/null 2>&1
+            got="$(cd "$repo" && bash "$IMPACT" score HEAD 2>/dev/null | sed -E 's/.*"track_floor":"([^"]+)".*/\1/')"
+            rm -rf "$repo" 2>/dev/null
+        fi
+        # 유효 트랙이 아니면(mktemp 실패·impact 오류·추출 실패) MISS 가 아니라 '측정실패'로 — 점수를 부풀리지 않고 회귀로 드러낸다
+        case "$got" in Trivial|Small|Medium|Large) ;; *) got="<측정실패>" ;; esac
         if [ "$gap" = "1" ]; then
-            IMP_GAP_TOTAL=$((IMP_GAP_TOTAL + 1))
-            [ "$got" = "$expect" ] && IMP_GAP_MATCH=$((IMP_GAP_MATCH + 1))
-            [ "$got" != "$expect" ] && IMP_MISS="$IMP_MISS\n    [known-gap] $rel: 기대 $expect, 실제 ${got:-?} (커버 밖 스택)"
+            if [ "$got" = "$expect" ]; then IMP_GAP_MATCH=$((IMP_GAP_MATCH + 1))
+            else IMP_MISS="$IMP_MISS\n    [known-gap] $rel: 기대 $expect, 실제 $got (커버 밖 스택)"; fi
         else
-            IMP_TOTAL=$((IMP_TOTAL + 1))
-            if [ "$got" = "$expect" ]; then
-                IMP_MATCH=$((IMP_MATCH + 1))
-            else
-                IMP_MISS="$IMP_MISS\n    [MISS] $rel: 기대 $expect, 실제 ${got:-?}"
-            fi
+            if [ "$got" = "$expect" ]; then IMP_MATCH=$((IMP_MATCH + 1))
+            else IMP_MISS="$IMP_MISS\n    [MISS] $rel: 기대 $expect, 실제 $got"; fi
         fi
     done <<EOF
 $(_impact_fixtures)
@@ -106,8 +114,8 @@ eval_guard() {
     local label cmd esc rc
     while IFS='|' read -r label cmd; do
         [ -z "$label" ] && continue
-        # 명령 내 따옴표를 \" 로 이스케이프해 유효한 JSON 으로 가드에 전달(실제 PreToolUse 입력과 동일 형태)
-        esc="${cmd//\"/\\\"}"
+        # 유효 JSON 으로 가드에 전달 — 역슬래시 먼저, 그다음 따옴표 이스케이프(순서 중요; 픽스처는 단일 라인이라 개행 없음)
+        esc="${cmd//\\/\\\\}"; esc="${esc//\"/\\\"}"
         printf '{"tool_input":{"command":"%s"}}' "$esc" | bash "$GUARD" >/dev/null 2>&1
         rc=$?  # 2 = 차단, 0 = 통과
         if [ "$label" = "block" ]; then

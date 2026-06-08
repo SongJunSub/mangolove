@@ -29,7 +29,7 @@ EVAL() { echo "$MANGOLOVE_DIR/lib/eval-harness.sh"; }
 @test "eval: impact calibration matches all spec fixtures" {
     run bash "$(EVAL)" impact
     [ "$status" -eq 0 ]
-    [[ "$output" == *"적합 6/6"* ]]
+    [[ "$output" == *"적합 8/8"* ]]
 }
 
 @test "eval: guard precision/recall is perfect on the labeled suite" {
@@ -60,6 +60,14 @@ EVAL() { echo "$MANGOLOVE_DIR/lib/eval-harness.sh"; }
     run bash "$(EVAL)" impact
     [ "$status" -eq 1 ]
     [[ "$output" == *"MISS"* ]]
+}
+
+@test "eval: an impact-score emitting non-track output is flagged 측정실패 (no silent inflation)" {
+    # impact-score 가 트랙이 아닌 출력/오류를 내면 — 가짜 일치나 분모 축소가 아니라 '측정실패'로 회귀 처리
+    printf '#!/usr/bin/env bash\necho "Error: boom" >&2\nexit 1\n' > "$MANGOLOVE_DIR/lib/impact-score.sh"
+    run bash "$(EVAL)" impact
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"측정실패"* ]]
 }
 
 @test "eval: a guard that over-blocks is caught as a regression (FP reported)" {

@@ -43,3 +43,14 @@ setup() {
     esc=$(printf '%s' "$file_ver" | sed 's/[.]/\\./g')
     grep -qE "^\*\*MangoLove\*\* v${esc}\$" "$REPO/README.md"
 }
+
+@test "repo: all lib/*.sh are executable in git (runtime chmod must not block mangolove update)" {
+    # mangolove 는 세션 시작/설치 시 lib/*.sh 를 chmod +x 한다. git 에 100644 로 커밋된 스크립트가
+    # 있으면 그 mode 차이가 다음 'mangolove update' 의 git pull 을 막는다. 전부 100755 여야 한다.
+    local f mode bad=""
+    while IFS= read -r f; do
+        mode="$(git -C "$REPO" ls-files -s -- "$f" | awk '{print $1}')"
+        [ "$mode" = "100755" ] || bad="$bad $f($mode)"
+    done < <(git -C "$REPO" ls-files -- 'lib/*.sh')
+    [ -z "$bad" ] || { echo "non-executable in git:$bad"; false; }
+}

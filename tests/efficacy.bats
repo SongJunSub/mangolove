@@ -178,9 +178,11 @@ _commit_track() {
     run bash "$(REC)" report
     [ "$status" -eq 0 ]
     [[ "$output" == *"under-triage"* ]]
-    # seed(미선언) + 2선언 → 분모는 선언된 2개만
-    [[ "$output" == *"선언 커밋: 2/"* ]]
-    [[ "$output" == *"under-triage: 1건"* ]]
+    # seed(미선언) + 2선언 → n=3, 분모는 선언된 2개만, under 1건
+    [[ "$output" == *"3커밋 중 2건 선언"* ]]
+    [[ "$output" == *"under-triage: 선언 2건 중 1건"* ]]
+    # 선언은 자기보고임을 정직하게 표기
+    [[ "$output" == *"자기보고"* ]]
 }
 
 @test "efficacy: report reports zero coverage when no Change-Track declared" {

@@ -374,6 +374,19 @@ _mkcommit_track() {
     [ -z "$output" ]
 }
 
+@test "impact declared-track: a Change-Track line in prose body is NOT captured (footer-only)" {
+    local r; r=$(_repo "dt-prose")
+    echo x > "$r/a.txt"; git -C "$r" add -A
+    # 'Change-Track: Large ...' 가 본문 중간에 있고, 진짜 마지막 단락은 산문 → 트레일러 아님
+    git -C "$r" -c user.email=t@t.com -c user.name=t \
+        commit -qm "$(printf 'feat: x\n\nChange-Track: Large is just a concept here.\n\nActual body paragraph, no trailer.\n')" >/dev/null
+    local sha; sha=$(git -C "$r" rev-parse HEAD)
+    cd "$r"
+    run bash "$(IMPACT)" declared-track "$sha"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
 @test "impact declared-track: last trailer wins and is case-insensitive" {
     local r; r=$(_repo "dt-last")
     echo x > "$r/a.txt"; git -C "$r" add -A

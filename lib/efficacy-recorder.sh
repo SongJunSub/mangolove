@@ -86,11 +86,18 @@ report() {
         printf '  점수화된 최근 %s커밋:  Trivial %s / Small %s / Medium %s / Large %s\n' "$n" "$t" "$s" "$m" "$l"
         printf '  인증/DB/외부API 터치: %s건 (무거운 트랙이어야 할 변경)\n' "$risky"
         echo ""
-        echo "트랙 under-triage (선언 트랙 < 코드 floor — 무거운 리뷰 누락 신호; 분모=선언된 커밋만):"
+        echo "참고 — 트랙 under-triage (선언 트랙 < 코드 floor; 선언은 자기보고·floor는 git diff 결정적):"
+        echo "  (분모=선언된 커밋만; --first-parent 기준이라 merge-커밋으로 들어온 선언은 미집계)"
         if [ "$declared" -gt 0 ]; then
-            printf '  선언 커밋: %s/%s (Change-Track trailer 커버리지)\n' "$declared" "$n"
-            printf '  under-triage: %s건 / %s선언 = %s%%\n' "$under" "$declared" "$(( under * 100 / declared ))"
-            [ "$under" -gt 0 ] && echo "  ↳ 선언보다 무거운 트랙이 필요했던 변경 — Spec/리뷰 단계가 누락됐을 수 있음"
+            # 커버리지를 명시적으로 — '미선언 N건은 측정 대상 외'로 오독(높은 선언율로 위장) 차단
+            printf '  선언 커버리지: %s커밋 중 %s건 선언 (%s%%) — 미선언 %s건은 측정 대상 외\n' \
+                "$n" "$declared" "$(( declared * 100 / n ))" "$(( n - declared ))"
+            # 소표본에서 오해를 부르는 단독 %% 대신 raw 분수를 1급으로 — 선언 D건 중 U건
+            if [ "$under" -gt 0 ]; then
+                printf '  under-triage: 선언 %s건 중 %s건 — 선언보다 무거운 트랙 필요(Spec/리뷰 누락 신호)\n' "$declared" "$under"
+            else
+                printf '  under-triage: 선언 %s건 중 0건 — 선언 트랙 모두 floor 이상\n' "$declared"
+            fi
         else
             echo "  (선언된 커밋 없음 — Change-Track: trailer 미사용; coverage 0, 측정 불가)"
         fi

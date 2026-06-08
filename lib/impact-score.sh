@@ -166,14 +166,16 @@ triage() {
 }
 
 # declared-track <ref> → 커밋 메시지의 Change-Track: trailer 를 정규화해 출력(없으면 빈 문자열).
-# 마지막 트레일러 우선(git trailer 관례), 값의 첫 토큰만, 유효하지 않으면 undeclared 취급(빈 출력).
-# --working 은 커밋 메시지가 없으므로 항상 빈 출력(N/A).
+# git interpret-trailers --parse 로 **footer 트레일러 블록만** 파싱 — 본문(prose) 속
+# "Change-Track: ..." 라인을 트레일러로 오인하지 않는다(FP 차단). 마지막 트레일러 우선,
+# 값의 첫 토큰만, 유효하지 않으면 undeclared 취급(빈 출력). --working 은 메시지가 없어 빈 출력.
 declared_track() {
     local ref="$1" raw norm
     [ "$ref" = "--working" ] && return 0
     raw="$(git show -s --format='%B' "$ref" 2>/dev/null \
-        | grep -iE '^[[:space:]]*Change-Track:' | tail -1 \
-        | sed -E 's/^[[:space:]]*[Cc]hange-[Tt]rack:[[:space:]]*//' \
+        | git interpret-trailers --parse 2>/dev/null \
+        | grep -iE '^Change-Track:' | tail -1 \
+        | sed -E 's/^[Cc]hange-[Tt]rack:[[:space:]]*//' \
         | awk '{print $1}')"
     [ -z "$raw" ] && return 0
     norm="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"

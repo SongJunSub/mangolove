@@ -62,7 +62,7 @@ EVAL() { echo "$MANGOLOVE_DIR/lib/eval-harness.sh"; }
     [[ "$output" == *"MISS"* ]]
 }
 
-@test "eval: an impact-score emitting non-track output is flagged 측정실패 (no silent inflation)" {
+@test "eval: an impact-score emitting non-track output is flagged as measurement failure (no silent inflation)" {
     # impact-score 가 트랙이 아닌 출력/오류를 내면 — 가짜 일치나 분모 축소가 아니라 '측정실패'로 회귀 처리
     printf '#!/usr/bin/env bash\necho "Error: boom" >&2\nexit 1\n' > "$MANGOLOVE_DIR/lib/impact-score.sh"
     run bash "$(EVAL)" impact

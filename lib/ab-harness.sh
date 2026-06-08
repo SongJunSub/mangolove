@@ -5,9 +5,10 @@
 # 질문: "방법론(mangolove)이 맨 claude보다 실제로 더 나은 결과를 내는가?"
 # 이 하니스는 그 비교를 위한 **측정 도구**다. 두 부분으로 나뉜다 — 정직성이 핵심:
 #
-#   ① 환경 수준 게이트 보호 — **실측**(결정적, LLM 없이 CI 에서 돈다):
-#      위험 스텝 suite 에 대해 처치군(가드 on)은 차단, 대조군(맨 claude, 가드 off)은 실행.
-#      "방법론이 세션당 막는 위험 실행 N건" — 맨 claude 엔 없는 안전망. 이건 진짜 수치다.
+#   ① 환경 차이 — 안전망(가드) 유무 (결정적 계층, LLM 없이 CI 에서 돈다):
+#      대표 위험 카테고리에서 처치군(가드 on)은 차단, 대조군(맨 claude, 가드 off)은 그대로 실행.
+#      이는 **결정적 가드 계층**(변종 탐지 재현율은 v1 'mangolove eval' 에서 측정)으로, 새 측정·우월성
+#      주장이 아니라 "대조군엔 이 안전망이 아예 없다"는 환경 차이다. end-to-end 모델 행동 차이는 ②+live arm.
 #
 #   ② 결과 채점 엔진 — build/test·트랙선언을 결정적으로 채점(impact-score·체크 명령 재사용).
 #      여기 내장 arm 은 **demo(손수 작성)** — 엔진이 좋은/나쁜 결과를 구별하는지 *자체 검증*할 뿐,
@@ -63,12 +64,13 @@ EOF
 # ── ② 결과 채점 엔진 ──
 # score_result <repo> <check_cmd> → "build:<0|1> track:<0|1>"
 #   build/test: check_cmd 가 repo 에서 0 종료하면 1
-#   track: HEAD 의 선언 트랙이 코드 floor 이상이면 1 (impact-score triage-commit; under/undeclared 면 0)
+#   track: HEAD 선언 트랙이 코드 floor 와 **일치(ok)**하면 1. 과대선언(over)·과소선언(under)·미선언은
+#          전부 0 — 과대선언도 잘못된 트리아지(불필요한 무거운 절차)이므로 성공이 아니다.
 score_result() {
     local repo="$1" check="$2" b=0 t=0 verdict
     if ( cd "$repo" && bash -c "$check" ) >/dev/null 2>&1; then b=1; fi
     verdict="$(cd "$repo" && bash "$IMPACT" triage-commit HEAD 2>/dev/null | sed -E 's/.*"verdict":"([^"]+)".*/\1/')"
-    case "$verdict" in ok|over_triage) t=1 ;; esac
+    case "$verdict" in ok) t=1 ;; esac
     printf 'build:%s track:%s' "$b" "$t"
 }
 
@@ -108,15 +110,16 @@ ab_engine_selftest() {
 
 report() {
     echo "A/B 하니스 (Phase 4 v2 — 방법론 vs 맨 claude)"
-    echo "[정직] ①은 실측(가드 결정적). ②는 채점 엔진 자체검증(demo arm — 손수 작성, 실제 모델 출력 아님)."
+    echo "[정직] ①은 환경 차이(결정적 가드 계층 — 새 측정 아님). ②는 채점 엔진 자체검증(demo arm — 실제 모델 출력 아님)."
     echo "       실모델 A/B 수치는 AB_TREATMENT_CMD/AB_CONTROL_CMD 로 live arm 연결 시 산출(과금·비결정성, CI 미실행)."
     echo ""
 
     ab_gate_protection
-    echo "① 환경 수준 — 위험 스텝 게이트 보호 (실측):"
-    printf '  처치군(mangolove): %s/%s 차단\n' "$GP_T" "$GP_N"
-    printf '  대조군(맨 claude): %s/%s (가드 없음 — 동일 스텝이 그대로 실행됨)\n' "$GP_C" "$GP_N"
-    printf '  → 방법론이 막는 위험 실행: 세션당 %s건 (맨 claude 엔 없는 안전망)\n' "$GP_T"
+    echo "① 환경 차이 — 안전망(가드) 유무 (결정적 계층, 새 측정 아님):"
+    printf '  처치군(mangolove): 대표 위험 카테고리 %s/%s 차단\n' "$GP_T" "$GP_N"
+    printf '  대조군(맨 claude): %s/%s — 이 계층이 아예 없어 동일 스텝이 실행됨\n' "$GP_C" "$GP_N"
+    echo "  (이 스텝들은 가드가 설계상 잡는 대표 카테고리일 뿐 — 변종 탐지 재현율은 v1 'mangolove eval' 에서 측정."
+    echo "   여기 신호는 '대조군엔 안전망이 없다'는 환경 차이지, end-to-end 모델 행동 차이가 아니다(그건 ②+live arm).)"
     [ -n "$GP_MISS" ] && printf '%b\n' "$GP_MISS"
 
     echo ""

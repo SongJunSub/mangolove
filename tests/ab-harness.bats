@@ -31,12 +31,13 @@ AB() { echo "$MANGOLOVE_DIR/lib/ab-harness.sh"; }
     [[ "$output" == *"bad[build:0 track:0]"* ]]
 }
 
-@test "ab: report shows the real gate-protection delta and honest labels" {
+@test "ab: report shows the gate-protection delta with honest (non-overclaiming) framing" {
     run bash "$(AB)" report
     [ "$status" -eq 0 ]
-    [[ "$output" == *"게이트 보호 (실측)"* ]]
-    [[ "$output" == *"세션당 5건"* ]]
-    # 정직성: demo arm 임을 명시
+    [[ "$output" == *"환경 차이 — 안전망"* ]]
+    [[ "$output" == *"대표 위험 카테고리 5/5 차단"* ]]
+    # 과장 금지: '새 측정 아님' + demo arm 명시
+    [[ "$output" == *"새 측정 아님"* ]]
     [[ "$output" == *"실제 모델 출력 아님"* ]]
 }
 

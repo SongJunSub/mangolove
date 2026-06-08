@@ -156,6 +156,24 @@ teardown() {
     [[ "$output" == *"gitignored"* ]]
 }
 
+@test "doctor: reports session gates enabled" {
+    cd "$TEST_DIR"
+    run bash "$MANGOLOVE_DIR/bin/mangolove" doctor
+    [[ "$output" == *"Session gates"* ]]
+}
+
+@test "session-settings: generate_session_settings writes valid JSON with both hooks" {
+    command -v python3 >/dev/null 2>&1 || skip "needs python3"
+    local out="$TEST_DIR/session-settings.json"
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'; generate_session_settings '$out'"
+    [ "$status" -eq 0 ]
+    [ -f "$out" ]
+    python3 -c "import json; json.load(open('$out'))"
+    grep -q "PreToolUse" "$out"
+    grep -q "irreversible-guard.sh" "$out"
+    grep -q "quality-gate.sh" "$out"
+}
+
 # ─────────────────────────────────────────────
 # mode validation
 # ─────────────────────────────────────────────

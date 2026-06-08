@@ -33,6 +33,13 @@ if [ "$MODE" = "pretooluse" ]; then
     if printf '%s' "$cmd" | grep -qE 'commit[[:space:]]+(-[a-zA-Z]*a|--all)'; then
         SECRET_DIFF_REF="HEAD"
     fi
+    # 세션 hook 으로 다른 cwd 에서 실행될 수 있으므로 stdin 의 cwd 로 이동해 프로젝트를 정확히 식별
+    cwd_field="$(printf '%s' "$input" | grep -oE '"cwd"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"' | head -1)"
+    cwd_field="${cwd_field#*\"cwd\"*:*\"}"
+    cwd_field="${cwd_field%\"}"
+    if [ -n "$cwd_field" ] && [ -d "$cwd_field" ]; then
+        cd "$cwd_field" 2>/dev/null || true
+    fi
 fi
 
 # 감사되는 우회구 — strict.md 는 우회를 금지하나 물리적으로는 존재한다.

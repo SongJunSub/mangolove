@@ -19,6 +19,7 @@ STATS_SCRIPT="$MANGOLOVE_DIR/lib/stats.sh"
 COST_TRACKER="$MANGOLOVE_DIR/lib/cost-tracker.sh"
 IMPACT_SCRIPT="$MANGOLOVE_DIR/lib/impact-score.sh"
 EFFICACY_SCRIPT="$MANGOLOVE_DIR/lib/efficacy-recorder.sh"
+EVAL_SCRIPT="$MANGOLOVE_DIR/lib/eval-harness.sh"
 BANNER_SCRIPT="$MANGOLOVE_DIR/lib/banner.sh"
 
 # ─────────────────────────────────────────────
@@ -182,6 +183,7 @@ show_help() {
     echo "  mangolove cost [period]       Token usage and cost (today/week/month/all)"
     echo "  mangolove impact [sha]        Deterministic track/impact of a change (working tree or commit)"
     echo "  mangolove efficacy            Methodology efficacy — what the gates/tracks actually caught"
+    echo "  mangolove eval                Self-eval — deterministic component scores (impact calibration, guard P/R)"
     echo "  mangolove switch <project>    Switch to project directory and launch claude"
     echo "  mangolove projects            List project profiles"
     echo "  mangolove profile add         Add a new project profile"
@@ -626,6 +628,11 @@ Continue from where you left off. Summarize the previous session state and ask w
         efficacy)
             shift
             bash "$EFFICACY_SCRIPT" report
+            exit 0
+            ;;
+        eval)
+            shift
+            bash "$EVAL_SCRIPT" "${1:-report}"
             exit 0
             ;;
         switch)

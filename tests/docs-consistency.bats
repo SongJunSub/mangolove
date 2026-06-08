@@ -44,6 +44,17 @@ setup() {
     grep -qE "^\*\*MangoLove\*\* v${esc}\$" "$REPO/README.md"
 }
 
+@test "methodology: multi-agent review mandates an adversarial find->verify stage (decorrelation)" {
+    # Phase 3 — 리뷰 탈상관: 3인 페르소나(도메인 분리)만으로는 같은 맹점을 공유하므로
+    # (a) 발견을 반증으로 검증하는 단계와 (b) 방법(method) 탈상관을 방법론이 강제해야 한다.
+    # 이 가드가 RED면 리뷰 규율이 '찾기만 하고 검증 안 함'으로 후퇴했다는 뜻이다.
+    grep -qE 'find → verify|찾기 → 검증|적대적 검증' "$REPO/methodology/strict.md"
+    grep -q '반증' "$REPO/methodology/strict.md"
+    grep -qE '방법\(method\) 탈상관' "$REPO/methodology/strict.md"
+    # review.md 모드도 동일 규율로 정렬돼 있어야 한다
+    grep -qE 'find → verify|찾기 → 검증' "$REPO/prompts/modes/review.md"
+}
+
 @test "repo: all lib/*.sh are executable in git (runtime chmod must not block mangolove update)" {
     # mangolove 는 세션 시작/설치 시 lib/*.sh 를 chmod +x 한다. git 에 100644 로 커밋된 스크립트가
     # 있으면 그 mode 차이가 다음 'mangolove update' 의 git pull 을 막는다. 전부 100755 여야 한다.

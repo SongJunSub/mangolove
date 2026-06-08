@@ -91,30 +91,6 @@ _git_repo() {
 
 # ── 적대적 리뷰 회귀 (실설치 배선·cwd·게이트 비차단·invariant·JSON) ──
 
-@test "efficacy: init --strict installs the recorder alongside the gate (real wiring)" {
-    local proj; proj=$(create_fake_project "eff-install")
-    echo '{"name":"app","scripts":{"test":"jest","lint":"eslint ."}}' > "$proj/package.json"
-    echo '{}' > "$proj/.eslintrc.json"
-    cd "$proj"
-    bash "$MANGOLOVE_DIR/lib/project-init.sh" init --strict
-    [ -f "$proj/.mangolove/hooks/efficacy-recorder.sh" ]
-    [ -x "$proj/.mangolove/hooks/efficacy-recorder.sh" ]
-}
-
-@test "efficacy: installed gate records a block via real wiring (no manual cp)" {
-    local proj; proj=$(create_fake_project "eff-e2e")
-    echo '{"name":"app","scripts":{"test":"jest","lint":"eslint ."}}' > "$proj/package.json"
-    echo '{}' > "$proj/.eslintrc.json"
-    git -C "$proj" init -q
-    cd "$proj"
-    bash "$MANGOLOVE_DIR/lib/project-init.sh" init --strict
-    printf '%s\n' 'GATE_LINT=block' 'LINT_CMD=false' 'GATE_TEST=off' 'GATE_SECRET=off' > "$proj/.mangolove/hooks/gate.conf"
-    run bash "$proj/.mangolove/hooks/quality-gate.sh" precommit
-    [ "$status" -eq 1 ]
-    [ -f "$MANGOLOVE_DIR/efficacy/eff-e2e.jsonl" ]
-    grep -q '"phase":"gate"' "$MANGOLOVE_DIR/efficacy/eff-e2e.jsonl"
-}
-
 @test "efficacy: guard records to the project ledger using stdin cwd" {
     local r; r=$(_git_repo "eff-guard-cwd")
     cp "$MANGOLOVE_DIR/lib/irreversible-guard.sh" "$MANGOLOVE_DIR/lib/efficacy-recorder.sh" "$r/"

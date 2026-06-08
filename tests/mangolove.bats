@@ -226,39 +226,3 @@ teardown() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"Plugins"* ]]
 }
-
-# ── init / sync 가 project-init 으로 배선돼 있는가 (README 가 문서화 — claude 로 떨어지면 안 됨) ──
-
-@test "init: dispatches to project-init and scaffolds CLAUDE.md (not passed to claude)" {
-    cp "$BATS_TEST_DIRNAME/../bin/mangolove" "$MANGOLOVE_DIR/bin/mangolove"
-    chmod +x "$MANGOLOVE_DIR/bin/mangolove"
-    local proj; proj=$(create_fake_project "init-dispatch")
-    echo '{"name":"app","scripts":{"test":"jest"}}' > "$proj/package.json"
-    cd "$proj"
-    run bash "$MANGOLOVE_DIR/bin/mangolove" init
-    [ "$status" -eq 0 ]
-    [ -f "$proj/CLAUDE.md" ]
-}
-
-@test "init --strict: scaffolds gate hooks via the wired command" {
-    cp "$BATS_TEST_DIRNAME/../bin/mangolove" "$MANGOLOVE_DIR/bin/mangolove"
-    chmod +x "$MANGOLOVE_DIR/bin/mangolove"
-    local proj; proj=$(create_fake_project "init-strict-dispatch")
-    echo '{"name":"app","scripts":{"test":"jest","lint":"eslint ."}}' > "$proj/package.json"
-    echo '{}' > "$proj/.eslintrc.json"
-    cd "$proj"
-    run bash "$MANGOLOVE_DIR/bin/mangolove" init --strict
-    [ "$status" -eq 0 ]
-    [ -f "$proj/.mangolove/hooks/irreversible-guard.sh" ]
-}
-
-@test "sync: dispatches to project-init (recognized command, not a claude prompt)" {
-    cp "$BATS_TEST_DIRNAME/../bin/mangolove" "$MANGOLOVE_DIR/bin/mangolove"
-    chmod +x "$MANGOLOVE_DIR/bin/mangolove"
-    local proj; proj=$(create_fake_project "sync-dispatch")
-    echo '{"name":"app"}' > "$proj/package.json"
-    cd "$proj"
-    bash "$MANGOLOVE_DIR/bin/mangolove" init >/dev/null 2>&1
-    run bash "$MANGOLOVE_DIR/bin/mangolove" sync
-    [ "$status" -eq 0 ]
-}

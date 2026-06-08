@@ -160,6 +160,12 @@ fi
 [ -n "$warnings" ] && echo "MangoLove gate 경고(비차단):${warnings}" >&2
 
 if [ -n "$failures" ]; then
+    # 효능 원장에 차단 기록 (비차단·실패무시 — 게이트 동작을 방해하지 않음)
+    rec="$GATE_DIR/efficacy-recorder.sh"
+    if [ -f "$rec" ]; then
+        read -ra _fk <<< "$failures"
+        for _f in "${_fk[@]+"${_fk[@]}"}"; do bash "$rec" record-block gate "$_f" 2>/dev/null || true; done
+    fi
     echo "MangoLove gate 차단 — 실패 단계:${failures}" >&2
     echo "  수정 후 재커밋하거나, 부득이하면 MANGOLOVE_SKIP_GATE=1 로 우회(감사됨)." >&2
     [ "$MODE" = "pretooluse" ] && exit 2

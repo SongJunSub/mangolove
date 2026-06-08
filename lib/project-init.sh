@@ -555,7 +555,7 @@ generate_gate() {
 
     # 1. 게이트 러너 + 비가역 가드 — 항상 최신 템플릿으로 설치 (버전관리 대상)
     local template
-    for template in quality-gate.sh irreversible-guard.sh; do
+    for template in quality-gate.sh irreversible-guard.sh efficacy-recorder.sh; do
         if [ -f "${MANGOLOVE_DIR}/lib/${template}" ]; then
             cp "${MANGOLOVE_DIR}/lib/${template}" "$gate_dir/${template}"
             chmod +x "$gate_dir/${template}"

@@ -26,8 +26,12 @@ _ledger() { printf '%s/%s.jsonl' "$EFF_DIR" "$(_project)"; }
 # 게이트/가드 차단 1건 기록 (비차단·실패무시 — 게이트 동작을 절대 방해하지 않음)
 record_block() {
     mkdir -p "$EFF_DIR" 2>/dev/null || return 0
-    local ts; ts="$(date '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || echo '')"
-    printf '{"ts":"%s","type":"block","phase":"%s","kind":"%s"}\n' "$ts" "${1:-?}" "${2:-?}" \
+    local ts p k
+    ts="$(date '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || echo '')"
+    # JSON 이스케이프 (역슬래시 먼저, 그다음 따옴표) — 향후 명령유래 문자열 호출에도 유효 JSON 보장
+    p="${1:-?}"; p="${p//\\/\\\\}"; p="${p//\"/\\\"}"
+    k="${2:-?}"; k="${k//\\/\\\\}"; k="${k//\"/\\\"}"
+    printf '{"ts":"%s","type":"block","phase":"%s","kind":"%s"}\n' "$ts" "$p" "$k" \
         >> "$(_ledger)" 2>/dev/null || true
 }
 
@@ -37,20 +41,23 @@ report() {
     echo ""
     echo "게이트가 막은 것 (결정적, 세션 중 실시간 기록):"
     if [ -f "$lg" ]; then
-        local sec dng lt tot
-        sec="$(grep -c '"kind":"secret"' "$lg" 2>/dev/null)"; sec="${sec:-0}"
-        dng="$(grep -c '"phase":"guard"' "$lg" 2>/dev/null)"; dng="${dng:-0}"
-        lt="$(grep -cE '"kind":"(lint|test)"' "$lg" 2>/dev/null)"; lt="${lt:-0}"
+        # (phase,kind) 결합으로 상호배타 분류 — 버킷합 == 총합 보장
+        local sec dng lt tot other
+        sec="$(grep -cE '"phase":"gate","kind":"secret"' "$lg" 2>/dev/null)"; sec="${sec:-0}"
+        dng="$(grep -cE '"phase":"guard"' "$lg" 2>/dev/null)"; dng="${dng:-0}"
+        lt="$(grep -cE '"phase":"gate","kind":"(lint|test)"' "$lg" 2>/dev/null)"; lt="${lt:-0}"
         tot="$(grep -c '"type":"block"' "$lg" 2>/dev/null)"; tot="${tot:-0}"
+        other=$((tot - sec - dng - lt)); [ "$other" -lt 0 ] && other=0
         printf '  시크릿 커밋 차단:        %s\n' "$sec"
         printf '  위험/비가역 명령 차단:   %s\n' "$dng"
         printf '  커밋 게이트(lint/test):  %s\n' "$lt"
-        printf '  (총 %s건 — 방법론이 실제로 막은 사고)\n' "$tot"
+        [ "$other" -gt 0 ] && printf '  기타 차단:               %s\n' "$other"
+        printf '  (총 %s회 게이트/가드 차단 — 재시도 포함, 고유 사고 수 아님)\n' "$tot"
     else
         echo "  (아직 기록 없음 — 막을 게 없었거나 세션 게이트 미활성)"
     fi
     echo ""
-    echo "최근 커밋 리스크 분포 (결정적, git diff 계산):"
+    echo "참고 — 최근 mainline 히스토리 리스크 분포 (막은 것 아님; impact-score 커버 스택 한정, --first-parent):"
     local imp="$SELF_DIR/impact-score.sh"
     if [ -f "$imp" ] && git rev-parse --git-dir >/dev/null 2>&1; then
         local n=0 t=0 s=0 m=0 l=0 risky=0 sha j floor
@@ -67,13 +74,13 @@ report() {
             if printf '%s' "$j" | grep -qE '"(db|auth|ext)":true'; then risky=$((risky + 1)); fi
             n=$((n + 1))
         done < <(git log -n 20 --first-parent --format='%H' 2>/dev/null)
-        printf '  최근 %s커밋:  Trivial %s / Small %s / Medium %s / Large %s\n' "$n" "$t" "$s" "$m" "$l"
+        printf '  점수화된 최근 %s커밋:  Trivial %s / Small %s / Medium %s / Large %s\n' "$n" "$t" "$s" "$m" "$l"
         printf '  인증/DB/외부API 터치: %s건 (무거운 트랙이어야 할 변경)\n' "$risky"
     else
         echo "  (impact-score 미설치 또는 비-git)"
     fi
     echo ""
-    echo "되돌림(revert) 신호 (소표본·전략적 롤백 포함 — 정밀 결함분류는 후속):"
+    echo "참고 — 되돌림(revert) 신호 (결함 무관 롤백 포함 — 효능 측정치 아님, 정밀 결함분류는 후속):"
     if git rev-parse --git-dir >/dev/null 2>&1; then
         local rev
         rev="$(git log -n 200 --format='%s' 2>/dev/null | grep -cE '^Revert ')"; rev="${rev:-0}"

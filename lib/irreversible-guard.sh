@@ -15,6 +15,10 @@ set -uo pipefail
 [ "${MANGOLOVE_ALLOW_DANGER:-}" = "1" ] && exit 0
 
 input="$(cat)"
+# 세션 hook 으로 다른 cwd 에서 실행될 수 있으므로 stdin 의 cwd 로 이동 (게이트와 동일 — 효능 기록을 정확한 프로젝트 원장으로)
+_cwd="$(printf '%s' "$input" | grep -oE '"cwd"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"' | head -1)"
+_cwd="${_cwd#*\"cwd\"*:*\"}"; _cwd="${_cwd%\"}"
+if [ -n "$_cwd" ] && [ -d "$_cwd" ]; then cd "$_cwd" 2>/dev/null || true; fi
 # JSON 래퍼("command":"...")를 벗겨 bare 명령을 얻고, 따옴표/백슬래시/백틱을 제거한다.
 # (따옴표로 감싼 위험 경로/SQL 우회와 토큰 경계 오인을 무력화)
 raw="$(printf '%s' "$input" | grep -oE '"command"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"' | head -1)"

@@ -335,3 +335,91 @@ _mkcommit() {
     [[ "$output" == *'"file_pts":8'* ]]
     [[ "$output" == *'"track_from_score":"Medium"'* ]]
 }
+
+# ── declared-track + triage-commit (Phase 2 잔여 / under_triage) ──
+
+# 트레일러 포함 커밋 생성 (subject + 빈 줄 + Change-Track) → SHA echo
+_mkcommit_track() {
+    local r="$1" subject="$2" track="$3"
+    git -C "$r" add -A
+    git -C "$r" -c user.email=t@t.com -c user.name=t \
+        commit -qm "$(printf '%s\n\nChange-Track: %s\n' "$subject" "$track")" >/dev/null
+    git -C "$r" rev-parse HEAD
+}
+
+@test "impact declared-track: extracts a valid Change-Track trailer" {
+    local r; r=$(_repo "dt-ok")
+    echo x > "$r/a.txt"
+    local sha; sha=$(_mkcommit_track "$r" "feat: x" "Small")
+    cd "$r"
+    run bash "$(IMPACT)" declared-track "$sha"
+    [ "$status" -eq 0 ]
+    [ "$output" = "Small" ]
+}
+
+@test "impact declared-track: empty when no trailer" {
+    local r; r=$(_repo "dt-none")
+    echo x > "$r/a.txt"; local sha; sha=$(_mkcommit "$r" "no trailer")
+    cd "$r"
+    run bash "$(IMPACT)" declared-track "$sha"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "impact declared-track: invalid value yields empty (undeclared)" {
+    local r; r=$(_repo "dt-bad")
+    echo x > "$r/a.txt"; local sha; sha=$(_mkcommit_track "$r" "x" "Huge")
+    cd "$r"
+    run bash "$(IMPACT)" declared-track "$sha"
+    [ -z "$output" ]
+}
+
+@test "impact declared-track: last trailer wins and is case-insensitive" {
+    local r; r=$(_repo "dt-last")
+    echo x > "$r/a.txt"; git -C "$r" add -A
+    git -C "$r" -c user.email=t@t.com -c user.name=t \
+        commit -qm "$(printf 'x\n\nChange-Track: small\nChange-Track: LARGE\n')" >/dev/null
+    local sha; sha=$(git -C "$r" rev-parse HEAD)
+    cd "$r"
+    run bash "$(IMPACT)" declared-track "$sha"
+    [ "$output" = "Large" ]
+}
+
+@test "impact triage-commit: no trailer -> verdict undeclared (declared null)" {
+    local r; r=$(_repo "tc-undecl")
+    echo x > "$r/a.txt"; local sha; sha=$(_mkcommit "$r" "x")
+    cd "$r"
+    run bash "$(IMPACT)" triage-commit "$sha"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"declared":null'* ]]
+    [[ "$output" == *'"verdict":"undeclared"'* ]]
+}
+
+@test "impact triage-commit: declared Small but auth change -> under_triage" {
+    local r; r=$(_repo "tc-under")
+    mkdir -p "$r/src/security"; printf '@Secured("ADMIN")\n' > "$r/src/security/S.kt"
+    local sha; sha=$(_mkcommit_track "$r" "sec" "Small")
+    cd "$r"
+    run bash "$(IMPACT)" triage-commit "$sha"
+    [[ "$output" == *'"declared":"Small"'* ]]
+    [[ "$output" == *'"track_floor":"Large"'* ]]
+    [[ "$output" == *'"verdict":"under_triage"'* ]]
+}
+
+@test "impact triage-commit: declared Large matches floor -> ok" {
+    local r; r=$(_repo "tc-ok")
+    mkdir -p "$r/src/security"; printf '@Secured("ADMIN")\n' > "$r/src/security/S.kt"
+    local sha; sha=$(_mkcommit_track "$r" "sec" "Large")
+    cd "$r"
+    run bash "$(IMPACT)" triage-commit "$sha"
+    [[ "$output" == *'"verdict":"ok"'* ]]
+}
+
+@test "impact triage-commit: declared Large for a trivial change -> over_triage" {
+    local r; r=$(_repo "tc-over")
+    echo x > "$r/a.txt"
+    local sha; sha=$(_mkcommit_track "$r" "x" "Large")
+    cd "$r"
+    run bash "$(IMPACT)" triage-commit "$sha"
+    [[ "$output" == *'"verdict":"over_triage"'* ]]
+}

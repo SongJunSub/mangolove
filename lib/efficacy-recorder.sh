@@ -6,10 +6,12 @@
 # 기록·집계한다. cost/stats(노력·부피)와 달리 효능(무엇을 막았나)을 측정.
 #
 #   record-block <phase> <kind>  게이트/가드 차단 시 실시간 append (결정적: 게이트 자신의 차단 결정)
-#   report                       차단 원장 + 최근 커밋 리스크 분포(impact-score, 결정적) + revert 신호
+#   report                       차단 원장 + 리스크 분포 + under-triage(선언 vs floor) + revert 신호
 #
 # 저장: ${MANGOLOVE_DIR:-~/.mangolove}/efficacy/<project>.jsonl (로컬 전용)
 # 절대원칙: 분자/분모는 HARD 신호(차단 exit code, git diff, git revert)에만 앵커.
+#   under-triage: floor 는 git diff 로 결정적, 분모는 '선언된' 커밋만(미선언은 거짓 통과로
+#   세지 않고 coverage 로 분리) — 선언 자체는 모델 주장이나 갭의 기준값은 코드가 강제한다.
 # ─────────────────────────────────────────────
 set -uo pipefail
 
@@ -60,10 +62,11 @@ report() {
     echo "참고 — 최근 mainline 히스토리 리스크 분포 (막은 것 아님; impact-score 커버 스택 한정, --first-parent):"
     local imp="$SELF_DIR/impact-score.sh"
     if [ -f "$imp" ] && git rev-parse --git-dir >/dev/null 2>&1; then
-        local n=0 t=0 s=0 m=0 l=0 risky=0 sha j floor
+        local n=0 t=0 s=0 m=0 l=0 risky=0 declared=0 under=0 sha j floor verdict
         while IFS= read -r sha; do
             [ -z "$sha" ] && continue
-            j="$(bash "$imp" score "$sha" 2>/dev/null)" || continue
+            # triage-commit 1회로 floor·리스크플래그·선언트랙·verdict 를 함께 얻는다(커밋당 1콜).
+            j="$(bash "$imp" triage-commit "$sha" 2>/dev/null)" || continue
             floor="$(printf '%s' "$j" | sed -E 's/.*"track_floor":"([^"]+)".*/\1/')"
             case "$floor" in
                 Trivial) t=$((t + 1)) ;;
@@ -72,10 +75,25 @@ report() {
                 Large)   l=$((l + 1)) ;;
             esac
             if printf '%s' "$j" | grep -qE '"(db|auth|ext)":true'; then risky=$((risky + 1)); fi
+            # under-triage 집계 — 분모는 '선언된' 커밋만(undeclared 는 거짓 통과로 세지 않음)
+            verdict="$(printf '%s' "$j" | sed -E 's/.*"verdict":"([^"]+)".*/\1/')"
+            case "$verdict" in
+                under_triage)   declared=$((declared + 1)); under=$((under + 1)) ;;
+                ok|over_triage) declared=$((declared + 1)) ;;
+            esac
             n=$((n + 1))
         done < <(git log -n 20 --first-parent --format='%H' 2>/dev/null)
         printf '  점수화된 최근 %s커밋:  Trivial %s / Small %s / Medium %s / Large %s\n' "$n" "$t" "$s" "$m" "$l"
         printf '  인증/DB/외부API 터치: %s건 (무거운 트랙이어야 할 변경)\n' "$risky"
+        echo ""
+        echo "트랙 under-triage (선언 트랙 < 코드 floor — 무거운 리뷰 누락 신호; 분모=선언된 커밋만):"
+        if [ "$declared" -gt 0 ]; then
+            printf '  선언 커밋: %s/%s (Change-Track trailer 커버리지)\n' "$declared" "$n"
+            printf '  under-triage: %s건 / %s선언 = %s%%\n' "$under" "$declared" "$(( under * 100 / declared ))"
+            [ "$under" -gt 0 ] && echo "  ↳ 선언보다 무거운 트랙이 필요했던 변경 — Spec/리뷰 단계가 누락됐을 수 있음"
+        else
+            echo "  (선언된 커밋 없음 — Change-Track: trailer 미사용; coverage 0, 측정 불가)"
+        fi
     else
         echo "  (impact-score 미설치 또는 비-git)"
     fi

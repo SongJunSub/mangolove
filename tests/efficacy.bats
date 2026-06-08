@@ -156,3 +156,39 @@ _git_repo() {
     bash "$(REC)" record-block guard 'weird"quote\back'
     python3 -c "import json; [json.loads(l) for l in open('$MANGOLOVE_DIR/efficacy/eff-json.jsonl')]"
 }
+
+# ── under-triage (Phase 2 잔여) — 선언 트랙 vs 코드 floor 갭, 분모=선언된 커밋만 ──
+
+# 트레일러 포함 커밋 (현재 cwd 레포에 add+commit)
+_commit_track() {
+    local subject="$1" track="$2"
+    git add -A
+    git -c user.email=t@t.com -c user.name=t \
+        commit -qm "$(printf '%s\n\nChange-Track: %s\n' "$subject" "$track")" >/dev/null
+}
+
+@test "efficacy: report shows under-triage rate over declared commits" {
+    local r; r=$(_git_repo "eff-under")
+    cd "$r"
+    # auth 변경을 Small 로 선언 → under_triage (floor Large)
+    mkdir -p src/security; printf '@Secured("ADMIN")\n' > src/security/S.kt
+    _commit_track "sec" "Small"
+    # trivial 을 Trivial 로 선언 → ok
+    echo x > a.txt; _commit_track "tweak" "Trivial"
+    run bash "$(REC)" report
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"under-triage"* ]]
+    # seed(미선언) + 2선언 → 분모는 선언된 2개만
+    [[ "$output" == *"선언 커밋: 2/"* ]]
+    [[ "$output" == *"under-triage: 1건"* ]]
+}
+
+@test "efficacy: report reports zero coverage when no Change-Track declared" {
+    local r; r=$(_git_repo "eff-nocover")
+    cd "$r"
+    echo x > a.txt; git add -A
+    git -c user.email=t@t.com -c user.name=t commit -qm "no trailer here" >/dev/null
+    run bash "$(REC)" report
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"coverage 0"* ]]
+}

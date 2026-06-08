@@ -121,6 +121,19 @@
 
 사용자는 이 시점에 "Large로 해줘" 또는 "Trivial로 충분해" 등으로 오버라이드 가능.
 
+### 커밋 트레일러 — Change-Track (효능 측정 연동)
+
+판정해서 **실제로 따른** 트랙을 커밋에 영구 기록한다. 커밋 메시지 footer 에 다음 트레일러를 추가:
+
+```
+Change-Track: <Trivial|Small|Medium|Large>
+```
+
+- `mangolove efficacy` 가 이 선언값을 코드가 계산한 `track_floor`(impact-score, 결정적)와 대조해
+  **under-triage**(선언 트랙이 실제 영향도보다 낮음 — 무거운 리뷰/Spec 단계가 누락됐을 신호)를 집계한다.
+- 미기재 시 측정에서 제외될 뿐(거짓 통과로 세지 않음), 동작·게이트에는 영향 없다.
+- Conventional Commits footer 규칙과 동일 위치(`Co-Authored-By:` 등과 같은 묶음). 값은 한 단어.
+
 ## 트랙 내 단계 스킵 금지
 
 선택된 트랙의 단계는 건너뛸 수 없다.
@@ -235,6 +248,7 @@
 
 ### commit message와의 관계
 - commit message에는 "왜" + 변경 요지만 (Conventional Commits)
+- footer 에 `Change-Track: <트랙>` 트레일러 기재 (효능 측정 연동 — 위 "커밋 트레일러" 절)
 - `.progress.md`에는 "어디까지/다음에 무엇을/왜 멈췄는지"
 - 둘은 보완 관계 — commit log만 봐서는 작업의 현재 위치를 즉시 파악하기 어렵다
 

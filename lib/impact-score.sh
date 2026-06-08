@@ -12,9 +12,11 @@
 # Python, Go, Rails/Django (그 밖 스택은 미커버 — track_floor 보장은 커버 스택 한정).
 #
 # 사용:
-#   impact-score.sh score  <sha|--working>             → JSON 1줄 (점수 분해 + track_floor)
-#   impact-score.sh triage <predicted> <sha|--working> → under_triage|ok|over_triage 판정(JSON)
-#   impact-score.sh report <sha|--working>             → 사람용 출력
+#   impact-score.sh score          <sha|--working>             → JSON 1줄 (점수 분해 + track_floor)
+#   impact-score.sh triage         <predicted> <sha|--working> → under_triage|ok|over_triage 판정(JSON)
+#   impact-score.sh declared-track <sha>                       → 커밋의 Change-Track: trailer (없으면 빈 출력)
+#   impact-score.sh triage-commit  <sha|--working>             → score + 선언트랙 + verdict(JSON 1줄)
+#   impact-score.sh report         <sha|--working>             → 사람용 출력
 # ─────────────────────────────────────────────
 set -uo pipefail
 
@@ -163,6 +165,49 @@ triage() {
     printf '{"predicted":"%s","track_floor":"%s","verdict":"%s"}\n' "$predicted" "$floor" "$verdict"
 }
 
+# declared-track <ref> → 커밋 메시지의 Change-Track: trailer 를 정규화해 출력(없으면 빈 문자열).
+# 마지막 트레일러 우선(git trailer 관례), 값의 첫 토큰만, 유효하지 않으면 undeclared 취급(빈 출력).
+# --working 은 커밋 메시지가 없으므로 항상 빈 출력(N/A).
+declared_track() {
+    local ref="$1" raw norm
+    [ "$ref" = "--working" ] && return 0
+    raw="$(git show -s --format='%B' "$ref" 2>/dev/null \
+        | grep -iE '^[[:space:]]*Change-Track:' | tail -1 \
+        | sed -E 's/^[[:space:]]*[Cc]hange-[Tt]rack:[[:space:]]*//' \
+        | awk '{print $1}')"
+    [ -z "$raw" ] && return 0
+    norm="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
+    case "$norm" in
+        trivial) echo Trivial ;;
+        small)   echo Small ;;
+        medium)  echo Medium ;;
+        large)   echo Large ;;
+        *) : ;;
+    esac
+}
+
+# triage-commit <ref> → compute JSON 에 선언트랙(declared)과 verdict 를 합친 1줄.
+# verdict: 선언이 없으면 undeclared, 있으면 floor 와 비교해 under_triage|over_triage|ok.
+# (트리아지 판정의 단일 출처 — efficacy 집계는 이 verdict 만 읽는다.)
+triage_commit() {
+    local ref="$1" json floor decl dr fr verdict declared_json
+    json="$(compute "$ref")"
+    floor="$(printf '%s' "$json" | sed -E 's/.*"track_floor":"([^"]+)".*/\1/')"
+    fr="$(_rank "$floor")"
+    decl="$(declared_track "$ref")"
+    if [ -z "$decl" ]; then
+        verdict="undeclared"; declared_json="null"
+    else
+        dr="$(_rank "$decl")"
+        if   [ "$dr" -lt "$fr" ]; then verdict="under_triage"
+        elif [ "$dr" -gt "$fr" ]; then verdict="over_triage"
+        else verdict="ok"
+        fi
+        declared_json="\"$decl\""
+    fi
+    printf '%s,"declared":%s,"verdict":"%s"}\n' "${json%\}}" "$declared_json" "$verdict"
+}
+
 # report <ref> → 사람용
 report() {
     local ref="$1" json files score ts tf
@@ -186,8 +231,10 @@ main() {
     case "${1:-}" in
         score)  [ -n "${2:-}" ] || { echo "usage: impact-score.sh score <sha|--working>" >&2; exit 2; }; _require_ref "$2"; compute "$2" ;;
         triage) [ -n "${3:-}" ] || { echo "usage: impact-score.sh triage <predicted> <sha|--working>" >&2; exit 2; }; _require_ref "$3"; triage "$2" "$3" ;;
+        declared-track) [ -n "${2:-}" ] || { echo "usage: impact-score.sh declared-track <sha>" >&2; exit 2; }; _require_ref "$2"; declared_track "$2" ;;
+        triage-commit)  [ -n "${2:-}" ] || { echo "usage: impact-score.sh triage-commit <sha|--working>" >&2; exit 2; }; _require_ref "$2"; triage_commit "$2" ;;
         report) [ -n "${2:-}" ] || { echo "usage: impact-score.sh report <sha|--working>" >&2; exit 2; }; _require_ref "$2"; report "$2" ;;
-        *) echo "usage: impact-score.sh {score|triage|report} ..." >&2; exit 2 ;;
+        *) echo "usage: impact-score.sh {score|triage|declared-track|triage-commit|report} ..." >&2; exit 2 ;;
     esac
 }
 

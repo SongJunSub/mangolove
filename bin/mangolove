@@ -17,6 +17,7 @@ SKILL_MANAGER="$MANGOLOVE_DIR/lib/skill-manager.sh"
 SESSION_MEMORY="$MANGOLOVE_DIR/lib/session-memory.sh"
 STATS_SCRIPT="$MANGOLOVE_DIR/lib/stats.sh"
 COST_TRACKER="$MANGOLOVE_DIR/lib/cost-tracker.sh"
+IMPACT_SCRIPT="$MANGOLOVE_DIR/lib/impact-score.sh"
 BANNER_SCRIPT="$MANGOLOVE_DIR/lib/banner.sh"
 
 # ─────────────────────────────────────────────
@@ -178,6 +179,7 @@ show_help() {
     echo "  mangolove sessions            List all saved sessions"
     echo "  mangolove stats [period]      Productivity stats (today/week/month)"
     echo "  mangolove cost [period]       Token usage and cost (today/week/month/all)"
+    echo "  mangolove impact [sha]        Deterministic track/impact of a change (working tree or commit)"
     echo "  mangolove switch <project>    Switch to project directory and launch claude"
     echo "  mangolove projects            List project profiles"
     echo "  mangolove profile add         Add a new project profile"
@@ -612,6 +614,11 @@ Continue from where you left off. Summarize the previous session state and ask w
         cost)
             shift
             bash "$COST_TRACKER" "${1:-week}"
+            exit 0
+            ;;
+        impact)
+            shift
+            bash "$IMPACT_SCRIPT" report "${1:---working}"
             exit 0
             ;;
         switch)

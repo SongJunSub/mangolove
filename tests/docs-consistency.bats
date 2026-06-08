@@ -18,6 +18,26 @@ setup() {
     # 3인 리뷰는 Large 트랙 전용 — '자동으로 ... 3인 병렬 리뷰' 무조건 흐름 표현은 드리프트다.
     ! grep -qE 'automatically follows.*3-agent parallel review' "$REPO/README.md"
     ! grep -qE '자동으로.*3인 병렬 리뷰' "$REPO/README.md"
+    # 옛 고정 5-Phase 리뷰 루프 헤더의 재발 방지 (방법론은 4-track)
+    ! grep -qE '^### (Phase|[0-9]단계)' "$REPO/README.md"
+}
+
+@test "docs: README documents the current model (tracks, find->verify, gates, ops, claude-vs-mangolove)" {
+    local r="$REPO/README.md"
+    # 4 트랙이 문서화돼 있다
+    local t
+    for t in Trivial Small Medium Large; do grep -q "$t" "$r" || { echo "missing track: $t"; false; }; done
+    # 리뷰 탈상관/검증
+    grep -q 'find → verify' "$r"
+    # 결정적 게이트 + 측정 ops 명령
+    grep -q 'PreToolUse' "$r"
+    grep -q 'mangolove efficacy' "$r"
+    grep -q 'mangolove eval' "$r"
+    grep -q 'mangolove ab' "$r"
+    grep -q 'Change-Track' "$r"
+    # claude vs mangolove 차이가 문서화돼 있다(정직한 경계 포함)
+    grep -q '정직한 경계' "$r"
+    grep -qE 'claude.* vs .*mangolove' "$r"
 }
 
 @test "methodology: strict.md defines all four tracks (single source of truth)" {

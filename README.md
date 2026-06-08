@@ -1,162 +1,145 @@
 # MangoLove
 
-**The best way to use Claude Code.** One command to set up any project for optimal AI-assisted development.
+**Claude Code를 제대로 쓰는 방법.** `claude` 대신 `mangolove`를 실행하면 모든 세션에 위험도 기반 품질 방법론과 결정적 안전망이 함께 따라옵니다. (프로젝트 스캐폴딩이 필요하면 `mangolove init`.)
 
-MangoLove scans your project, generates the right configuration, and gives Claude Code the context it needs to be maximally productive — including a mandatory quality workflow that catches issues before they reach code review.
+MangoLove는 Claude Code를 감쌉니다 — 4-track 방법론을 시스템 프롬프트로 주입하고, 위험 명령과 시크릿 커밋을 실행 전에 차단하며, 실제로 무엇을 잡았는지 측정합니다. 그래서 품질이 *희망*이 아니라 *기본값이자 숫자*가 됩니다. (아래 [`claude` vs `mangolove`](#claude-vs-mangolove) 참조.)
 
-> **Origin of the name**
-> Named after two Jindo dogs — Mango and Sarang (Love).
+> **이름의 유래**
+> 두 마리 진도견 — 망고(Mango)와 사랑(Love)의 이름에서 따왔습니다.
 
-## What It Does
+## `claude` vs `mangolove`
+
+방법론을 쓰려고 `init`을 할 필요는 없습니다. 인자 없이 **`mangolove`**를 실행하면 — 내부적으로 같은 `claude`지만 — 방법론과 안전 게이트가 이미 연결된(`claude --settings`로 시작 시 주입) 대화형 세션이 뜹니다. **bare `mangolove`가 기본 사용법**입니다.
+
+| | `claude` (맨) | `mangolove` (bare, 대화형) |
+|---|---|---|
+| **방법론** | 없음 — 프롬프트에 전적으로 의존 | `strict.md`(4-track Change Impact Score)를 시스템 프롬프트로 주입 |
+| **위험 명령** | 그대로 실행 | **실행 전 차단** — force-push, `rm -rf /`/`$PWD`, SQL `DROP`/`TRUNCATE`/`WHERE` 없는 `DELETE`, Mongo `dropDatabase`/`deleteMany({})`, `kubectl delete`, `terraform destroy` (PreToolUse 가드, exit 2) |
+| **시크릿 커밋** | 미검사 | 커밋 시점에 시크릿 스캔 게이트로 **차단** |
+| **작업 분류** | 없음 | **Trivial / Small / Medium / Large** 자동 분류, 비례 워크플로우 |
+| **코드 리뷰** | 요청해야 수행 | Large 트랙에서 **find → verify** 탈상관 멀티에이전트 리뷰 |
+| **품질 측정** | 측정 안 됨 | `mangolove efficacy`(게이트가 막은 것 + under-triage), `mangolove eval`(결정적 부품 점수) |
+| **오버헤드** | 0 | 훅 몇 개 + 크고 위험한 변경에 더 무거운 절차(사소한 작업은 가볍게 유지) |
+
+**`claude`**는 의견도 오버헤드도 0인 즉석 탐색에, **`mangolove`**는 안전망·일관된 절차·측정 가능한 품질이 중요한 실제 프로젝트 작업에 쓰세요.
+
+> **정직한 경계**: 방법론은 *프롬프트*로 주입됩니다 — 모델에게 따르라고 *요청*하는 것. **게이트·가드는 결정적**(exit code로 실제 차단)이지만, 산문 규율은 확률적으로 지켜집니다. MangoLove는 그 규율을 기본값으로 만들고 단단한 결정적 안전망을 더하는 것이지, 모델을 무오류로 만들지는 않습니다. 실제로 무엇이 측정되고 무엇이 안 되는지는 `mangolove eval` 참조.
+
+## 프로젝트 스캐폴딩 (`mangolove init`)
+
+bare 실행과 별개로, 프로젝트에 설정 파일을 깔고 싶으면:
 
 ```bash
 cd ~/my-project
 mangolove init --strict
 ```
 
-This single command:
-1. **Scans** your project (tech stack, dependencies, architecture, API endpoints)
-2. **Generates** `CLAUDE.md` with full project context (the quality methodology itself is injected at runtime, not baked into `CLAUDE.md`)
-3. **Creates** `.claude/commands/` with `/test`, `/build`, `/lint`, `/review`, `/check` + framework-specific commands
-4. **Configures** `.claude/settings.json` with PostToolUse hooks that run your linter after every code change
-5. **Updates** `.gitignore` to exclude `.claude/` local settings
+이 한 줄이:
+1. 프로젝트를 **분석** (기술 스택, 의존성, 아키텍처, API 엔드포인트)
+2. `CLAUDE.md`를 **생성** (전체 프로젝트 컨텍스트 — 품질 방법론은 런타임에 주입되며 `CLAUDE.md`에 복제되지 않음)
+3. `.claude/commands/`에 슬래시 커맨드를 **생성** (`/test`, `/build`, `/lint`, `/review`, `/check` + 프레임워크별 커맨드)
+4. `.claude/settings.json`에 게이트 훅을 **설정** (PreToolUse 가드/커밋 게이트 + PostToolUse 린터)
+5. `.gitignore`를 **업데이트** (`.claude/` 로컬 설정 제외)
 
-Now when you run `claude`, it **auto-classifies each task by risk** and runs a proportional workflow — from a quick implement → build/lint → report for Trivial changes, up to Spec + adversarial review + 3-agent review for Large ones — no manual commands needed.
+## Strict Mode: 위험도 기반 품질 워크플로우
 
-## Why MangoLove
+모든 작업이 **Change Impact Score**로 4개 트랙(**Trivial / Small / Medium / Large**)으로 자동 분류되고, 트랙별로 비례하는 워크플로우가 적용됩니다. 방법론의 단일 출처는 [`methodology/strict.md`](methodology/strict.md)이며 **런타임에 시스템 프롬프트로 주입**됩니다(`CLAUDE.md`에 복제하지 않으므로 낡지 않음).
 
-| | Claude Code alone | With MangoLove |
+네 트랙은 위험도에 비례해 절차를 키웁니다 — 무거운 트랙은 가벼운 단계를 **건너뛰지 않고 추가**합니다:
+
+| 트랙 | 언제 | 워크플로우 |
 |---|---|---|
-| Project setup | Write CLAUDE.md manually (30-60 min) | `mangolove init` (5 seconds) |
-| Architecture context | Claude reads files each time | 22 controllers, 115 endpoints known instantly |
-| Quality workflow | Depends on your prompt | Risk-scaled tracks (Trivial→Large) with adversarial spec review + multi-agent review |
-| Post-edit linting | Manual | Automatic via PostToolUse hooks |
-| Context freshness | CLAUDE.md gets stale | `mangolove sync` detects changes |
-| Team onboarding | Documentation + tribal knowledge | `--export` / `--from-team` one-command setup |
-| Cost visibility | None | `mangolove cost` per-project token tracking |
-| Project switching | `cd` + remember context | `mangolove switch crs-be` |
+| **Trivial** | 오타, 설정값, 로그 레벨 | 구현 → 빌드/린트 → 보고 |
+| **Small** | 필드 추가, 검증 보강, 버그 수정 | 분석 → 구현 → 셀프 리뷰 → 빌드/린트/테스트 → 보고 |
+| **Medium** | 새 비즈니스 로직, API 수정, 서비스 연동 | + Spec → 승인 → 1인 리뷰 |
+| **Large** | 신규 API, DB 스키마, 인증 변경, 대규모 리팩토링 | + 적대적 Spec 리뷰 → Product/Engineering 리뷰 → 3인 탈상관 리뷰 |
 
-## Strict Mode: The Core Feature
+트랙은 파일 수 + 신호로 계산되고, [`lib/impact-score.sh`](lib/impact-score.sh)의 결정적 floor가 점수와 무관하게 **승격 트리거**를 강제합니다 — DB 스키마 변경은 최소 **Medium**, 외부 API 연동은 최소 **Medium**, 인증 변경은 최소 **Large**. (`mangolove impact`로 임의 변경의 계산된 트랙 확인.)
 
+### 멀티에이전트 리뷰 (Medium & Large) — find → verify
+
+리뷰는 이슈를 *찾기만* 하지 않습니다. 각 발견은 수정 대상이 되기 전에 **적대적으로 검증**됩니다:
+
+- **탈상관 렌즈** — 리뷰어를 도메인(보안 / 성능 / 비즈니스 로직)만이 아니라 *방법*(정독 / 적대적 반증 / 반례 생성)으로도 나눕니다. 같은 모델·같은 프레임은 같은 맹점을 공유하기 때문.
+- **find → verify** — 각 Critical/Major 발견은 별도 에이전트가 반증(기본값 refuted)을 시도해 살아남은 것만 수정 대상이 되고, 고위험 변경은 다수결 검증을 씁니다. 정밀도가 올라 — 그럴듯하나 틀린 발견이 불필요한 수정을 유발하지 않습니다.
+- 신뢰의 근거는 **검증을 통과한 발견**이지 "N명이 동의함"이 아닙니다(상관된 동의는 독립 검증이 아님).
+
+### 완료 보고
+무엇이 바뀌었는지, 빌드/린트/테스트 결과(산출물 경로 포함), Medium/Large는 **확정 vs 반증** 발견까지 보고합니다. 목표는 자동 코드 리뷰(Gemini, CodeRabbit 등)를 첫 제출에 통과하되 — *왜 믿을 수 있는지의 근거와 함께* — "PASS"만 보고하지 않는 것입니다.
+
+## 전체 기능
+
+### 프로젝트 설정
 ```bash
-mangolove init --strict
+mangolove init                # CLAUDE.md + 커맨드 + 훅 생성
+mangolove init --strict       # 위 + 위험도 기반 품질 방법론(strict.md)
+mangolove init --force        # CLAUDE.md 가 있어도 재생성
+mangolove init --export       # 팀 공유용 .mangolove.md 내보내기
+mangolove init --from-team    # 팀의 .mangolove.md 로 설정
+mangolove sync                # 현재 프로젝트 상태로 CLAUDE.md 갱신
 ```
 
-In strict mode, every task is auto-classified by a **Change Impact Score** into one of four tracks — **Trivial / Small / Medium / Large** — and each track runs a proportional workflow (heavier tracks add Spec writing, adversarial Spec review, and multi-agent review). The methodology is the single source of truth in [`methodology/strict.md`](methodology/strict.md) and is **injected into the system prompt at runtime** — it is not copied into `CLAUDE.md`, so it never goes stale.
-
-The phases below show the **core review loop**. The Large track additionally front-loads Spec writing, adversarial Spec review, and Product/Engineering review before implementation — see [`methodology/strict.md`](methodology/strict.md) for the full 10-step Large track:
-
-### Phase 1: Analysis (Always First)
-When you describe a problem, Claude automatically:
-- Reads all related files and traces the full call chain
-- Identifies every affected file
-- Presents a plan and **waits for your approval** before coding
-
-### Phase 2: Implementation
-After you approve, Claude implements with built-in verification for:
-- **Security** — SQL injection, XSS, hardcoded secrets, auth gaps, input validation
-- **Style** — Runs your linter, matches existing patterns, no dead code
-- **Performance** — N+1 queries, unnecessary allocations, blocking in async code
-- **Maintainability** — Single responsibility, clear naming, no magic numbers
-- **Null Safety** — Optional types, specific exceptions, context in error messages
-
-### Phase 3: Self-Review (Mandatory)
-After implementation, Claude performs a hostile self-review against a 10-point checklist:
-- OWASP Top 10, performance anti-patterns, test coverage, code duplication, thread safety, API consistency
-- Any failure triggers automatic fix + re-verification
-
-### Phase 4: 3-Agent Parallel Independent Code Review
-Before commit & push, 3 independent review agents run in parallel:
-- Each agent reviews the **full scope** — code quality, security, performance, edge cases, reusability, efficiency, design consistency
-- Not 1 reviewer per topic, but 3 reviewers each doing a full review from different perspectives
-- All issues from all 3 reviews must be fixed before commit & push
-
-### Phase 5: Completion Report
-```
-Changes:
-  - ReservationService.java: added cancellation validation
-  - ReservationController.java: new DELETE /v1/reservations/{id}
-
-Verification:
-  - Build: PASS
-  - Lint: PASS
-  - Tests: PASS (45 passed, 2 new)
-
-Self-Review:
-  - Security: PASS
-  - Performance: PASS
-  - Style: PASS
-  - Maintainability: PASS
-```
-
-**Goal**: Code quality high enough to pass automated code review (Gemini, CodeRabbit, etc.) with zero issues on first submission.
-
-> **Why 3 agents instead of 1?**
-> A single reviewer has blind spots shaped by its context. Three independent reviewers, each doing a full review without seeing each other's findings, catch issues that any single pass would miss — the same principle behind requiring multiple approvals on production PRs.
-
-## All Features
-
-### Project Setup
+### 비용 추적
 ```bash
-mangolove init                # Generate CLAUDE.md + commands + hooks
-mangolove init --strict       # Same + risk-scaled quality methodology (strict.md)
-mangolove init --force        # Regenerate even if CLAUDE.md exists
-mangolove init --export       # Export .mangolove.md for team sharing
-mangolove init --from-team    # Setup from team's .mangolove.md
-mangolove sync                # Update CLAUDE.md with current project state
+mangolove cost                # 이번 주 토큰 사용량·비용
+mangolove cost today          # 오늘
+mangolove cost month          # 이번 달
+mangolove cost all            # 전체 기간
 ```
 
-### Cost Tracking
+### 생산성
 ```bash
-mangolove cost                # This week's token usage and cost
-mangolove cost today          # Today only
-mangolove cost month          # This month
-mangolove cost all            # All time
+mangolove stats               # git 기반 생산성 대시보드
+mangolove stats today         # 오늘의 커밋·파일·LOC
+mangolove stats month         # 월간 유형별 분석
 ```
 
-Output:
-```
-Total Cost
-  Estimated  : $408.55
-  Sessions   : 49
-  Messages   : 5381
-
-By Project
-  CRS-crs    — $101.94 (14 sessions, 430.3K output)
-  crs-be     — $89.37 (8 sessions, 298.0K output)
-  crs-admin  — $74.05 (7 sessions, 250.5K output)
-```
-
-### Productivity
+### 프로젝트 네비게이션
 ```bash
-mangolove stats               # Git-based productivity dashboard
-mangolove stats today         # Today's commits, files, LOC
-mangolove stats month         # Monthly breakdown by type
+mangolove switch              # 등록된 프로젝트 목록
+mangolove switch crs-be       # 전환 + 자동 sync + claude 실행
+mangolove projects            # 프로젝트 프로필 목록
 ```
 
-### Project Navigation
+### 세션 메모리
 ```bash
-mangolove switch              # List all registered projects
-mangolove switch crs-be       # Switch + auto-sync + launch claude
-mangolove projects            # List project profiles
+mangolove resume              # 이전 세션 컨텍스트 이어가기
+mangolove sessions            # 저장된 세션 목록
 ```
 
-### Session Memory
+### 측정 · 자가평가
 ```bash
-mangolove resume              # Continue with previous session context
-mangolove sessions            # List saved sessions
+mangolove impact [sha]        # 변경의 결정적 트랙/영향도 (워킹트리 또는 커밋)
+mangolove efficacy            # 게이트/가드가 실제로 막은 것 + 트랙 under-triage
+mangolove eval                # 자가평가 — impact-score 보정도 + 가드 정밀도/재현율 (정직한 known-gap 포함)
+mangolove ab                  # A/B 하니스 (방법론 vs 맨 claude): 게이트 보호 + 채점 엔진
 ```
+세션 중 타이핑하는 명령이 아니라, 프로젝트에서 시스템을 점검할 때 쓰는 ops/CI용 명령입니다.
 
-### Other
+### 안전 게이트 (모든 `mangolove` 세션에서 활성)
+두 개의 PreToolUse 훅이 자동 동작합니다 — `init` 불필요:
+- **커밋 게이트** — 스테이징된 변경에서 시크릿(+선택적 lint/test)을 스캔해 발견 시 **커밋을 차단**.
+- **비가역 명령 가드** — force-push, 위험 루트의 `rm -rf`, 파괴적 SQL/Mongo, `kubectl delete`, `terraform destroy` 를 실행 전 차단. 의도된 실행: `MANGOLOVE_ALLOW_DANGER=1`(감사 대상).
+
+차단된 건은 로컬 효능 원장에 기록돼 `mangolove efficacy`가 무엇을 잡았는지 보고합니다.
+
+### 커밋 트레일러 — `Change-Track:`
+방법론은 에이전트가 사용한 트랙을 커밋 footer에 기록하도록 요청합니다:
+```
+Change-Track: <Trivial|Small|Medium|Large>
+```
+`mangolove efficacy`가 이 선언값을 코드가 계산한 floor와 대조해 **under-triage**(영향도보다 가볍게 선언된 변경 — 리뷰 누락 신호)를 보고합니다. 미기재 시 측정에서만 빠질 뿐 동작에는 영향 없습니다.
+
+### 기타
 ```bash
-mangolove doctor              # Health check
-mangolove update              # Update MangoLove
-mangolove help                # Full command list
+mangolove doctor              # 헬스 체크
+mangolove update              # MangoLove 업데이트
+mangolove help                # 전체 명령 목록
 ```
 
-## Deep Project Analysis
+## 깊은 프로젝트 분석
 
-`mangolove init` doesn't just detect "Java + Spring Boot". It performs deep source code analysis:
+`mangolove init`은 "Java + Spring Boot" 감지에 그치지 않고 소스 코드를 깊이 분석합니다:
 
 ```
 Detected:
@@ -173,13 +156,9 @@ Detected:
   Endpoints  : GET:73 POST:20 PUT:20 DELETE:2
 ```
 
-The generated CLAUDE.md includes:
-- All API endpoint paths (`/v1/users`, `/v1/payments`, ...)
-- Base package name (`me.onda.crs`)
-- Component counts by type
-- Framework-specific slash commands (`/entity`, `/api`, `/migration` for Spring Boot)
+생성되는 CLAUDE.md에는 모든 API 엔드포인트 경로, 베이스 패키지명, 유형별 컴포넌트 수, 프레임워크별 슬래시 커맨드(`/entity`, `/api`, `/migration` 등)가 포함됩니다.
 
-## Supported Tech Stacks
+## 지원 기술 스택
 
 - **Java/Kotlin**: Gradle, Maven, Spring Boot, JPA, QueryDSL, WebFlux
 - **Node.js**: npm, yarn, pnpm, bun, TypeScript, React, Next.js, Vue, NestJS, Express
@@ -189,20 +168,22 @@ The generated CLAUDE.md includes:
 - **Databases**: MySQL, PostgreSQL, MongoDB, Redis, ElasticSearch
 - **Infrastructure**: Docker, Kubernetes, GitHub Actions, Jenkins, Terraform
 
-## Requirements
+(impact-score의 결정적 트랙 분류는 위에 더해 C#/.NET·PHP/Laravel·Ruby/Elixir의 일부 관용구도 커버합니다 — 정확한 커버리지는 `mangolove eval`이 known-gap과 함께 보고.)
 
-- [Claude Code](https://claude.ai/claude-code) — `claude` command must be in PATH
-- [GitHub CLI](https://cli.github.com/) (`gh`) — Optional, for work logging
+## 요구사항
+
+- [Claude Code](https://claude.ai/claude-code) — `claude` 명령이 PATH에 있어야 함
+- [GitHub CLI](https://cli.github.com/) (`gh`) — 선택(작업 로깅용)
 - Git
-- python3 — Required for cost tracking
+- python3 — 비용 추적에 필요
 
-## Installation
+## 설치
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/SongJunSub/mangolove/main/install.sh | bash
 ```
 
-Or manually:
+또는 수동으로:
 
 ```bash
 git clone https://github.com/SongJunSub/mangolove.git ~/.mangolove
@@ -210,100 +191,30 @@ chmod +x ~/.mangolove/bin/mangolove
 ln -sf ~/.mangolove/bin/mangolove ~/.local/bin/mangolove
 ```
 
-Verify:
+확인:
 
 ```bash
 mangolove --version
 mangolove doctor
 ```
 
-## Testing
+## 테스트
 
 ```bash
-bats tests/          # 108 tests
+bats tests/                              # 전체 스위트
+shellcheck -x bin/mangolove lib/*.sh     # 린트
 ```
 
-## Contributing
+## 기여
 
-1. Fork this repository
-2. Create your feature branch
-3. Ensure `bats tests/` and `shellcheck -x bin/mangolove lib/*.sh` pass
-4. Open a Pull Request
+1. 이 저장소를 Fork
+2. 기능 브랜치 생성
+3. `bats tests/`와 `shellcheck -x bin/mangolove lib/*.sh` 통과 확인
+4. Pull Request 생성
 
-## License
+## 라이선스
 
-MIT License — see [LICENSE](LICENSE) for details.
-
----
-
-# MangoLove (한국어)
-
-**Claude Code를 제대로 쓰는 방법.** 한 번의 명령으로 모든 프로젝트를 AI 개발 환경에 최적화합니다.
-
-MangoLove는 프로젝트를 스캔하고, 적절한 설정을 생성하며, Claude Code가 최대한 생산적으로 동작하는 데 필요한 컨텍스트를 제공합니다. 코드 리뷰에 도달하기 전에 문제를 잡아내는 필수 품질 워크플로우를 포함합니다.
-
-> **이름의 유래**
-> 두 마리 진도견 — 망고(Mango)와 사랑(Love)의 이름에서 따왔습니다.
-
-## 주요 기능
-
-```bash
-cd ~/my-project
-mangolove init --strict
-```
-
-이 한 줄의 명령이:
-1. 프로젝트를 **분석** (기술 스택, 의존성, 아키텍처, API 엔드포인트)
-2. `CLAUDE.md`를 **생성** (전체 프로젝트 컨텍스트 — 품질 방법론은 런타임에 주입되며 `CLAUDE.md`에 복제되지 않음)
-3. `.claude/commands/`에 슬래시 커맨드를 **생성** (`/test`, `/build`, `/lint`, `/review`, `/check` + 프레임워크별 커맨드)
-4. `.claude/settings.json`에 PostToolUse 훅을 **설정** (코드 변경 시 자동 린터 실행)
-5. `.gitignore`를 **업데이트** (`.claude/` 로컬 설정 제외)
-
-`claude`를 실행하면 **작업 위험도에 따라 트랙을 자동 분류**해 비례하는 워크플로우(Trivial은 구현 → 빌드/린트 → 보고, Large는 Spec + 적대적 리뷰 + 3인 리뷰)를 적용합니다 — 별도 명령 불필요.
-
-## Strict Mode: 위험도 기반 품질 워크플로우
-
-strict 모드에서는 모든 작업이 **Change Impact Score**로 4개 트랙(**Trivial / Small / Medium / Large**)으로 자동 분류되고, 트랙별로 비례하는 워크플로우가 적용됩니다. 방법론의 단일 출처는 [`methodology/strict.md`](methodology/strict.md)이며 **런타임에 시스템 프롬프트로 주입**됩니다(`CLAUDE.md`에 복제하지 않으므로 낡지 않음). 아래 단계는 **핵심 리뷰 루프**이며, Large 트랙은 구현 이전에 Spec 작성·적대적 Spec 리뷰·Product/Engineering 리뷰를 추가로 수행합니다(전체 10단계는 strict.md 참조).
-
-### 1단계: 분석 (항상 먼저)
-- 관련 파일을 모두 읽고 전체 호출 체인을 추적
-- 영향받는 모든 파일을 식별하고 계획을 제시
-- **사용자 승인을 기다린 후** 코딩 시작
-
-### 2단계: 구현
-보안(OWASP Top 10), 스타일, 성능, 유지보수성, Null Safety 등 내장 검증을 수행하며 구현
-
-### 3단계: 셀프 리뷰 (필수)
-10개 항목의 적대적 셀프 리뷰 — 실패 시 자동 수정 + 재검증
-
-### 4단계: 3인 병렬 독립 코드 리뷰
-커밋 & 푸시 전, 3개의 독립 리뷰 에이전트를 병렬 실행:
-- 각 에이전트가 **전체 관점** (코드 품질 / 보안 / 성능 / 엣지 케이스 / 재사용성 / 효율성 / 설계 의도와의 일관성)을 모두 검토
-- 관점별 1명이 아니라 3명이 각각 전체 리뷰를 수행하여 서로 다른 시각에서 이슈 발견
-- 3명의 리뷰에서 발견된 이슈를 모두 수정한 후에만 커밋 & 푸시
-
-> **왜 3명인가?**
-> 단일 리뷰어는 자기 컨텍스트에 의한 사각지대가 있습니다. 서로의 결과를 보지 않고 독립적으로 전체 리뷰를 수행하는 3명은, 단일 패스에서 놓칠 수 있는 이슈를 잡아냅니다.
-
-### 5단계: 완료 보고
-```
-변경 사항:
-  - ReservationService.java: 취소 검증 추가
-  - ReservationController.java: DELETE /v1/reservations/{id} 신규
-
-검증 결과:
-  - 빌드: PASS
-  - 린트: PASS
-  - 테스트: PASS (45개 통과, 2개 신규)
-
-셀프 리뷰:
-  - 보안: PASS
-  - 성능: PASS
-  - 스타일: PASS
-  - 유지보수성: PASS
-```
-
-**목표**: 자동 코드 리뷰(Gemini, CodeRabbit 등)에서 첫 제출에 지적사항 제로.
+MIT License — 자세한 내용은 [LICENSE](LICENSE) 참조.
 
 ---
 

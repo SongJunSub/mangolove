@@ -138,16 +138,6 @@ _json() {
     [ "$status" -eq 0 ]
 }
 
-@test "guard: --strict installs irreversible-guard and wires it into PreToolUse" {
-    local proj; proj=$(create_fake_project "guard-install")
-    echo '{"name":"app","scripts":{"test":"jest","lint":"eslint ."}}' > "$proj/package.json"
-    echo '{}' > "$proj/.eslintrc.json"
-    cd "$proj"
-    bash "$MANGOLOVE_DIR/lib/project-init.sh" init --strict
-    [ -x "$proj/.mangolove/hooks/irreversible-guard.sh" ]
-    grep -q "irreversible-guard.sh" "$proj/.claude/settings.json"
-}
-
 # ── Mongo 파괴 구문 + 동적 경로 rm (커버리지 갭 보강) ──
 
 @test "guard: blocks Mongo deleteMany with empty filter" {

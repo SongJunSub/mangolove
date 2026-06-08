@@ -25,88 +25,6 @@ _strict_node_project() {
 
 # ── 설치 ──
 
-@test "gate: --strict installs executable quality-gate.sh and gate.conf" {
-    local proj; proj=$(_strict_node_project "gate-install")
-    cd "$proj"
-    run bash "$MANGOLOVE_DIR/lib/project-init.sh" init --strict
-    [ "$status" -eq 0 ]
-    [ -f "$proj/.mangolove/hooks/quality-gate.sh" ]
-    [ -x "$proj/.mangolove/hooks/quality-gate.sh" ]
-    [ -f "$proj/.mangolove/hooks/gate.conf" ]
-    grep -q "LINT_CMD=" "$proj/.mangolove/hooks/gate.conf"
-    grep -q "TEST_CMD=" "$proj/.mangolove/hooks/gate.conf"
-}
-
-@test "gate: settings.json adds PreToolUse gate and stays valid JSON" {
-    local proj; proj=$(_strict_node_project "gate-settings")
-    cd "$proj"
-    bash "$MANGOLOVE_DIR/lib/project-init.sh" init --strict
-    grep -q "PreToolUse" "$proj/.claude/settings.json"
-    grep -q "PostToolUse" "$proj/.claude/settings.json"
-    grep -q "SessionStart" "$proj/.claude/settings.json"
-    grep -q "quality-gate.sh" "$proj/.claude/settings.json"
-    if command -v python3 >/dev/null 2>&1; then
-        python3 -c "import json; json.load(open('$proj/.claude/settings.json'))"
-    fi
-}
-
-@test "gate: non-strict init installs no gate" {
-    local proj; proj=$(create_fake_project "gate-nonstrict")
-    echo '{"name":"app","scripts":{"test":"jest"}}' > "$proj/package.json"
-    cd "$proj"
-    bash "$MANGOLOVE_DIR/lib/project-init.sh" init
-    [ ! -d "$proj/.mangolove/hooks" ]
-}
-
-@test "gate: installs MangoLove-managed git pre-commit in a git repo" {
-    local proj; proj=$(_strict_node_project "gate-precommit")
-    git -C "$proj" init -q
-    cd "$proj"
-    bash "$MANGOLOVE_DIR/lib/project-init.sh" init --strict
-    [ -f "$proj/.git/hooks/pre-commit" ]
-    [ -x "$proj/.git/hooks/pre-commit" ]
-    grep -q "MangoLove" "$proj/.git/hooks/pre-commit"
-}
-
-@test "gate: preserves an existing non-MangoLove pre-commit" {
-    local proj; proj=$(_strict_node_project "gate-precommit-existing")
-    git -C "$proj" init -q
-    printf '#!/bin/sh\necho mine\n' > "$proj/.git/hooks/pre-commit"
-    cd "$proj"
-    bash "$MANGOLOVE_DIR/lib/project-init.sh" init --strict
-    grep -q "echo mine" "$proj/.git/hooks/pre-commit"
-    ! grep -q "MangoLove" "$proj/.git/hooks/pre-commit"
-}
-
-@test "gate: installs pre-commit in a git worktree (.git is a file)" {
-    local main; main=$(create_fake_project "gate-wt-main")
-    git -C "$main" init -q
-    git -C "$main" -c user.email=t@t.com -c user.name=t commit -q --allow-empty -m init
-    local wt="$TEST_DIR/gate-wt-linked"
-    git -C "$main" worktree add -q "$wt" -b wtbranch
-    echo '{"name":"app","scripts":{"test":"jest","lint":"eslint ."}}' > "$wt/package.json"
-    echo '{}' > "$wt/.eslintrc.json"
-    cd "$wt"
-    bash "$MANGOLOVE_DIR/lib/project-init.sh" init --strict
-    local hd; hd="$(git -C "$wt" rev-parse --git-path hooks)"
-    case "$hd" in /*) : ;; *) hd="$wt/$hd" ;; esac
-    [ -f "$hd/pre-commit" ]
-    grep -q "MangoLove" "$hd/pre-commit"
-}
-
-@test "gate: --strict wires PreToolUse into a pre-existing settings.json" {
-    command -v python3 >/dev/null 2>&1 || skip "needs python3 for merge"
-    local proj; proj=$(_strict_node_project "gate-upgrade")
-    mkdir -p "$proj/.claude"
-    printf '{\n  "hooks": {}\n}\n' > "$proj/.claude/settings.json"
-    cd "$proj"
-    bash "$MANGOLOVE_DIR/lib/project-init.sh" init --strict
-    grep -q "PreToolUse" "$proj/.claude/settings.json"
-    grep -q "quality-gate.sh" "$proj/.claude/settings.json"
-    grep -q "irreversible-guard.sh" "$proj/.claude/settings.json"
-    python3 -c "import json; json.load(open('$proj/.claude/settings.json'))"
-}
-
 # ── 동작 (controlled gate.conf) ──
 
 # $1=dir suffix, $2..=gate.conf 라인 -> 게이트 디렉토리 경로를 echo
@@ -304,14 +222,3 @@ _secret_repo() {
 }
 
 # ── 게이트가 추적되는 위치에 설치되는지 (D4: 버전관리/감사 가능) ──
-
-@test "gate: .mangolove gate dir stays tracked while .claude is gitignored" {
-    local proj; proj=$(_strict_node_project "gate-tracked")
-    echo "node_modules/" > "$proj/.gitignore"
-    cd "$proj"
-    bash "$MANGOLOVE_DIR/lib/project-init.sh" init --strict
-    # .claude/ 는 ignore 되지만 게이트가 사는 .mangolove/ 는 추적되어야 한다
-    grep -qE "^\.claude/" "$proj/.gitignore"
-    ! grep -q ".mangolove" "$proj/.gitignore"
-    [ -f "$proj/.mangolove/hooks/quality-gate.sh" ]
-}

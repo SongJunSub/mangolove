@@ -21,7 +21,6 @@ IMPACT_SCRIPT="$MANGOLOVE_DIR/lib/impact-score.sh"
 EFFICACY_SCRIPT="$MANGOLOVE_DIR/lib/efficacy-recorder.sh"
 EVAL_SCRIPT="$MANGOLOVE_DIR/lib/eval-harness.sh"
 AB_SCRIPT="$MANGOLOVE_DIR/lib/ab-harness.sh"
-PROJECT_INIT_SCRIPT="$MANGOLOVE_DIR/lib/project-init.sh"
 BANNER_SCRIPT="$MANGOLOVE_DIR/lib/banner.sh"
 
 # ─────────────────────────────────────────────
@@ -179,8 +178,6 @@ show_help() {
     echo "  mangolove -p [prompt]         Print mode (non-interactive)"
     echo ""
     echo "Commands:"
-    echo "  mangolove init [--strict]     Scaffold a project (CLAUDE.md + commands + gate hooks)"
-    echo "  mangolove sync                Update CLAUDE.md with current project state"
     echo "  mangolove resume              Show last session context and continue"
     echo "  mangolove sessions            List all saved sessions"
     echo "  mangolove stats [period]      Productivity stats (today/week/month)"
@@ -517,7 +514,7 @@ handle_switch() {
         # Also check CLAUDE.md in recent directories
         if [ $count -eq 0 ]; then
             echo -e "  \033[2mNo projects registered.\033[0m"
-            echo -e "  \033[2mRun 'mangolove init' in a project, or 'mangolove profile add'.\033[0m"
+            echo -e "  \033[2mRun 'mangolove profile add' to register a project.\033[0m"
         fi
 
         echo ""
@@ -590,16 +587,6 @@ main() {
             ;;
         --version|-v)
             show_version
-            exit 0
-            ;;
-        init)
-            shift
-            bash "$PROJECT_INIT_SCRIPT" init "$@"
-            exit 0
-            ;;
-        sync)
-            shift
-            bash "$PROJECT_INIT_SCRIPT" sync "$@"
             exit 0
             ;;
         resume)

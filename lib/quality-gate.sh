@@ -2,7 +2,7 @@
 # ─────────────────────────────────────────────
 # MangoLove — Quality Gate (커밋 경계 결정적 차단 게이트)
 #
-# init --strict 시 프로젝트의 .mangolove/hooks/quality-gate.sh 로 설치된다.
+# bare mangolove 세션에 PreToolUse 훅으로 런타임 주입된다(claude --settings).
 # 이 게이트 로직은 버전관리 대상이라 diff로 리뷰/감사된다 (어조가 아니라 코드로 강제).
 #
 # 사용:

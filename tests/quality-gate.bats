@@ -14,17 +14,6 @@ teardown() {
     teardown_test_env
 }
 
-# lint + test 둘 다 있는 strict 노드 프로젝트를 만든다.
-_strict_node_project() {
-    local proj
-    proj=$(create_fake_project "$1")
-    echo '{"name":"app","scripts":{"test":"jest","lint":"eslint ."}}' > "$proj/package.json"
-    echo '{}' > "$proj/.eslintrc.json"
-    echo "$proj"
-}
-
-# ── 설치 ──
-
 # ── 동작 (controlled gate.conf) ──
 
 # $1=dir suffix, $2..=gate.conf 라인 -> 게이트 디렉토리 경로를 echo

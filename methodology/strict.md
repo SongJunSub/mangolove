@@ -300,7 +300,7 @@ Fail → Investigate → Verify → Distill → Consult
 구현 → DoD rubric 대조 → 미달 항목 self-correct → 재검증 → (전항목 PASS까지 반복)
 ```
 
-잘 설계된 rubric은 환경에 피드백을 더하고, 모델은 그 피드백 위에서 반복 개선한다. Claude Code `/goal`·Managed Agent Outcomes 가 이 루프의 기본 도구다 (가용하면 사용, 불가하면 아래 규율을 수동 적용).
+잘 설계된 rubric은 환경에 피드백을 더하고, 모델은 그 피드백 위에서 반복 개선한다. CLI에서 이 루프의 본체는 사용자가 켜는 내장 명령 **`/goal <조건>`** 이다 — 매 턴 후 완료 조건 충족을 자동 판정하고, 미충족이면 다음 턴을 이어간다. 선언한 DoD 를 그대로 완료 조건으로 넣는다 (예: `/goal test/auth 전체 통과 + 린트 클린`). 에이전트는 `/goal` 을 self-invoke 할 수 없으므로, 멀티턴 자동 수렴이 필요하면 사용자에게 `/goal <DoD>` 활성화를 제안한다. (Managed Agent Outcomes 는 클라우드 Managed Agents 제품의 동등 기능이며 로컬 CLI 와는 별개다.)
 
 ### 적용
 - **DoD 항목은 실행 가능한 체크로 만든다** — 각 종료 조건이 테스트·스크립트·린트·로그 grep 같은 결정적 판정을 갖게 한다. 주관적 자기 판단("괜찮아 보임")이 아니라 돌릴 수 있는 신호여야 루프가 결정적으로 닫힌다. (`## 신뢰성 게이트` 의 "강제 표현 → 코드/hook 인코딩"과 동일 원리)

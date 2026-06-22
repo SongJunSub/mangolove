@@ -199,3 +199,45 @@ _json() {
     run bash "$(_guard)" <<< "$(_json 'mongosh --eval "db.users.deleteMany({age:{gt:30}})"')"
     [ "$status" -eq 0 ]
 }
+
+# ── push --delete 가 force-push 로 오탐되던 회귀 (force 검출을 push 세그먼트에 앵커링) ──
+
+@test "guard: allows remote branch delete (long form)" {
+    run bash "$(_guard)" <<< "$(_json 'git push origin --delete BKO-2224')"
+    [ "$status" -eq 0 ]
+}
+
+@test "guard: allows remote branch delete (flag-first form)" {
+    run bash "$(_guard)" <<< "$(_json 'git push --delete origin feature/BKO-2224')"
+    [ "$status" -eq 0 ]
+}
+
+@test "guard: allows remote branch delete (colon refspec)" {
+    run bash "$(_guard)" <<< "$(_json 'git push origin :BKO-2224')"
+    [ "$status" -eq 0 ]
+}
+
+@test "guard: allows push --delete chained with rm -f cleanup" {
+    run bash "$(_guard)" <<< "$(_json 'git push origin --delete BKO-2224 && rm -f stale.log')"
+    [ "$status" -eq 0 ]
+}
+
+@test "guard: allows push --delete chained with worktree remove --force" {
+    run bash "$(_guard)" <<< "$(_json 'git push origin --delete BKO-2224 && git worktree remove --force ../wt')"
+    [ "$status" -eq 0 ]
+}
+
+@test "guard: allows rm -f cleanup chained before push --delete" {
+    run bash "$(_guard)" <<< "$(_json 'rm -f tmp.txt && git push origin --delete BKO-2224')"
+    [ "$status" -eq 0 ]
+}
+
+@test "guard: still blocks real --force when chained after a safe command" {
+    run bash "$(_guard)" <<< "$(_json 'git status && git push --force origin main')"
+    [ "$status" -eq 2 ]
+}
+
+@test "guard: still blocks real -f when chained after a safe command" {
+    run bash "$(_guard)" <<< "$(_json 'git fetch origin && git push -f origin main')"
+    [ "$status" -eq 2 ]
+}

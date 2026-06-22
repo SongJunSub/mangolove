@@ -41,12 +41,19 @@ block() {
     exit 2
 }
 
-# git 강제 푸시 — force-with-lease 토큰을 먼저 제거한 뒤 남은 평범한 --force/-f 를 검출
-# (부분문자열 'force-with-lease' 존재로 진짜 --force 가 면제되던 우회를 차단)
+# git 강제 푸시 — push '세그먼트'에 한해서만 --force/-f 를 검출한다.
+# 명령줄 전체를 보면 체인된 무관 명령의 -f/--force 가 push 의 force 로 오탐된다:
+#   'git push origin --delete X && rm -f y'                 → '-f' 가 rm 의 것인데 push -f 로 오탐
+#   'git push origin --delete X && git worktree remove --force …' → '--force' 가 worktree 의 것인데 push --force 로 오탐
+# 따라서 git 으로 시작해 push 를 포함하고 다음 구분자(; | &) 직전까지의 세그먼트만 검사한다.
+# force-with-lease 토큰은 먼저 제거(부분문자열 존재로 진짜 --force 가 면제되던 우회 차단).
 if has 'git[[:space:]].*push'; then
     nolease="$(printf '%s' "$cmd" | sed -E 's/--force-with-lease[^[:space:]]*//g')"
-    printf '%s' "$nolease" | grep -qiE '(^|[^-])--force([[:space:]=]|$)' && block "git push --force"
-    printf '%s' "$nolease" | grep -qiE '[[:space:]]-f([[:space:]]|$)'     && block "git push -f"
+    push_seg="$(printf '%s' "$nolease" | grep -oiE 'git[[:space:]]+([^;|&]*[[:space:]])?push[^;|&]*')"
+    if [ -n "$push_seg" ]; then
+        printf '%s' "$push_seg" | grep -qiE '(^|[^-])--force([[:space:]=]|$)' && block "git push --force"
+        printf '%s' "$push_seg" | grep -qiE '[[:space:]]-f([[:space:]]|$)'     && block "git push -f"
+    fi
 fi
 
 has 'git[[:space:]]+reset[[:space:]]+--hard' && block "git reset --hard"

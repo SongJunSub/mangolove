@@ -30,3 +30,8 @@ MANGOLOVE_EFFORT=""
 #   split    — inject a lean core.md and load heavy Spec/review procedures on-demand as
 #              cc-plugin skills. Cuts always-on tokens; falls back to monolith if incomplete.
 MANGOLOVE_METHODOLOGY_MODE=monolith
+
+# DoD gate (on / off) — 완료 직전 ./.mangolove/dod.sh 를 Stop 훅으로 결정적 검증
+#   모델이 완료를 주장하기 전에 DoD 를 실행형 체크로 외부화하면, 통과 전까지 턴이 끝나지 않는다.
+#   기본 off(옵트인). 세션 게이트 번들에 함께 주입되므로 MANGOLOVE_SESSION_GATES=true 필요.
+MANGOLOVE_DOD_GATE=off

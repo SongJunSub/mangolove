@@ -41,6 +41,9 @@ MANGOLOVE_SESSION_GATES=true
 # Default monolith for behavior parity; split is opt-in during rollout and falls back to
 # monolith (loudly) if core.md / cc-plugin are missing, so it never silently strips methodology.
 MANGOLOVE_METHODOLOGY_MODE=monolith
+# DoD gate (on / off): Stop 훅으로 완료 직전 ./.mangolove/dod.sh 를 결정적으로 검증.
+# 기본 off (옵트인). 세션 게이트 번들에 함께 주입되므로 MANGOLOVE_SESSION_GATES=true 필요.
+MANGOLOVE_DOD_GATE=off
 
 if [ -f "$MANGOLOVE_DIR/config.sh" ]; then
     if bash -n "$MANGOLOVE_DIR/config.sh" 2>/dev/null; then
@@ -431,6 +434,13 @@ do_doctor() {
         echo -e "  \033[38;5;113m✓\033[0m Session gates: 시크릿 스캔 + 비가역 가드 (mangolove 실행 시 자동)"
     else
         echo -e "  \033[38;5;220m△\033[0m Session gates: off (MANGOLOVE_SESSION_GATES)"
+    fi
+
+    # DoD gate (Stop hook) — 완료 직전 ./.mangolove/dod.sh 결정적 검증
+    if [ "${MANGOLOVE_DOD_GATE:-off}" = "on" ] && [ -f "$MANGOLOVE_DIR/lib/dod-gate.sh" ]; then
+        echo -e "  \033[38;5;113m✓\033[0m DoD gate: on (Stop 훅 — 완료 직전 DoD 검증)"
+    else
+        echo -e "  \033[38;5;220m△\033[0m DoD gate: off (MANGOLOVE_DOD_GATE=on 으로 활성)"
     fi
 
     # Project quality gate — 현재 디렉토리가 게이트 설치된 프로젝트면 무결성/추적을 감사한다.
@@ -877,6 +887,25 @@ generate_session_settings() {
     local out="$1"
     local guard="${MANGOLOVE_DIR}/lib/irreversible-guard.sh"
     local gate="${MANGOLOVE_DIR}/lib/quality-gate.sh"
+    local dod="${MANGOLOVE_DIR}/lib/dod-gate.sh"
+
+    # Stop 훅(DoD 게이트)은 MANGOLOVE_DOD_GATE=on 일 때만 병합. Stop 은 매 턴 발화하나
+    # dod.sh 미외부화 시 무비용 통과하므로 idle 오버헤드가 없다.
+    local stop_block=""
+    if [ "${MANGOLOVE_DOD_GATE:-off}" = "on" ] && [ -f "$dod" ]; then
+        stop_block=$(cat << STOPEOF
+,
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "bash \\"${dod}\\"" }
+        ]
+      }
+    ]
+STOPEOF
+)
+    fi
+
     cat > "$out" << SESSIONEOF
 {
   "hooks": {
@@ -888,7 +917,7 @@ generate_session_settings() {
           { "type": "command", "command": "GATE_SECRET=block bash \\"${gate}\\" pretooluse" }
         ]
       }
-    ]
+    ]${stop_block}
   }
 }
 SESSIONEOF

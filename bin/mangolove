@@ -44,6 +44,9 @@ MANGOLOVE_METHODOLOGY_MODE=monolith
 # DoD gate (on / off): Stop 훅으로 완료 직전 ./.mangolove/dod.sh 를 결정적으로 검증.
 # 기본 off (옵트인). 세션 게이트 번들에 함께 주입되므로 MANGOLOVE_SESSION_GATES=true 필요.
 MANGOLOVE_DOD_GATE=off
+# Status line (on / off): context 사용률·비용·메서드러지 모드를 상태줄에 노출. 기본 on.
+# mangolove 세션 동안 사용자 자체 statusLine 을 override 하므로 보존하려면 off.
+MANGOLOVE_STATUSLINE=on
 
 if [ -f "$MANGOLOVE_DIR/config.sh" ]; then
     if bash -n "$MANGOLOVE_DIR/config.sh" 2>/dev/null; then
@@ -441,6 +444,13 @@ do_doctor() {
         echo -e "  \033[38;5;113m✓\033[0m DoD gate: on (Stop 훅 — 완료 직전 DoD 검증)"
     else
         echo -e "  \033[38;5;220m△\033[0m DoD gate: off (MANGOLOVE_DOD_GATE=on 으로 활성)"
+    fi
+
+    # Status line
+    if [ "${MANGOLOVE_STATUSLINE:-on}" != "off" ] && [ -f "$MANGOLOVE_DIR/lib/statusline.sh" ]; then
+        echo -e "  \033[38;5;113m✓\033[0m Status line: on (context 사용률·비용·모드)"
+    else
+        echo -e "  \033[38;5;220m△\033[0m Status line: off (MANGOLOVE_STATUSLINE)"
     fi
 
     # Project quality gate — 현재 디렉토리가 게이트 설치된 프로젝트면 무결성/추적을 감사한다.
@@ -888,6 +898,7 @@ generate_session_settings() {
     local guard="${MANGOLOVE_DIR}/lib/irreversible-guard.sh"
     local gate="${MANGOLOVE_DIR}/lib/quality-gate.sh"
     local dod="${MANGOLOVE_DIR}/lib/dod-gate.sh"
+    local statusline="${MANGOLOVE_DIR}/lib/statusline.sh"
 
     # Stop 훅(DoD 게이트)은 MANGOLOVE_DOD_GATE=on 일 때만 병합. Stop 은 매 턴 발화하나
     # dod.sh 미외부화 시 무비용 통과하므로 idle 오버헤드가 없다.
@@ -906,8 +917,20 @@ STOPEOF
 )
     fi
 
+    # 상태줄: context 사용률·비용·모드 노출. MANGOLOVE_STATUSLINE=off 로 비활성(사용자 statusLine 보존).
+    local statusline_block=""
+    if [ "${MANGOLOVE_STATUSLINE:-on}" != "off" ] && [ -f "$statusline" ]; then
+        local eff_mode="monolith"
+        [ "${USE_CC_PLUGIN:-0}" = "1" ] && eff_mode="split"
+        statusline_block=$(cat << SLEOF
+  "statusLine": { "type": "command", "command": "MANGOLOVE_STATUSLINE_MODE=${eff_mode} MANGOLOVE_STATUSLINE_DOD=${MANGOLOVE_DOD_GATE:-off} bash \\"${statusline}\\"", "padding": 0 },
+SLEOF
+)
+    fi
+
     cat > "$out" << SESSIONEOF
 {
+${statusline_block}
   "hooks": {
     "PreToolUse": [
       {

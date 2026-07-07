@@ -35,3 +35,7 @@ MANGOLOVE_METHODOLOGY_MODE=monolith
 #   모델이 완료를 주장하기 전에 DoD 를 실행형 체크로 외부화하면, 통과 전까지 턴이 끝나지 않는다.
 #   기본 off(옵트인). 세션 게이트 번들에 함께 주입되므로 MANGOLOVE_SESSION_GATES=true 필요.
 MANGOLOVE_DOD_GATE=off
+
+# Status line (on / off) — context 사용률·세션 비용·메서드러지 모드를 상태줄에 노출
+#   기본 on. mangolove 세션 동안 사용자 자체 statusLine 을 override 하므로 보존하려면 off.
+MANGOLOVE_STATUSLINE=on

@@ -184,4 +184,4 @@ MIT License — 자세한 내용은 [LICENSE](LICENSE) 참조.
 
 ---
 
-**MangoLove** v0.5.0
+**MangoLove** v0.6.0

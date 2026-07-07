@@ -6,6 +6,9 @@ config.sh
 session-settings.json
 efficacy/
 
+# Work-in-progress state (externalized per methodology, not shared)
+.progress.md
+
 # OS
 .DS_Store
 Thumbs.db

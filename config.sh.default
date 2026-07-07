@@ -24,3 +24,9 @@ MANGOLOVE_MODEL=""
 
 # Default effort level (low / medium / high / max / auto)
 MANGOLOVE_EFFORT=""
+
+# Methodology delivery (monolith / split)
+#   monolith — inject the full strict.md methodology every session (default; behavior parity).
+#   split    — inject a lean core.md and load heavy Spec/review procedures on-demand as
+#              cc-plugin skills. Cuts always-on tokens; falls back to monolith if incomplete.
+MANGOLOVE_METHODOLOGY_MODE=monolith

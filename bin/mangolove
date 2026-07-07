@@ -414,6 +414,18 @@ do_doctor() {
     done
     echo -e "  \033[38;5;113m✓\033[0m Skills: ${skill_count}"
 
+    # Methodology delivery (monolith / split) + cc-plugin health
+    echo -e "  \033[38;5;113m✓\033[0m Methodology mode: ${MANGOLOVE_METHODOLOGY_MODE:-monolith}"
+    if [ -f "$CORE_METHODOLOGY_FILE" ] && [ -f "$CC_PLUGIN_DIR/.claude-plugin/plugin.json" ]; then
+        if command -v claude &> /dev/null && claude plugin validate "$CC_PLUGIN_DIR" &> /dev/null; then
+            echo -e "  \033[38;5;113m✓\033[0m cc-plugin: valid (core.md + skills ready for split)"
+        else
+            echo -e "  \033[38;5;220m△\033[0m cc-plugin: present (validate skipped/failed)"
+        fi
+    else
+        echo -e "  \033[38;5;220m△\033[0m cc-plugin/core.md: absent (split falls back to monolith)"
+    fi
+
     # Session gates — bare mangolove 실행 시 자동 적용되는 게이트
     if [ "$MANGOLOVE_SESSION_GATES" = "true" ] && [ -f "$MANGOLOVE_DIR/lib/quality-gate.sh" ] && [ -f "$MANGOLOVE_DIR/lib/irreversible-guard.sh" ]; then
         echo -e "  \033[38;5;113m✓\033[0m Session gates: 시크릿 스캔 + 비가역 가드 (mangolove 실행 시 자동)"

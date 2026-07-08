@@ -24,7 +24,11 @@ teardown() {
     run bash "$MANGOLOVE_DIR/bin/mangolove" --version
     [ "$status" -eq 0 ]
     [[ "$output" == *"MangoLove"* ]]
-    [[ "$output" == *"0.5.0"* ]]
+    # 버전은 bin/mangolove 의 MANGOLOVE_VERSION 이 단일 출처 — 하드코딩하면 릴리스마다 깨진다.
+    local expected_version
+    expected_version=$(grep -m1 '^MANGOLOVE_VERSION=' "$BATS_TEST_DIRNAME/../bin/mangolove" | cut -d'"' -f2)
+    [ -n "$expected_version" ]
+    [[ "$output" == *"$expected_version"* ]]
 }
 
 @test "version: -v shorthand works" {

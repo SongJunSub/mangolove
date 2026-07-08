@@ -11,13 +11,12 @@ MANGOLOVE_DIR="${MANGOLOVE_DIR:-$HOME/.mangolove}"
 source "${MANGOLOVE_DIR}/lib/colors.sh"
 
 CLAUDE_DIR="$HOME/.claude"
-PROJECTS_DIR="$CLAUDE_DIR/projects"
+PROJECTS_DIR="${MANGOLOVE_COST_PROJECTS_DIR:-$CLAUDE_DIR/projects}"
 
-# Pricing per million tokens (Claude Opus 4.6, 2026 rates)
-PRICE_INPUT=15.00
-PRICE_OUTPUT=75.00
-PRICE_CACHE_WRITE=3.75
-PRICE_CACHE_READ=0.30
+# 단가는 모델별로 다르다 — 세션 레코드의 message.model 에 따라 아래 batch_parse_sessions
+# 의 PRICES 로 레코드 단위 적용한다. (과거엔 Opus 단가를 전 세션에 평면 적용해 경량 모델
+# 비용을 과대 계상했다. 게다가 그 Opus 값($15/$75)마저 구형이라 현행 Opus($5/$25)의 3배였다.)
+# cache write=input×1.25, cache read=input×0.1 (5분 ephemeral 기준)로 유도한다.
 
 # ─────────────────────────────────────────────
 # Parse a single session file and sum tokens
@@ -34,7 +33,38 @@ batch_parse_sessions() {
 import json, os
 from collections import defaultdict
 
-projects = defaultdict(lambda: [0, 0, 0, 0, 0, 0])
+# 모델별 (input, output) 달러/1M 토큰. cache write=input*1.25, read=input*0.1 로 유도.
+PRICES = {
+    'claude-opus-4-8': (5.0, 25.0),
+    'claude-opus-4-7': (5.0, 25.0),
+    'claude-opus-4-6': (5.0, 25.0),
+    'claude-opus-4-5': (5.0, 25.0),
+    'claude-sonnet-5': (3.0, 15.0),
+    'claude-sonnet-4-6': (3.0, 15.0),
+    'claude-sonnet-4-5': (3.0, 15.0),
+    'claude-haiku-4-5': (1.0, 5.0),
+    'claude-fable-5': (10.0, 50.0),
+    'claude-mythos-5': (10.0, 50.0),
+}
+DEFAULT = PRICES['claude-opus-4-8']  # 미상 모델 → 현행 Opus 단가로 추정
+
+def price_for(model):
+    if not model:
+        return DEFAULT
+    if model in PRICES:
+        return PRICES[model]
+    if model.startswith('claude-fable') or model.startswith('claude-mythos'):
+        return (10.0, 50.0)
+    if model.startswith('claude-opus'):
+        return (5.0, 25.0)
+    if model.startswith('claude-sonnet'):
+        return (3.0, 15.0)
+    if model.startswith('claude-haiku'):
+        return (1.0, 5.0)
+    return DEFAULT
+
+# [input, output, cache_write, cache_read, msgs, sessions, cost]
+projects = defaultdict(lambda: [0, 0, 0, 0, 0, 0, 0.0])
 file_list = '''${input_data}'''
 
 for line in file_list.strip().split('\n'):
@@ -54,21 +84,29 @@ for line in file_list.strip().split('\n'):
                 continue
             try:
                 data = json.loads(fline)
-                usage = data.get('message', {}).get('usage', {})
+                msg = data.get('message', {}) or {}
+                usage = msg.get('usage', {}) or {}
                 if usage:
-                    projects[proj_name][0] += usage.get('input_tokens', 0)
-                    projects[proj_name][1] += usage.get('output_tokens', 0)
-                    projects[proj_name][2] += usage.get('cache_creation_input_tokens', 0)
-                    projects[proj_name][3] += usage.get('cache_read_input_tokens', 0)
+                    i = usage.get('input_tokens', 0) or 0
+                    o = usage.get('output_tokens', 0) or 0
+                    cw = usage.get('cache_creation_input_tokens', 0) or 0
+                    cr = usage.get('cache_read_input_tokens', 0) or 0
+                    p_in, p_out = price_for(msg.get('model'))
+                    cost = (i * p_in + o * p_out + cw * (p_in * 1.25) + cr * (p_in * 0.1)) / 1_000_000
+                    projects[proj_name][0] += i
+                    projects[proj_name][1] += o
+                    projects[proj_name][2] += cw
+                    projects[proj_name][3] += cr
                     projects[proj_name][4] += 1
+                    projects[proj_name][6] += cost
                     session_msgs += 1
             except (json.JSONDecodeError, KeyError):
                 continue
     if session_msgs > 0:
         projects[proj_name][5] += 1
 
-for name, vals in projects.items():
-    print(f'{name},{vals[0]},{vals[1]},{vals[2]},{vals[3]},{vals[4]},{vals[5]}')
+for name, v in projects.items():
+    print(f'{name},{v[0]},{v[1]},{v[2]},{v[3]},{v[4]},{v[5]},{v[6]:.2f}')
 " 2>/dev/null
 }
 
@@ -93,18 +131,6 @@ format_tokens() {
     else
         echo "$count"
     fi
-}
-
-# ─────────────────────────────────────────────
-# Calculate cost from token counts
-# ─────────────────────────────────────────────
-calculate_cost() {
-    local input="$1"
-    local output="$2"
-    local cache_write="$3"
-    local cache_read="$4"
-
-    echo "scale=2; ($input * $PRICE_INPUT + $output * $PRICE_OUTPUT + $cache_write * $PRICE_CACHE_WRITE + $cache_read * $PRICE_CACHE_READ) / 1000000" | bc
 }
 
 # ─────────────────────────────────────────────
@@ -160,13 +186,12 @@ show_cost() {
 
     local total_input=0 total_output=0 total_cache_write=0 total_cache_read=0
     local total_messages=0 total_sessions=0
+    local total_cost=0
     local project_data=""
 
-    while IFS=',' read -r pname p_in p_out p_cw p_cr p_msgs p_sess; do
+    while IFS=',' read -r pname p_in p_out p_cw p_cr p_msgs p_sess p_cost; do
         [ -z "$pname" ] && continue
-        local proj_cost
-        proj_cost=$(calculate_cost "$p_in" "$p_out" "$p_cw" "$p_cr")
-        project_data="${project_data}${proj_cost}|${pname}|${p_in}|${p_out}|${p_cw}|${p_cr}|${p_msgs}|${p_sess}
+        project_data="${project_data}${p_cost}|${pname}|${p_in}|${p_out}|${p_cw}|${p_cr}|${p_msgs}|${p_sess}
 "
         total_input=$((total_input + p_in))
         total_output=$((total_output + p_out))
@@ -174,6 +199,7 @@ show_cost() {
         total_cache_read=$((total_cache_read + p_cr))
         total_messages=$((total_messages + p_msgs))
         total_sessions=$((total_sessions + p_sess))
+        total_cost=$(echo "${total_cost} + ${p_cost}" | bc)
     done <<< "$batch_result"
 
     if [ "$total_messages" -eq 0 ]; then
@@ -182,9 +208,8 @@ show_cost() {
         return 0
     fi
 
-    # Total cost
-    local total_cost
-    total_cost=$(calculate_cost "$total_input" "$total_output" "$total_cache_write" "$total_cache_read")
+    # Total cost — 프로젝트별(모델별 단가 적용) 비용의 합
+    total_cost=$(printf "%.2f" "$total_cost")
 
     echo -e "  ${G}Total Cost${R}"
     echo -e "    Estimated  : ${B}\$${total_cost}${R}"
@@ -210,7 +235,7 @@ show_cost() {
 
     echo ""
     echo -e "${DIM}──────────────────────────────────────${R}"
-    echo -e "  ${DIM}Prices: input \$${PRICE_INPUT}/M, output \$${PRICE_OUTPUT}/M${R}"
+    echo -e "  ${DIM}단가(모델별, /1M in·out): opus \$5/\$25 · sonnet \$3/\$15 · haiku \$1/\$5 · fable \$10/\$50 (cache 추정)${R}"
     echo ""
 }
 

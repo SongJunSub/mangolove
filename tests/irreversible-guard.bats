@@ -241,3 +241,35 @@ _json() {
     run bash "$(_guard)" <<< "$(_json 'git fetch origin && git push -f origin main')"
     [ "$status" -eq 2 ]
 }
+
+# ── Jul-10 회수분: JSON 이스케이프(\n\r\t) 치환 · push -f 대소문자 구분 · rm 세그먼트 단위 검사 ──
+# 아래는 모두 구버전에서 오탐 차단(또는 실제 위험을 오검 통과)하던 케이스다.
+
+@test "guard: allows multi-line safe push, unrelated commit -F on next line (\\n = 경계)" {
+    # 구버전: \n 이 글자 n 으로 붙어 push 세그먼트가 통째로 잡히고 -F 가 -f(대소문자무시)로 오탐 → 차단.
+    run bash "$(_guard)" <<< "$(_json 'git push origin main\ngit commit -F -')"
+    [ "$status" -eq 0 ]
+}
+
+@test "guard: allows rm -rf relative dir chained with a command touching root" {
+    # 구버전: 명령 전체에서 -r/-f/'/' 를 모아 봐서 'rm -rf build' + 'ls /' 조합을 오탐 → 차단.
+    run bash "$(_guard)" <<< "$(_json 'rm -rf build && ls /')"
+    [ "$status" -eq 0 ]
+}
+
+@test "guard: allows safe rm then a root-path command across a newline (per-segment)" {
+    run bash "$(_guard)" <<< "$(_json 'rm -rf build\ncat /etc/hosts')"
+    [ "$status" -eq 0 ]
+}
+
+@test "guard: allows a commit message that merely mentions rm -rf /" {
+    # rm 이 구분자(^;|&) 뒤가 아니라 문장 중간이라 실제 명령이 아님 → 세그먼트로 추출되지 않음.
+    run bash "$(_guard)" <<< "$(_json 'git commit -m "chore: drop rm -rf / shim"')"
+    [ "$status" -eq 0 ]
+}
+
+@test "guard: blocks a real rm -rf / that follows a newline (\\n = 경계, 오검 보완)" {
+    # 구버전: \n→n 으로 'hinrm' 이 되어 rm 앵커를 놓치고 통과(false negative). 신버전은 차단.
+    run bash "$(_guard)" <<< "$(_json 'echo hi\nrm -rf /')"
+    [ "$status" -eq 2 ]
+}

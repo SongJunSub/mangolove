@@ -26,6 +26,13 @@ raw="$(printf '%s' "$input" | grep -oE '"command"[[:space:]]*:[[:space:]]*"([^"\
 cmd="${raw#*\"command\"*:*\"}"
 cmd="${cmd%\"}"
 cmd="${cmd//\"/}"
+# JSON 은 개행/캐리지리턴/탭을 \n \r \t 로 이스케이프한다. 아래 백슬래시 제거 '전에'
+# 이들을 명령 구분자로 치환한다 — 안 그러면 \n 이 글자 'n' 이 되어 여러 줄 명령이 한 줄로
+# 붙고, push 세그먼트 격리([^;|&])가 깨져 다른 명령의 -f/--force(예: 'git commit -F -')가
+# push 의 force 로 오탐된다. (개행=명령 경계이므로 ';' 로 치환)
+cmd="${cmd//\\n/;}"
+cmd="${cmd//\\r/;}"
+cmd="${cmd//\\t/ }"
 cmd="${cmd//\\/}"
 cmd="${cmd//\'/}"
 cmd="${cmd//\`/}"
@@ -52,7 +59,8 @@ if has 'git[[:space:]].*push'; then
     push_seg="$(printf '%s' "$nolease" | grep -oiE 'git[[:space:]]+([^;|&]*[[:space:]])?push[^;|&]*')"
     if [ -n "$push_seg" ]; then
         printf '%s' "$push_seg" | grep -qiE '(^|[^-])--force([[:space:]=]|$)' && block "git push --force"
-        printf '%s' "$push_seg" | grep -qiE '[[:space:]]-f([[:space:]]|$)'     && block "git push -f"
+        # 단축 force 는 소문자 -f 만(대소문자 구분): 'git commit -F'(from-file) 등 -F 오탐 방지.
+        printf '%s' "$push_seg" | grep -qE '[[:space:]]-f([[:space:]]|$)'      && block "git push -f"
     fi
 fi
 
@@ -62,12 +70,16 @@ has 'git[[:space:]]+reset[[:space:]]+--hard' && block "git reset --hard"
 # 위험 루트엔 리터럴(/,~)·환경변수(\$HOME,\$PWD,\${HOME},\${PWD})·명령치환(\$(pwd))까지 포함.
 # 보수적: 이 루트 '아래 하위경로'(예: \$PWD/build, \$HOME/.ssh)도 함께 막는다 — 안전한 하위삭제와
 # 위험한 하위삭제(.ssh 등)를 정규식으로 구분할 수 없으므로 안전을 택한다. 의도된 삭제는 override.
-if has '(^|[[:space:]])rm[[:space:]]' \
-   && has '(--recursive|[[:space:]]-[a-z]*r)' \
-   && has '(--force|[[:space:]]-[a-z]*f)' \
-   && has '[[:space:]](/|~|\$HOME|\$PWD|\$\{HOME\}|\$\{PWD\}|\$\(pwd\))'; then
+# 4개 조건을 명령 전체가 아니라 각 rm '세그먼트'에서만 확인 — 위 git push 검사와 동일 원리.
+# 무관한 토큰(다른 명령의 -r, jq '//=' 의 '/', 설정 경로의 $HOME 등)이 합쳐져 생기던 오탐 제거.
+# 진짜 'rm -rf $HOME' / 'rm -rf /' 는 그 세그먼트에서 3조건이 모두 참이므로 그대로 차단.
+while IFS= read -r rm_seg; do
+    [ -z "$rm_seg" ] && continue
+    printf '%s' "$rm_seg" | grep -qiE '(--recursive|[[:space:]]-[a-z]*r)' || continue
+    printf '%s' "$rm_seg" | grep -qiE '(--force|[[:space:]]-[a-z]*f)'     || continue
+    printf '%s' "$rm_seg" | grep -qiE '[[:space:]](/|~|\$HOME|\$PWD|\$\{HOME\}|\$\{PWD\}|\$\(pwd\))' || continue
     block "rm -rf on dangerous root"
-fi
+done < <(printf '%s' "$cmd" | grep -oiE '(^|[;|&])[[:space:]]*rm[[:space:]][^;|&]*')
 
 # 파괴적 SQL — sql 클라이언트 호출에 앵커링 (echo/grep/sed/커밋 메시지의 키워드 오차단 방지)
 if has '(psql|mysql|mariadb|sqlite3|mongosh|mongo|clickhouse-client|cqlsh)([[:space:]]|$)'; then

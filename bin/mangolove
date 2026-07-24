@@ -621,6 +621,42 @@ methodology_split_ready() {
     [ -f "$CORE_METHODOLOGY_FILE" ] && [ -f "$CC_PLUGIN_DIR/.claude-plugin/plugin.json" ]
 }
 
+# Recognized project build markers. Kept in one place so sub-project detection and the
+# "is the CWD itself a project?" guard use the SAME set (they used to diverge — the guard
+# only checked 3 of these, so the picker could false-positive inside Kotlin/Go/Rust/Python
+# projects whose subdirs happen to be projects too).
+_ml_has_build_marker() {
+    local d="$1"
+    [ -f "${d}/build.gradle" ] || [ -f "${d}/build.gradle.kts" ] || [ -f "${d}/package.json" ] \
+        || [ -f "${d}/pom.xml" ] || [ -f "${d}/go.mod" ] || [ -f "${d}/Cargo.toml" ] \
+        || [ -f "${d}/pyproject.toml" ]
+}
+
+# Detect a multi-project root: a directory holding >=2 immediate sub-dirs that are each their
+# own git project (a .git plus a recognized build marker). Prints the sub-project names, one
+# per line, when the picker should be offered; prints nothing otherwise. Scans the caller's CWD.
+#
+# Never treats these as multi-project roots (avoids the false-positive selector):
+#   - $HOME and the filesystem root — common holders of several UNRELATED checkouts, never a
+#     real monorepo/workspace root.
+#   - a directory that is itself a project (has any build marker) — you're already inside one.
+detect_multi_project_root() {
+    _ml_has_build_marker "." && return 0
+    [ "$PWD" = "$HOME" ] && return 0
+    [ "$PWD" = "/" ] && return 0
+
+    local sub_dir found=()
+    for sub_dir in */; do
+        [ ! -d "$sub_dir" ] && continue
+        if [ -d "${sub_dir}.git" ] && _ml_has_build_marker "${sub_dir%/}"; then
+            found+=("$(basename "$sub_dir")")
+        fi
+    done
+
+    [ "${#found[@]}" -ge 2 ] || return 0
+    printf '%s\n' "${found[@]}"
+}
+
 # ─────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────
@@ -765,19 +801,14 @@ Continue from where you left off. Summarize the previous session state and ask w
     # Auto-update check (once per 24h, non-blocking)
     auto_update_check
 
-    # Detect multi-project root (directory with multiple sub-projects, each with their own .git)
-    local sub_project_count=0
-    local sub_projects=()
-    for sub_dir in */; do
-        [ ! -d "$sub_dir" ] && continue
-        if [ -d "${sub_dir}.git" ] && { [ -f "${sub_dir}build.gradle" ] || [ -f "${sub_dir}build.gradle.kts" ] || [ -f "${sub_dir}package.json" ] || [ -f "${sub_dir}pom.xml" ] || [ -f "${sub_dir}go.mod" ] || [ -f "${sub_dir}Cargo.toml" ] || [ -f "${sub_dir}pyproject.toml" ]; }; then
-            sub_project_count=$((sub_project_count + 1))
-            sub_projects+=("$(basename "$sub_dir")")
-        fi
-    done
+    # Detect multi-project root and, if so, let the user pick a sub-project.
+    # (bash 3.2 on macOS — no mapfile; read the newline-separated list into an array.)
+    local sub_projects=() line
+    while IFS= read -r line; do
+        [ -n "$line" ] && sub_projects+=("$line")
+    done < <(detect_multi_project_root)
 
-    if [ "$sub_project_count" -ge 2 ] && [ ! -f "build.gradle" ] && [ ! -f "package.json" ] && [ ! -f "pom.xml" ]; then
-        # This is a multi-project root — let user pick
+    if [ "${#sub_projects[@]}" -ge 2 ]; then
         echo ""
         echo -e "\033[38;5;208m\033[1mMangoLove\033[0m — Multi-project directory detected"
         echo ""
@@ -789,9 +820,9 @@ Continue from where you left off. Summarize the previous session state and ask w
             idx=$((idx + 1))
         done
         echo ""
-        read -rp "  Select project (1-${sub_project_count}): " choice
+        read -rp "  Select project (1-${#sub_projects[@]}): " choice
 
-        if [ -n "$choice" ] && [ "$choice" -ge 1 ] 2>/dev/null && [ "$choice" -le "$sub_project_count" ] 2>/dev/null; then
+        if [ -n "$choice" ] && [ "$choice" -ge 1 ] 2>/dev/null && [ "$choice" -le "${#sub_projects[@]}" ] 2>/dev/null; then
             local selected="${sub_projects[$((choice - 1))]}"
             echo -e "  \033[38;5;113m→\033[0m ${selected}"
             cd "$selected" || exit 1

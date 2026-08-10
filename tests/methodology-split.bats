@@ -23,17 +23,29 @@ setup() {
 
 @test "split: every strict.md line lands in core or a skill (only moved section header dropped)" {
     local total; total="$(wc -l < "$REPO/methodology/strict.md")"
-    [ "$total" -eq 1047 ]
-    # core(1-431,935-946,1013-1047) + skills(434-662,663-934,947-990,991-1012) 합집합이
-    # 1..1047 에서 빠뜨리는 줄은 이동된 섹션 헤더/공백(432-433)뿐이어야 한다.
-    run awk 'BEGIN{
-        split("1-431 434-662 663-934 935-946 947-990 991-1012 1013-1047", R, " ");
-        for(i in R){split(R[i],p,"-"); for(l=p[1];l<=p[2];l++) c[l]=1}
+    [ "$total" -gt 0 ]
+    # 추출 범위는 생성기에서 파싱한다 — 여기에 다시 적으면 두 번째 진실 출처가 되어
+    # strict.md 를 고칠 때마다 생성기와 테스트를 손으로 맞춰야 한다(드리프트 원인 자체).
+    local ranges
+    ranges="$(grep -oE "sed -n '[0-9]+,[0-9]+p'" "$REPO/lib/gen-methodology.sh" \
+              | sed -E "s/sed -n '([0-9]+),([0-9]+)p'/\1-\2/" | tr '\n' ' ')"
+    [ "$(printf '%s' "$ranges" | wc -w)" -eq 7 ]   # core 3구간 + 스킬 4구간
+    local missing
+    missing="$(awk -v ranges="$ranges" -v total="$total" 'BEGIN{
+        n=split(ranges, R, " ");
+        for(i=1;i<=n;i++){split(R[i],p,"-"); for(l=p[1];l<=p[2];l++) c[l]=1}
         miss="";
-        for(l=1;l<=1047;l++) if(!(l in c)) miss=miss (miss==""?"":" ") l;
+        for(l=1;l<=total;l++) if(!(l in c)) miss=miss (miss==""?"":" ") l;
         print miss
-    }'
-    [ "$output" = "432 433" ]
+    }')"
+    # 합집합이 빠뜨리는 줄은 '이동된 섹션 헤더 + 뒤 공백' 2줄뿐이어야 한다.
+    # 줄번호가 아니라 내용으로 검증한다 — strict.md 가 길어져도 이 단언은 유효하다.
+    [ "$(printf '%s' "$missing" | wc -w)" -eq 2 ]
+    local l content
+    for l in $missing; do
+        content="$(sed -n "${l}p" "$REPO/methodology/strict.md")"
+        [ "$content" = '## Large Track 워크플로우' ] || [ -z "$content" ]
+    done
 }
 
 @test "split: safety-critical procedures stay resident in core.md (not on-demand skills)" {

@@ -34,6 +34,7 @@ setup() {
     grep -q 'mangolove efficacy' "$r"
     grep -q 'mangolove eval' "$r"
     grep -q 'mangolove ab' "$r"
+    grep -q 'mangolove audit-methodology' "$r"
     grep -q 'Change-Track' "$r"
     # claude vs mangolove 차이가 문서화돼 있다(정직한 경계 포함)
     grep -q '정직한 경계' "$r"

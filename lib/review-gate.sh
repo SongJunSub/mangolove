@@ -51,6 +51,8 @@ _ml_seed_gitignore() {
     [ -f "$d/.gitignore" ] && return 0
     {
         echo "# MangoLove 게이트의 일시 상태 (자동 생성). 레포 내용이 아니다."
+        echo "# 이 파일 자신도 무시한다 — 게이트가 어느 머신에서든 다시 만든다."
+        echo ".gitignore"
         echo "dod.sh"
         echo ".dod-gate-attempts"
         echo ".review-ledger"
@@ -120,7 +122,12 @@ do_record() {
     local input skill
     input="$(cat)"
     _cd_to_hook_cwd "$input"
-    skill="$(_json_str "$input" skill_name)"
+    # 필드 이름은 런타임에서 실측했다: Skill 도구의 tool_input 은 {"skill":"simplify"} 다.
+    # 훅 문서는 skill_name 이라고 적고 있어 양쪽을 다 받는다 — 한쪽만 읽고 맞췄다가는
+    # 원장이 영영 비어 Medium 이상 커밋이 전부 막힌다(경계면 교차검증).
+    # 두 패턴은 서로 오탐하지 않는다: "skill" 뒤에 곧바로 콜론이 와야 매칭된다.
+    skill="$(_json_str "$input" skill)"
+    [ -z "$skill" ] && skill="$(_json_str "$input" skill_name)"
     [ -z "$skill" ] && exit 0
     skill="$(_normalize_skill "$skill")"
     mkdir -p "$(dirname "$LEDGER_REL")" 2>/dev/null || exit 0

@@ -33,7 +33,13 @@ _json_cmd() {
 }
 
 # PostToolUse(Skill) JSON — 실행된 스킬 이름 + cwd
+# 필드 이름은 실제 세션 트랜스크립트에서 실측한 것이다: {"skill":"simplify"}.
 _json_skill() {
+    printf '{"tool_name":"Skill","cwd":"%s","tool_input":{"skill":"%s"}}' "$REPO_DIR" "$1"
+}
+
+# 훅 문서가 적고 있는 대체 필드명. 런타임이 어느 쪽을 보내도 원장이 채워져야 한다.
+_json_skill_alt() {
     printf '{"tool_name":"Skill","cwd":"%s","tool_input":{"skill_name":"%s"}}' "$REPO_DIR" "$1"
 }
 
@@ -198,9 +204,13 @@ _stage_external_api() {
     # 단, .mangolove/ 를 통째로 무시하면 안 된다 — .mangolove/hooks/ 는 버전관리 감사 대상이다.
     printf '%s' "$(_json_skill simplify)" | bash "$GATE" record
     [ -f "$REPO_DIR/.mangolove/.gitignore" ]
-    grep -q '^.review-ledger$' "$REPO_DIR/.mangolove/.gitignore"
-    grep -q '^dod.sh$' "$REPO_DIR/.mangolove/.gitignore"
+    grep -qx '.review-ledger' "$REPO_DIR/.mangolove/.gitignore"
+    grep -qx 'dod.sh' "$REPO_DIR/.mangolove/.gitignore"
+    # 자기 자신도 무시해야 사용자 레포에 요청하지 않은 파일이 생기지 않는다.
+    grep -qx '.gitignore' "$REPO_DIR/.mangolove/.gitignore"
+    # 통째 무시(*)는 안 된다 — .mangolove/hooks/ 는 버전관리 감사 대상이다.
     ! grep -qx '\*' "$REPO_DIR/.mangolove/.gitignore"
+    [ -z "$(git -C "$REPO_DIR" status --porcelain -- .mangolove)" ]
 }
 
 @test "record: 같은 스킬을 여러 번 호출해도 원장에 한 줄만 남는다" {
@@ -208,4 +218,13 @@ _stage_external_api() {
     printf '%s' "$(_json_skill simplify)" | bash "$GATE" record
     printf '%s' "$(_json_skill "code-review:simplify")" | bash "$GATE" record
     [ "$(grep -cx simplify "$REPO_DIR/.mangolove/.review-ledger")" -eq 1 ]
+}
+
+@test "record: tool_input 의 skill 과 skill_name 을 모두 받는다 (문서와 런타임이 다르다)" {
+    # 경계면 교차검증 회귀: 한쪽 이름만 받으면 원장이 영영 비어 Medium 이상 커밋이
+    # 전부 막힌다. 실측한 런타임 필드는 skill, 훅 문서가 적은 것은 skill_name 이다.
+    printf '%s' "$(_json_skill simplify)"        | bash "$GATE" record
+    printf '%s' "$(_json_skill_alt code-review)" | bash "$GATE" record
+    grep -qx simplify    "$REPO_DIR/.mangolove/.review-ledger"
+    grep -qx code-review "$REPO_DIR/.mangolove/.review-ledger"
 }

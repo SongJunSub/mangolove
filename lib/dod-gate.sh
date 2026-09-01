@@ -43,9 +43,12 @@ _ml_seed_gitignore() {
     [ -f "$d/.gitignore" ] && return 0
     {
         echo "# MangoLove 게이트의 일시 상태 (자동 생성). 레포 내용이 아니다."
+        echo "# 이 파일 자신도 무시한다 — 게이트가 어느 머신에서든 다시 만든다."
+        echo ".gitignore"
         echo "dod.sh"
         echo ".dod-gate-attempts"
         echo ".review-ledger"
+        echo ".review-ledger.base"
     } > "$d/.gitignore" 2>/dev/null || true
 }
 

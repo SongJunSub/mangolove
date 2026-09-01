@@ -32,6 +32,21 @@ if [ -n "$cwd_field" ] && [ -d "$cwd_field" ]; then
     cd "$cwd_field" 2>/dev/null || true
 fi
 
+# .mangolove/ 는 프로젝트가 버전관리할 수도 있는 디렉토리다(.mangolove/hooks/ 는 감사 대상).
+# 그러니 통째로 무시하지 않고, 게이트가 만드는 **일시 파일만** 자기 자신을 무시하게 한다.
+# 이게 없으면 게이트를 켠 모든 레포에서 사용자가 손으로 .gitignore 를 고쳐야 한다.
+_ml_seed_gitignore() {
+    local d="./.mangolove"
+    [ -d "$d" ] || return 0
+    [ -f "$d/.gitignore" ] && return 0
+    {
+        echo "# MangoLove 게이트의 일시 상태 (자동 생성). 레포 내용이 아니다."
+        echo "dod.sh"
+        echo ".dod-gate-attempts"
+        echo ".review-ledger"
+    } > "$d/.gitignore" 2>/dev/null || true
+}
+
 DOD="./.mangolove/dod.sh"
 STATE="./.mangolove/.dod-gate-attempts"
 
@@ -66,6 +81,7 @@ fi
 # 실패 → 카운터 증가 후 block.
 attempts=$((attempts + 1))
 mkdir -p ./.mangolove 2>/dev/null || true
+_ml_seed_gitignore
 printf '%s' "$attempts" > "$STATE" 2>/dev/null || true
 {
     echo "--- MangoLove DoD gate: DoD 미통과 (시도 ${attempts}/${MAX_ATTEMPTS}) — 완료를 주장하기 전에 아래를 해결하세요 ---"

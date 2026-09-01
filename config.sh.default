@@ -28,16 +28,19 @@ MANGOLOVE_MODEL=""
 #   level for coding and agentic work. Lower it for cheap, routine turns.
 MANGOLOVE_EFFORT=""
 
-# Methodology delivery (monolith / split)
-#   monolith — inject the full strict.md methodology every session (default; behavior parity).
+# Methodology delivery (split / monolith)
 #   split    — inject a lean core.md and load heavy Spec/review procedures on-demand as
-#              cc-plugin skills. Cuts always-on tokens; falls back to monolith if incomplete.
-MANGOLOVE_METHODOLOGY_MODE=monolith
+#              cc-plugin skills (default). Always-on volume drops ~36%; track decision,
+#              approval gates and safety procedures stay resident in the core.
+#              Falls back to monolith (loudly) if core.md / cc-plugin are missing.
+#   monolith — inject the full strict.md methodology every session.
+MANGOLOVE_METHODOLOGY_MODE=split
 
 # DoD gate (on / off) — 완료 직전 ./.mangolove/dod.sh 를 Stop 훅으로 결정적 검증
 #   모델이 완료를 주장하기 전에 DoD 를 실행형 체크로 외부화하면, 통과 전까지 턴이 끝나지 않는다.
-#   기본 off(옵트인). 세션 게이트 번들에 함께 주입되므로 MANGOLOVE_SESSION_GATES=true 필요.
-MANGOLOVE_DOD_GATE=off
+#   기본 on. dod.sh 를 외부화하지 않은 턴은 즉시 통과하므로 idle 비용이 없다.
+#   세션 게이트 번들에 함께 주입되므로 MANGOLOVE_SESSION_GATES=true 필요.
+MANGOLOVE_DOD_GATE=on
 
 # Status line (on / off) — context 사용률·세션 비용·메서드러지 모드를 상태줄에 노출
 #   기본 on. mangolove 세션 동안 사용자 자체 statusLine 을 override 하므로 보존하려면 off.

@@ -163,3 +163,13 @@ _stage_external_api() {
     [[ "$output" == *"Medium"* ]]
     [[ "$output" == *"BLOCK"* ]]
 }
+
+@test "gate: 원장 디렉토리를 만들 때 .mangolove/.gitignore 를 심는다 (레포 오염 방지)" {
+    # 게이트를 켠 모든 레포에서 사용자가 손으로 .gitignore 를 고치게 만들지 않는다.
+    # 단, .mangolove/ 를 통째로 무시하면 안 된다 — .mangolove/hooks/ 는 버전관리 감사 대상이다.
+    printf '%s' "$(_json_skill simplify)" | bash "$GATE" record
+    [ -f "$REPO_DIR/.mangolove/.gitignore" ]
+    grep -q '^.review-ledger$' "$REPO_DIR/.mangolove/.gitignore"
+    grep -q '^dod.sh$' "$REPO_DIR/.mangolove/.gitignore"
+    ! grep -qx '\*' "$REPO_DIR/.mangolove/.gitignore"
+}

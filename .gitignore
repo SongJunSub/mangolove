@@ -10,8 +10,11 @@ efficacy/
 .progress.md
 
 # Runtime gate state (DoD script + review ledger + attempt counters) — 일시 상태이지
-# 레포 내용이 아니다. 방법론이 요구하는 항목을 이 레포부터 지킨다.
-.mangolove/
+# 레포 내용이 아니다. .mangolove/ 자체는 버전관리될 수 있으므로(.mangolove/hooks/)
+# 통째로 무시하지 않고 게이트가 만드는 파일만 무시한다.
+.mangolove/dod.sh
+.mangolove/.dod-gate-attempts
+.mangolove/.review-ledger
 
 # OS
 .DS_Store

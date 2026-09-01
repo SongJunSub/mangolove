@@ -34,6 +34,22 @@ GATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMPACT="$GATE_DIR/impact-score.sh"
 LEDGER_REL=".mangolove/.review-ledger"
 
+# .mangolove/ 는 프로젝트가 버전관리할 수도 있는 디렉토리다(.mangolove/hooks/ 는 감사 대상).
+# 그러니 통째로 무시하지 않고, 게이트가 만드는 **일시 파일만** 자기 자신을 무시하게 한다.
+# 이게 없으면 게이트를 켠 모든 레포에서 사용자가 손으로 .gitignore 를 고쳐야 한다.
+_ml_seed_gitignore() {
+    local d="./.mangolove"
+    [ -d "$d" ] || return 0
+    [ -f "$d/.gitignore" ] && return 0
+    {
+        echo "# MangoLove 게이트의 일시 상태 (자동 생성). 레포 내용이 아니다."
+        echo "dod.sh"
+        echo ".dod-gate-attempts"
+        echo ".review-ledger"
+    } > "$d/.gitignore" 2>/dev/null || true
+}
+
+
 # ── stdin JSON 에서 문자열 필드 하나를 꺼낸다 (jq 비의존 — 다른 게이트와 같은 방식).
 _json_str() {
     local input="$1" key="$2" raw
@@ -88,6 +104,7 @@ do_record() {
     [ -z "$skill" ] && exit 0
     skill="$(_normalize_skill "$skill")"
     mkdir -p "$(dirname "$LEDGER_REL")" 2>/dev/null || exit 0
+    _ml_seed_gitignore
     printf '%s\n' "$skill" >> "$LEDGER_REL" 2>/dev/null || true
     exit 0
 }

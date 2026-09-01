@@ -253,3 +253,18 @@ teardown() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"Plugins"* ]]
 }
+
+@test "defaults: 메서드러지 split + DoD 게이트 + 리뷰 게이트가 기본 on 이다" {
+    # 이 세 기본값은 명시적 결정의 결과다(각각 컨텍스트 예산·완료 검증·리뷰 강제).
+    # 우연히 되돌려지면 MangoLove 가 조용히 예전 동작으로 후퇴하므로 기본값 자체를 고정한다.
+    local b="$MANGOLOVE_DIR/bin/mangolove"
+    grep -qE '^MANGOLOVE_METHODOLOGY_MODE="?split"?$' "$b"
+    grep -qE '^MANGOLOVE_DOD_GATE=on$' "$b"
+    grep -qE '^MANGOLOVE_REVIEW_GATE=on$' "$b"
+}
+
+@test "doctor: split 기본에서 메서드러지 모드를 split 으로 보고한다" {
+    cd "$TEST_DIR"
+    run bash "$MANGOLOVE_DIR/bin/mangolove" doctor
+    [[ "$output" == *"Methodology mode: split"* ]]
+}

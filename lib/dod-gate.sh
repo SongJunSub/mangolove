@@ -35,6 +35,8 @@ fi
 # .mangolove/ 는 프로젝트가 버전관리할 수도 있는 디렉토리다(.mangolove/hooks/ 는 감사 대상).
 # 그러니 통째로 무시하지 않고, 게이트가 만드는 **일시 파일만** 자기 자신을 무시하게 한다.
 # 이게 없으면 게이트를 켠 모든 레포에서 사용자가 손으로 .gitignore 를 고쳐야 한다.
+# (review-gate.sh 에 같은 함수가 있다. 훅 스크립트는 서로를 source 하지 않는다 — 한 파일이
+#  없거나 깨져도 다른 게이트가 같이 죽지 않게 하는 기존 설계를 따른다.)
 _ml_seed_gitignore() {
     local d="./.mangolove"
     [ -d "$d" ] || return 0

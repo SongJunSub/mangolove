@@ -7,7 +7,7 @@
 
 set -eo pipefail
 
-MANGOLOVE_VERSION="0.6.0"
+MANGOLOVE_VERSION="0.7.0"
 MANGOLOVE_DIR="${MANGOLOVE_DIR:-$HOME/.mangolove}"
 SYSTEM_PROMPT_FILE="$MANGOLOVE_DIR/prompts/system-prompt.md"
 WORK_LOGGER="$MANGOLOVE_DIR/lib/work-logger.sh"
@@ -429,7 +429,7 @@ do_doctor() {
     echo -e "  \033[38;5;113m✓\033[0m Skills: ${skill_count}"
 
     # Methodology delivery (monolith / split) + cc-plugin health
-    echo -e "  \033[38;5;113m✓\033[0m Methodology mode: ${MANGOLOVE_METHODOLOGY_MODE:-monolith}"
+    echo -e "  \033[38;5;113m✓\033[0m Methodology mode: ${MANGOLOVE_METHODOLOGY_MODE:-split}"
     if [ -f "$CORE_METHODOLOGY_FILE" ] && [ -f "$CC_PLUGIN_DIR/.claude-plugin/plugin.json" ]; then
         if command -v claude &> /dev/null && claude plugin validate "$CC_PLUGIN_DIR" &> /dev/null; then
             echo -e "  \033[38;5;113m✓\033[0m cc-plugin: valid (core.md + skills ready for split)"
@@ -448,7 +448,7 @@ do_doctor() {
     fi
 
     # DoD gate (Stop hook) — 완료 직전 ./.mangolove/dod.sh 결정적 검증
-    if [ "${MANGOLOVE_DOD_GATE:-off}" = "on" ] && [ -f "$MANGOLOVE_DIR/lib/dod-gate.sh" ]; then
+    if [ "${MANGOLOVE_DOD_GATE:-on}" = "on" ] && [ -f "$MANGOLOVE_DIR/lib/dod-gate.sh" ]; then
         echo -e "  \033[38;5;113m✓\033[0m DoD gate: on (Stop 훅 — 완료 직전 DoD 검증)"
     else
         echo -e "  \033[38;5;220m△\033[0m DoD gate: off (MANGOLOVE_DOD_GATE)"
@@ -979,7 +979,7 @@ REVPOSTEOF
     # Stop 훅(DoD 게이트)은 MANGOLOVE_DOD_GATE=on 일 때만 병합. Stop 은 매 턴 발화하나
     # dod.sh 미외부화 시 무비용 통과하므로 idle 오버헤드가 없다.
     local stop_block=""
-    if [ "${MANGOLOVE_DOD_GATE:-off}" = "on" ] && [ -f "$dod" ]; then
+    if [ "${MANGOLOVE_DOD_GATE:-on}" = "on" ] && [ -f "$dod" ]; then
         stop_block=$(cat << STOPEOF
 ,
     "Stop": [
@@ -999,7 +999,7 @@ STOPEOF
         local eff_mode="monolith"
         [ "${USE_CC_PLUGIN:-0}" = "1" ] && eff_mode="split"
         statusline_block=$(cat << SLEOF
-  "statusLine": { "type": "command", "command": "MANGOLOVE_STATUSLINE_MODE=${eff_mode} MANGOLOVE_STATUSLINE_DOD=${MANGOLOVE_DOD_GATE:-off} bash \\"${statusline}\\"", "padding": 0 },
+  "statusLine": { "type": "command", "command": "MANGOLOVE_STATUSLINE_MODE=${eff_mode} MANGOLOVE_STATUSLINE_DOD=${MANGOLOVE_DOD_GATE:-on} bash \\"${statusline}\\"", "padding": 0 },
 SLEOF
 )
     fi

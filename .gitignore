@@ -15,6 +15,7 @@ efficacy/
 .mangolove/dod.sh
 .mangolove/.dod-gate-attempts
 .mangolove/.review-ledger
+.mangolove/.review-ledger.base
 
 # OS
 .DS_Store

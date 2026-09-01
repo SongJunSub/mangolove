@@ -33,10 +33,18 @@ set -uo pipefail
 GATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMPACT="$GATE_DIR/impact-score.sh"
 LEDGER_REL=".mangolove/.review-ledger"
+# 원장이 어느 HEAD 위에서 만들어졌는지 기록한다. 커밋이 성공해 HEAD 가 움직이면 원장은
+# 낡은 것이 되고, 다음 커밋은 자기 diff 에 대한 리뷰를 새로 요구한다.
+# 통과 시점에 원장을 지우지 **않는** 이유: PreToolUse 는 커밋 성공을 알 수 없다. 같은
+# 훅 목록의 시크릿 게이트가 커밋을 막아도 이 훅은 이미 돌았으므로, 통과 시 지우면
+# 시크릿을 고치고 재시도할 때 리뷰를 다시 요구하게 된다(리뷰는 이미 했는데).
+LEDGER_BASE_REL=".mangolove/.review-ledger.base"
 
 # .mangolove/ 는 프로젝트가 버전관리할 수도 있는 디렉토리다(.mangolove/hooks/ 는 감사 대상).
 # 그러니 통째로 무시하지 않고, 게이트가 만드는 **일시 파일만** 자기 자신을 무시하게 한다.
 # 이게 없으면 게이트를 켠 모든 레포에서 사용자가 손으로 .gitignore 를 고쳐야 한다.
+# (dod-gate.sh 에 같은 함수가 있다. 훅 스크립트는 서로를 source 하지 않는다 — 한 파일이
+#  없거나 깨져도 다른 게이트가 같이 죽지 않게 하는 기존 설계를 따른다.)
 _ml_seed_gitignore() {
     local d="./.mangolove"
     [ -d "$d" ] || return 0
@@ -46,6 +54,7 @@ _ml_seed_gitignore() {
         echo "dod.sh"
         echo ".dod-gate-attempts"
         echo ".review-ledger"
+        echo ".review-ledger.base"
     } > "$d/.gitignore" 2>/dev/null || true
 }
 
@@ -72,6 +81,17 @@ _normalize_skill() { printf '%s' "${1##*:}"; }
 
 # JSON 1줄에서 스칼라 필드 하나 (문자열/불리언 공용).
 _json_field() { printf '%s' "$1" | sed -E "s/.*\"$2\":\"?([^,\"}]+)\"?.*/\1/"; }
+
+_head_sha() { git rev-parse HEAD 2>/dev/null || echo "_no-head"; }
+
+# 원장이 만들어진 HEAD 와 현재 HEAD 가 다르면(= 그 사이에 커밋이 성공했으면) 원장을 버린다.
+_drop_stale_ledger() {
+    [ -f "$LEDGER_REL" ] || return 0
+    local base=""
+    [ -f "$LEDGER_BASE_REL" ] && base="$(cat "$LEDGER_BASE_REL" 2>/dev/null)"
+    [ "$base" = "$(_head_sha)" ] && return 0
+    rm -f "$LEDGER_REL" "$LEDGER_BASE_REL" 2>/dev/null || true
+}
 
 # ── 정책 단일 출처 ──────────────────────────────────────────────
 # 트랙별 필수 리뷰. strict.md 의 표와 이 함수가 어긋나면 tests/review-gate.bats 가 RED.
@@ -105,7 +125,10 @@ do_record() {
     skill="$(_normalize_skill "$skill")"
     mkdir -p "$(dirname "$LEDGER_REL")" 2>/dev/null || exit 0
     _ml_seed_gitignore
-    printf '%s\n' "$skill" >> "$LEDGER_REL" 2>/dev/null || true
+    _drop_stale_ledger
+    [ -f "$LEDGER_REL" ] || _head_sha > "$LEDGER_BASE_REL" 2>/dev/null || true
+    # 같은 스킬을 여러 번 호출해도 한 줄만 남긴다 — 원장은 집합이지 호출 로그가 아니다.
+    grep -qxF "$skill" "$LEDGER_REL" 2>/dev/null || printf '%s\n' "$skill" >> "$LEDGER_REL" 2>/dev/null || true
     exit 0
 }
 
@@ -114,6 +137,7 @@ do_record() {
 REVIEW_TRACK=""; REVIEW_JSON=""; REVIEW_REQUIRED=""; REVIEW_MISSING=""
 _analyze() {
     local ref="$1" json track db auth ext s missing=""
+    _drop_stale_ledger
     json="$(bash "$IMPACT" score "$ref" 2>/dev/null)" || return 1
     [ -z "$json" ] && return 1
     track="$(printf '%s' "$json" | sed -E 's/.*"track_floor":"([^"]+)".*/\1/')"
@@ -156,8 +180,8 @@ do_pretooluse() {
     _analyze "$ref" || exit 0
 
     if [ -z "$REVIEW_MISSING" ]; then
-        # 통과 — 원장을 소비한다. 다음 커밋은 자기 diff 에 대한 리뷰를 새로 요구한다.
-        rm -f "$LEDGER_REL" 2>/dev/null || true
+        # 통과. 원장은 여기서 지우지 않는다 — 커밋이 실제로 성공했는지 알 수 없기 때문이다.
+        # 커밋이 성공하면 HEAD 가 움직이고, 그때 _drop_stale_ledger 가 버린다.
         if [ -n "$REVIEW_REQUIRED" ]; then
             echo "MangoLove review gate: ${REVIEW_TRACK} 필수 리뷰 충족 (${REVIEW_REQUIRED})" >&2
         fi

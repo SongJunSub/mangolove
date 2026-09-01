@@ -100,7 +100,7 @@ _stage_external_api() {
     [[ "$output" == *"code-review"* ]]
 }
 
-@test "gate: 원장에 필수 스킬이 기록돼 있으면 통과하고 원장을 소비한다" {
+@test "gate: 원장에 필수 스킬이 기록돼 있으면 통과한다" {
     _stage_external_api
     printf '%s' "$(_json_skill simplify)"    | bash "$GATE" record
     printf '%s' "$(_json_skill code-review)" | bash "$GATE" record
@@ -108,6 +108,35 @@ _stage_external_api() {
     [ -f "$REPO_DIR/.mangolove/.review-ledger" ]
     run bash -c "printf '%s' '$(_json_cmd "git commit -m x")' | bash '$GATE' pretooluse"
     [ "$status" -eq 0 ]
+}
+
+@test "gate: 통과 후 커밋이 실패해 재시도해도 다시 막지 않는다 (원장을 미리 소비하지 않는다)" {
+    # 같은 PreToolUse 목록의 시크릿 게이트가 커밋을 막으면 이 훅은 이미 통과한 뒤다.
+    # 통과 시점에 원장을 지우면, 시크릿을 고치고 재시도할 때 이미 한 리뷰를 또 요구하게 된다.
+    _stage_external_api
+    printf '%s' "$(_json_skill simplify)"        | bash "$GATE" record
+    printf '%s' "$(_json_skill code-review)"     | bash "$GATE" record
+    printf '%s' "$(_json_skill security-review)" | bash "$GATE" record
+    run bash -c "printf '%s' '$(_json_cmd "git commit -m x")' | bash '$GATE' pretooluse"
+    [ "$status" -eq 0 ]
+    # 커밋은 실패했다고 치고(HEAD 불변) 재시도
+    run bash -c "printf '%s' '$(_json_cmd "git commit -m x")' | bash '$GATE' pretooluse"
+    [ "$status" -eq 0 ]
+}
+
+@test "gate: 커밋이 성공해 HEAD 가 움직이면 원장은 낡은 것이 되어 다음 커밋에 리뷰를 다시 요구한다" {
+    _stage_external_api
+    printf '%s' "$(_json_skill simplify)"        | bash "$GATE" record
+    printf '%s' "$(_json_skill code-review)"     | bash "$GATE" record
+    printf '%s' "$(_json_skill security-review)" | bash "$GATE" record
+    run bash -c "printf '%s' '$(_json_cmd "git commit -m x")' | bash '$GATE' pretooluse"
+    [ "$status" -eq 0 ]
+    git -C "$REPO_DIR" commit -qm "actually committed"
+    # 새 Medium 변경 + HEAD 이동 → 원장 무효
+    printf 'const r2 = await axios.post("https://api.example.com/v2", {})\n' > "$REPO_DIR/client2.js"
+    git -C "$REPO_DIR" add -A
+    run bash -c "printf '%s' '$(_json_cmd "git commit -m y")' | bash '$GATE' pretooluse"
+    [ "$status" -eq 2 ]
     [ ! -f "$REPO_DIR/.mangolove/.review-ledger" ]
 }
 
@@ -172,4 +201,11 @@ _stage_external_api() {
     grep -q '^.review-ledger$' "$REPO_DIR/.mangolove/.gitignore"
     grep -q '^dod.sh$' "$REPO_DIR/.mangolove/.gitignore"
     ! grep -qx '\*' "$REPO_DIR/.mangolove/.gitignore"
+}
+
+@test "record: 같은 스킬을 여러 번 호출해도 원장에 한 줄만 남는다" {
+    printf '%s' "$(_json_skill simplify)" | bash "$GATE" record
+    printf '%s' "$(_json_skill simplify)" | bash "$GATE" record
+    printf '%s' "$(_json_skill "code-review:simplify")" | bash "$GATE" record
+    [ "$(grep -cx simplify "$REPO_DIR/.mangolove/.review-ledger")" -eq 1 ]
 }

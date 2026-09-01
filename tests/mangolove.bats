@@ -268,3 +268,18 @@ teardown() {
     run bash "$MANGOLOVE_DIR/bin/mangolove" doctor
     [[ "$output" == *"Methodology mode: split"* ]]
 }
+
+@test "flags: off 뿐 아니라 false/0/no 도 끄기로 해석한다" {
+    # config.sh 에 MANGOLOVE_SESSION_GATES=true 같은 불리언 스타일이 섞여 있어,
+    # off 만 인정하면 false 라고 적은 사용자가 꺼졌다고 믿는데 켜져 있게 된다.
+    command -v python3 >/dev/null 2>&1 || skip "needs python3"
+    local out="$TEST_DIR/f.json"
+    local v
+    for v in off OFF false 0 no; do
+        run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'; MANGOLOVE_REVIEW_GATE=$v generate_session_settings '$out'"
+        [ "$status" -eq 0 ]
+        ! grep -q "review-gate.sh" "$out" || { echo "값 '$v' 에서 게이트가 여전히 주입됨"; false; }
+    done
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'; MANGOLOVE_REVIEW_GATE=on generate_session_settings '$out'"
+    grep -q "review-gate.sh" "$out"
+}

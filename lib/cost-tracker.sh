@@ -31,7 +31,7 @@ batch_parse_sessions() {
     local input_data
     input_data=$(cat)
     python3 -c "
-import json, os
+import json, os, re
 from collections import defaultdict
 
 # 모델별 (input, output) 달러/1M 토큰. cache write=input*1.25, read=input*0.1 로 유도.
@@ -57,7 +57,18 @@ FAST_PRICES = {
     'claude-opus-5': (10.0, 50.0),
 }
 
+# 세션 레코드의 model 은 변형 접미사를 달고 온다 — 실측: 'claude-opus-5[1m]'(1M 컨텍스트),
+# 그리고 과거 모델의 '-20251101' 같은 날짜 스냅샷. 정규화 없이 정확 일치 표만 보면
+# 'claude-sonnet-5[1m]' 이 접두사 폴백(sonnet 4.6 단가)으로 새어 교정한 단가가 무효가 되고,
+# fast 판정도 정확 일치라 'claude-opus-5[1m]' 의 프리미엄 과금이 통째로 빠진다.
+def normalize_model(model):
+    if not model:
+        return model
+    m = model.split('[', 1)[0]                       # [1m] 등 변형 접미사 제거
+    return re.sub(r'-20\d{6}$', '', m)                # -YYYYMMDD 날짜 스냅샷 제거
+
 def price_for(model, speed=None):
+    model = normalize_model(model)
     if speed == 'fast' and model in FAST_PRICES:
         return FAST_PRICES[model]
     if not model:

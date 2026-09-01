@@ -26,21 +26,24 @@ teardown() {
     teardown_test_env
 }
 
-# PreToolUse(Bash) JSON — 명령 + cwd
+# PreToolUse(Bash) JSON — 명령 + cwd + session_id
 _json_cmd() {
     local c="${1//\"/\\\"}"
-    printf '{"tool_name":"Bash","cwd":"%s","tool_input":{"command":"%s"}}' "$REPO_DIR" "$c"
+    printf '{"tool_name":"Bash","session_id":"%s","cwd":"%s","tool_input":{"command":"%s"}}' \
+        "${SESSION:-s1}" "$REPO_DIR" "$c"
 }
 
 # PostToolUse(Skill) JSON — 실행된 스킬 이름 + cwd
 # 필드 이름은 실제 세션 트랜스크립트에서 실측한 것이다: {"skill":"simplify"}.
 _json_skill() {
-    printf '{"tool_name":"Skill","cwd":"%s","tool_input":{"skill":"%s"}}' "$REPO_DIR" "$1"
+    printf '{"tool_name":"Skill","session_id":"%s","cwd":"%s","tool_input":{"skill":"%s"}}' \
+        "${SESSION:-s1}" "$REPO_DIR" "$1"
 }
 
 # 훅 문서가 적고 있는 대체 필드명. 런타임이 어느 쪽을 보내도 원장이 채워져야 한다.
 _json_skill_alt() {
-    printf '{"tool_name":"Skill","cwd":"%s","tool_input":{"skill_name":"%s"}}' "$REPO_DIR" "$1"
+    printf '{"tool_name":"Skill","session_id":"%s","cwd":"%s","tool_input":{"skill_name":"%s"}}' \
+        "${SESSION:-s1}" "$REPO_DIR" "$1"
 }
 
 # Medium 이상이 되도록 파일 N개를 스테이징한다 (파일 6개 = +5, 그 위에 외부 API 신호로 승격).
@@ -227,4 +230,57 @@ _stage_external_api() {
     printf '%s' "$(_json_skill_alt code-review)" | bash "$GATE" record
     grep -qx simplify    "$REPO_DIR/.mangolove/.review-ledger"
     grep -qx code-review "$REPO_DIR/.mangolove/.review-ledger"
+}
+
+# ── 코드 리뷰에서 나온 회귀들 ──────────────────────────────────
+
+@test "gate: 멀티라인 명령의 git commit 도 잡는다 (JSON 의 \\n 이 단어 경계를 지운다)" {
+    # command 는 JSON 문자열이라 개행이 역슬래시+n 두 글자로 온다. 되돌리지 않으면
+    # 둘째 줄 git 앞 글자가 'n'(영숫자)이라 경계에 안 걸려 명령 전체가 게이트를 빠져나간다.
+    _stage_external_api
+    # JSON 안에서의 개행은 역슬래시+n 두 글자다 — 런타임이 실제로 보내는 형태 그대로 쓴다.
+    run bash -c "printf '%s' '$(_json_cmd 'git add -A\ngit commit -m x')' | bash '$GATE' pretooluse"
+    [ "$status" -eq 2 ]
+}
+
+@test "gate: 여러 줄이어도 커밋이 없으면 통과한다 (오탐 방지)" {
+    _stage_external_api
+    run bash -c "printf '%s' '$(_json_cmd 'git log --grep=commit\necho done')' | bash '$GATE' pretooluse"
+    [ "$status" -eq 0 ]
+}
+
+@test "gate: -a 가 commit 바로 뒤가 아니어도 워킹트리로 넓힌다" {
+    _stage_external_api
+    git -C "$REPO_DIR" commit -qm base
+    printf 'const r2 = await axios.post("https://api.example.com/v2", {})\n' >> "$REPO_DIR/client.js"
+    run bash -c "printf '%s' '$(_json_cmd "git commit -m msg -a")' | bash '$GATE' pretooluse"
+    [ "$status" -eq 2 ]
+}
+
+@test "gate: 다른 세션의 원장은 오늘의 커밋을 통과시키지 않는다" {
+    # 원장은 파일이라 세션을 넘어 남는다. HEAD 만으로 무효화하면 어제 돌린 리뷰가
+    # 오늘의 첫 커밋을 통과시킨다. 차단 메시지가 "이 세션에서"라고 말하는 것과도 어긋난다.
+    _stage_external_api
+    SESSION=s1
+    printf '%s' "$(_json_skill simplify)"        | bash "$GATE" record
+    printf '%s' "$(_json_skill code-review)"     | bash "$GATE" record
+    printf '%s' "$(_json_skill security-review)" | bash "$GATE" record
+    run bash -c "printf '%s' '$(SESSION=s1; _json_cmd "git commit -m x")' | bash '$GATE' pretooluse"
+    [ "$status" -eq 0 ]
+    run bash -c "printf '%s' '$(SESSION=s2; _json_cmd "git commit -m x")' | bash '$GATE' pretooluse"
+    [ "$status" -eq 2 ]
+}
+
+@test "gate: .mangolove/.review-skip 은 1회용 우회이고 소비된다" {
+    # 환경변수 우회는 훅에 닿지 않는다(훅은 Claude Code 프로세스 환경에서 뜬다).
+    # 세션 도중 막혔을 때 에이전트가 실제로 쓸 수 있는 경로가 있어야 한다.
+    _stage_external_api
+    mkdir -p "$REPO_DIR/.mangolove"
+    touch "$REPO_DIR/.mangolove/.review-skip"
+    run bash -c "printf '%s' '$(_json_cmd "git commit -m x")' | bash '$GATE' pretooluse"
+    [ "$status" -eq 0 ]
+    [ ! -f "$REPO_DIR/.mangolove/.review-skip" ]
+    # 소비됐으므로 다음 커밋은 다시 막힌다
+    run bash -c "printf '%s' '$(_json_cmd "git commit -m x")' | bash '$GATE' pretooluse"
+    [ "$status" -eq 2 ]
 }

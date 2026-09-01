@@ -68,6 +68,15 @@ fi
 # ─────────────────────────────────────────────
 # Preflight check
 # ─────────────────────────────────────────────
+# 끄기로 해석하는 값들 — config.sh 에 true/false 스타일이 섞여 있어 off 만 인정하면
+# MANGOLOVE_REVIEW_GATE=false 라고 적은 사용자가 꺼졌다고 믿는데 켜져 있게 된다.
+_ml_is_off() {
+    case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+        off|false|0|no|disabled) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 check_dependencies() {
     if ! command -v claude &> /dev/null; then
         echo ""
@@ -455,14 +464,14 @@ do_doctor() {
     fi
 
     # Review gate — 커밋 경계에서 트랙별 필수 리뷰 실행 여부를 결정적으로 대조
-    if [ "${MANGOLOVE_REVIEW_GATE:-on}" != "off" ] && [ -f "$MANGOLOVE_DIR/lib/review-gate.sh" ]; then
+    if ! _ml_is_off "${MANGOLOVE_REVIEW_GATE:-on}" && [ -f "$MANGOLOVE_DIR/lib/review-gate.sh" ]; then
         echo -e "  \033[38;5;113m✓\033[0m Review gate: on (Medium 이상 커밋에 필수 리뷰 강제)"
     else
         echo -e "  \033[38;5;220m△\033[0m Review gate: off (MANGOLOVE_REVIEW_GATE)"
     fi
 
     # Status line
-    if [ "${MANGOLOVE_STATUSLINE:-on}" != "off" ] && [ -f "$MANGOLOVE_DIR/lib/statusline.sh" ]; then
+    if ! _ml_is_off "${MANGOLOVE_STATUSLINE:-on}" && [ -f "$MANGOLOVE_DIR/lib/statusline.sh" ]; then
         echo -e "  \033[38;5;113m✓\033[0m Status line: on (context 사용률·비용·모드)"
     else
         echo -e "  \033[38;5;220m△\033[0m Status line: off (MANGOLOVE_STATUSLINE)"
@@ -956,7 +965,7 @@ generate_session_settings() {
     # 남기고, PreToolUse(Bash) 로 git commit 시점에 코드가 계산한 트랙과 대조한다.
     # 자기보고가 아니라 도구 호출 사실이 근거다.
     local review_pre="" review_post=""
-    if [ "${MANGOLOVE_REVIEW_GATE:-on}" != "off" ] && [ -f "$review" ]; then
+    if ! _ml_is_off "${MANGOLOVE_REVIEW_GATE:-on}" && [ -f "$review" ]; then
         review_pre=$(cat << REVPREEOF
 ,
           { "type": "command", "command": "bash \\"${review}\\" pretooluse" }
@@ -995,7 +1004,7 @@ STOPEOF
 
     # 상태줄: context 사용률·비용·모드 노출. MANGOLOVE_STATUSLINE=off 로 비활성(사용자 statusLine 보존).
     local statusline_block=""
-    if [ "${MANGOLOVE_STATUSLINE:-on}" != "off" ] && [ -f "$statusline" ]; then
+    if ! _ml_is_off "${MANGOLOVE_STATUSLINE:-on}" && [ -f "$statusline" ]; then
         local eff_mode="monolith"
         [ "${USE_CC_PLUGIN:-0}" = "1" ] && eff_mode="split"
         statusline_block=$(cat << SLEOF

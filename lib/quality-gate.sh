@@ -25,12 +25,18 @@ if [ "$MODE" = "pretooluse" ]; then
     raw="$(printf '%s' "$input" | grep -oE '"command"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"' | head -1)"
     cmd="${raw#*\"command\"*:*\"}"
     cmd="${cmd%\"}"
+    # JSON 문자열이라 개행이 역슬래시+n 두 글자로 온다. 그대로 매칭하면 둘째 줄 git 앞
+    # 글자가 'n'(영숫자)이라 단어 경계에 안 걸려, 멀티라인 명령의 커밋이 통째로 스캔을
+    # 빠져나간다(시크릿 게이트가 조용히 꺼지는 경로였다). 실제 개행으로 되돌려 줄 단위 매칭.
+    cmd="$(printf '%s' "$cmd" | awk '{gsub(/\\n/,"\n"); gsub(/\\t/," "); print}')"
     # git 을 단어 경계로 잡고, 옵션 토큰(-C dir 등 인자 동반 포함)을 건너뛴 뒤 commit 서브커맨드만 매칭
-    if ! printf '%s' "$cmd" | grep -qE '(^|[^[:alnum:]_])git([[:space:]]+-[^[:space:]]+([[:space:]]+[^-][^[:space:]]*)?)*[[:space:]]+commit([[:space:]]|$)'; then
+    commit_line="$(printf '%s\n' "$cmd" | grep -E '(^|[^[:alnum:]_])git([[:space:]]+-[^[:space:]]+([[:space:]]+[^-][^[:space:]]*)?)*[[:space:]]+commit([[:space:]]|$)' | head -1)"
+    if [ -z "$commit_line" ]; then
         exit 0
     fi
-    # git commit -a/-am 은 tracked 변경을 자동 스테이징하므로 시크릿 스캔을 인덱스+워킹트리(HEAD)로 확대
-    if printf '%s' "$cmd" | grep -qE 'commit[[:space:]]+(-[a-zA-Z]*a|--all)'; then
+    # git commit -a/-am 은 tracked 변경을 자동 스테이징하므로 시크릿 스캔을 인덱스+워킹트리(HEAD)로 확대.
+    # 플래그가 commit 바로 뒤에 없어도(git commit -m msg -a) 잡는다 — 넓게 스캔하는 쪽이 안전하다.
+    if printf '%s' "${commit_line#*commit}" | grep -qE '(^|[[:space:]])(--all|-[a-zA-Z]*a[a-zA-Z]*)([[:space:]]|$)'; then
         SECRET_DIFF_REF="HEAD"
     fi
     # 세션 hook 으로 다른 cwd 에서 실행될 수 있으므로 stdin 의 cwd 로 이동해 프로젝트를 정확히 식별

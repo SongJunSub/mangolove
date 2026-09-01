@@ -121,3 +121,29 @@ _run_cost() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"25.00"* ]]
 }
+
+# ── 모델 id 변형 접미사 (실측: 'claude-opus-5[1m]' 이 실제 세션 레코드에 존재한다) ──
+# 정규화가 없으면 [1m] 이 붙은 순간 정확 일치 표를 빗나가 접두사 폴백으로 새고,
+# 교정한 Sonnet 5 단가와 fast 프리미엄 과금이 조용히 무효가 된다.
+
+@test "sonnet 5 [1m] 변형도 sonnet 5 단가(\$10/M) — 접두사 폴백(\$15) 아님" {
+    _write_output_only_session "claude-sonnet-5[1m]" 1000000 "$PROJ_DIR/s5m.jsonl"
+    _run_cost
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"10.00"* ]]
+    [[ "$output" != *"15.00"* ]]
+}
+
+@test "opus 5 [1m] fast 도 fast 단가(\$50/M) — 정확 일치 실패로 표준 단가 되지 않는다" {
+    _write_output_only_session_speed "claude-opus-5[1m]" 1000000 "fast" "$PROJ_DIR/o5mf.jsonl"
+    _run_cost
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"50.00"* ]]
+}
+
+@test "날짜 스냅샷 접미사(-20251001)도 기본 모델 단가로 정규화된다" {
+    _write_output_only_session "claude-haiku-4-5-20251001" 1000000 "$PROJ_DIR/h5d.jsonl"
+    _run_cost
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"5.00"* ]]
+}

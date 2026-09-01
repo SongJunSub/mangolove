@@ -25,7 +25,9 @@
 #   review-gate.sh required <track> <db> <auth> <ext>   필수 스킬 목록 출력 — 정책 단일 출처.
 #   review-gate.sh status [ref] 사람용: 계산된 트랙 + 원장 + 부족분.
 #
-# 우회(감사됨): MANGOLOVE_SKIP_REVIEW=1
+# 우회(감사됨): .mangolove/.review-skip 파일(1회용, 세션 도중 가능)
+#               또는 mangolove 실행 전에 export 한 MANGOLOVE_SKIP_REVIEW=1
+#               (훅은 Claude Code 프로세스 환경에서 뜨므로 명령 앞 VAR=1 은 닿지 않는다)
 # 비활성: MANGOLOVE_REVIEW_GATE=off (훅 자체가 주입되지 않음)
 # ─────────────────────────────────────────────
 set -uo pipefail
@@ -39,6 +41,8 @@ LEDGER_REL=".mangolove/.review-ledger"
 # 훅 목록의 시크릿 게이트가 커밋을 막아도 이 훅은 이미 돌았으므로, 통과 시 지우면
 # 시크릿을 고치고 재시도할 때 리뷰를 다시 요구하게 된다(리뷰는 이미 했는데).
 LEDGER_BASE_REL=".mangolove/.review-ledger.base"
+# 세션 도중 쓸 수 있는 1회용 우회 파일. 환경변수 우회는 훅에 닿지 않기 때문에 필요하다.
+SKIP_REL=".mangolove/.review-skip"
 
 # .mangolove/ 는 프로젝트가 버전관리할 수도 있는 디렉토리다(.mangolove/hooks/ 는 감사 대상).
 # 그러니 통째로 무시하지 않고, 게이트가 만드는 **일시 파일만** 자기 자신을 무시하게 한다.
@@ -57,6 +61,7 @@ _ml_seed_gitignore() {
         echo ".dod-gate-attempts"
         echo ".review-ledger"
         echo ".review-ledger.base"
+        echo ".review-skip"
     } > "$d/.gitignore" 2>/dev/null || true
 }
 
@@ -77,6 +82,17 @@ _cd_to_hook_cwd() {
     if [ -n "$c" ] && [ -d "$c" ]; then cd "$c" 2>/dev/null || true; fi
 }
 
+# tool_input.command 는 JSON 문자열이라 개행이 역슬래시+n 두 글자로 온다. 그대로 정규식에
+# 태우면 둘째 줄 git 앞 글자가 'n'(영숫자)이라 단어 경계에 걸리지 않고, 멀티라인 명령이
+# 통째로 게이트를 빠져나간다(실측: 이 머신의 실제 커밋 호출 411건 중 84건, 20%).
+# 실제 개행으로 되돌린 뒤 grep 이 줄 단위로 보게 한다.
+_unescape_cmd() { printf '%s' "$1" | awk '{gsub(/\\n/,"\n"); gsub(/\\t/," "); print}'; }
+
+# git 을 단어 경계로 잡고 옵션 토큰을 건너뛴 뒤 commit 서브커맨드만 매칭한다
+# (git log --grep=commit 같은 비커밋은 통과). 매칭된 줄을 출력한다.
+GIT_COMMIT_RE='(^|[^[:alnum:]_])git([[:space:]]+-[^[:space:]]+([[:space:]]+[^-][^[:space:]]*)?)*[[:space:]]+commit([[:space:]]|$)'
+_commit_line() { printf '%s\n' "$1" | grep -E "$GIT_COMMIT_RE" | head -1; }
+
 # 플러그인 스킬은 "<plugin>:<skill>" 로 들어온다(code-review:code-review).
 # 마지막 콜론 뒤만 취해 내장/플러그인 경로를 같은 이름으로 취급한다.
 _normalize_skill() { printf '%s' "${1##*:}"; }
@@ -86,12 +102,23 @@ _json_field() { printf '%s' "$1" | sed -E "s/.*\"$2\":\"?([^,\"}]+)\"?.*/\1/"; }
 
 _head_sha() { git rev-parse HEAD 2>/dev/null || echo "_no-head"; }
 
-# 원장이 만들어진 HEAD 와 현재 HEAD 가 다르면(= 그 사이에 커밋이 성공했으면) 원장을 버린다.
+# 원장의 유효 범위를 한 줄로 적는다: "<session_id>\t<head_sha>".
+# HEAD 가 움직였으면(= 커밋이 성공했으면) 그 리뷰는 이미 소진된 것이고,
+# 세션이 바뀌었으면 어제 돌린 리뷰가 오늘의 첫 커밋을 통과시키면 안 된다.
+# session 인자가 비면 세션 비교를 건너뛴다(터미널에서 status 를 볼 때).
+_ledger_stamp() { printf '%s\t%s' "${1:-}" "$(_head_sha)"; }
+
 _drop_stale_ledger() {
+    local session="${1:-}"
     [ -f "$LEDGER_REL" ] || return 0
-    local base=""
+    local base="" b_session b_head
     [ -f "$LEDGER_BASE_REL" ] && base="$(cat "$LEDGER_BASE_REL" 2>/dev/null)"
-    [ "$base" = "$(_head_sha)" ] && return 0
+    b_session="${base%%	*}"
+    b_head="${base##*	}"
+    if [ "$b_head" = "$(_head_sha)" ]; then
+        [ -z "$session" ] && return 0
+        [ "$b_session" = "$session" ] && return 0
+    fi
     rm -f "$LEDGER_REL" "$LEDGER_BASE_REL" 2>/dev/null || true
 }
 
@@ -119,21 +146,22 @@ required_skills() {
 
 # ── record: 실행된 스킬을 원장에 append (PostToolUse). 절대 실패로 turn 을 막지 않는다.
 do_record() {
-    local input skill
+    local input skill session
     input="$(cat)"
     _cd_to_hook_cwd "$input"
     # 필드 이름은 런타임에서 실측했다: Skill 도구의 tool_input 은 {"skill":"simplify"} 다.
     # 훅 문서는 skill_name 이라고 적고 있어 양쪽을 다 받는다 — 한쪽만 읽고 맞췄다가는
     # 원장이 영영 비어 Medium 이상 커밋이 전부 막힌다(경계면 교차검증).
     # 두 패턴은 서로 오탐하지 않는다: "skill" 뒤에 곧바로 콜론이 와야 매칭된다.
+    session="$(_json_str "$input" session_id)"
     skill="$(_json_str "$input" skill)"
     [ -z "$skill" ] && skill="$(_json_str "$input" skill_name)"
     [ -z "$skill" ] && exit 0
     skill="$(_normalize_skill "$skill")"
     mkdir -p "$(dirname "$LEDGER_REL")" 2>/dev/null || exit 0
     _ml_seed_gitignore
-    _drop_stale_ledger
-    [ -f "$LEDGER_REL" ] || _head_sha > "$LEDGER_BASE_REL" 2>/dev/null || true
+    _drop_stale_ledger "$session"
+    [ -f "$LEDGER_REL" ] || _ledger_stamp "$session" > "$LEDGER_BASE_REL" 2>/dev/null || true
     # 같은 스킬을 여러 번 호출해도 한 줄만 남긴다 — 원장은 집합이지 호출 로그가 아니다.
     grep -qxF "$skill" "$LEDGER_REL" 2>/dev/null || printf '%s\n' "$skill" >> "$LEDGER_REL" 2>/dev/null || true
     exit 0
@@ -143,8 +171,8 @@ do_record() {
 #    반환 1 = impact 계산 실패(비-git 등) → 호출자는 fail-open 한다.
 REVIEW_TRACK=""; REVIEW_JSON=""; REVIEW_REQUIRED=""; REVIEW_MISSING=""
 _analyze() {
-    local ref="$1" json track db auth ext s missing=""
-    _drop_stale_ledger
+    local ref="$1" session="${2:-}" json track db auth ext s missing=""
+    _drop_stale_ledger "$session"
     json="$(bash "$IMPACT" score "$ref" 2>/dev/null)" || return 1
     [ -z "$json" ] && return 1
     track="$(printf '%s' "$json" | sed -E 's/.*"track_floor":"([^"]+)".*/\1/')"
@@ -163,13 +191,12 @@ _analyze() {
 
 # ── pretooluse: git commit 경계에서만 게이트.
 do_pretooluse() {
-    local input cmd ref s rec
+    local input cmd line after ref s rec
     input="$(cat)"
-    cmd="$(_json_str "$input" command)"
+    cmd="$(_unescape_cmd "$(_json_str "$input" command)")"
 
-    # git 을 단어 경계로 잡고 옵션 토큰을 건너뛴 뒤 commit 서브커맨드만 매칭한다
-    # (quality-gate.sh 와 같은 규칙 — git log --grep=commit 같은 비커밋은 통과).
-    printf '%s' "$cmd" | grep -qE '(^|[^[:alnum:]_])git([[:space:]]+-[^[:space:]]+([[:space:]]+[^-][^[:space:]]*)?)*[[:space:]]+commit([[:space:]]|$)' || exit 0
+    line="$(_commit_line "$cmd")"
+    [ -n "$line" ] || exit 0
 
     _cd_to_hook_cwd "$input"
     git rev-parse --git-dir >/dev/null 2>&1 || exit 0
@@ -178,13 +205,26 @@ do_pretooluse() {
         echo "MangoLove review gate: MANGOLOVE_SKIP_REVIEW=1 (게이트 우회 — 감사 대상)" >&2
         exit 0
     fi
+    # 환경변수 우회는 mangolove 실행 **전에** export 돼 있어야 한다. 훅은 Claude Code
+    # 프로세스의 환경에서 뜨므로, 명령 앞에 붙인 VAR=1 은 훅에 닿지 않는다. 세션 도중
+    # 우회해야 할 때를 위해 에이전트가 직접 쓸 수 있는 파일 경로를 둔다(1회용, 감사됨).
+    if [ -f "$SKIP_REL" ]; then
+        rm -f "$SKIP_REL" 2>/dev/null || true
+        echo "MangoLove review gate: .mangolove/.review-skip 으로 1회 우회 (감사 대상)" >&2
+        rec="$GATE_DIR/efficacy-recorder.sh"
+        if [ -f "$rec" ]; then bash "$rec" record-block review "bypassed" 2>/dev/null || true; fi
+        exit 0
+    fi
 
     # commit -a/--all 은 tracked 변경을 자동 스테이징하므로 판정 범위를 워킹트리로 넓힌다.
+    # 플래그가 commit 바로 뒤에 없어도(예: git commit -m msg -a) 잡아야 한다. 커밋 메시지
+    # 안의 " -a " 를 오탐하면 범위가 넓어질 뿐이라 안전한 방향으로 틀린다.
     ref="--staged"
-    if printf '%s' "$cmd" | grep -qE 'commit[[:space:]]+(-[a-zA-Z]*a|--all)'; then ref="--working"; fi
+    after="${line#*commit}"
+    if printf '%s' "$after" | grep -qE '(^|[[:space:]])(--all|-[a-zA-Z]*a[a-zA-Z]*)([[:space:]]|$)'; then ref="--working"; fi
 
     # impact 계산 실패는 fail-open — 게이트가 작업을 인질로 잡지 않는다.
-    _analyze "$ref" || exit 0
+    _analyze "$ref" "$(_json_str "$input" session_id)" || exit 0
 
     if [ -z "$REVIEW_MISSING" ]; then
         # 통과. 원장은 여기서 지우지 않는다 — 커밋이 실제로 성공했는지 알 수 없기 때문이다.
@@ -204,7 +244,10 @@ do_pretooluse() {
         for s in $REVIEW_MISSING; do echo "  - /${s}"; done
         echo ""
         echo "생략을 사후에 보고하지 말고 실행하세요. 과하다고 판단되면 실행하는 대신"
-        echo "**커밋 전에** 사용자에게 물으세요. 부득이한 우회(감사됨): MANGOLOVE_SKIP_REVIEW=1"
+        echo "**커밋 전에** 사용자에게 물으세요."
+        echo "부득이한 1회 우회(감사됨): touch .mangolove/.review-skip 후 다시 커밋"
+        echo "(MANGOLOVE_SKIP_REVIEW=1 은 mangolove 실행 전에 export 돼 있어야 합니다 —"
+        echo " 명령 앞에 붙인 값은 훅에 닿지 않습니다.)"
     } >&2
 
     rec="$GATE_DIR/efficacy-recorder.sh"

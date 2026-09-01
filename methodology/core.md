@@ -172,6 +172,7 @@ Change-Track: <Trivial|Small|Medium|Large>
   **under-triage**(선언 트랙이 실제 영향도보다 낮음 — 무거운 리뷰/Spec 단계가 누락됐을 신호)를 집계한다.
 - 미기재 시 측정에서 제외될 뿐(거짓 통과로 세지 않음), 동작·게이트에는 영향 없다.
 - Conventional Commits footer 규칙과 동일 위치(`Co-Authored-By:` 등과 같은 묶음). 값은 한 단어.
+- **`Co-Authored-By:` 와 같은 문단에 둔다. 사이에 빈 줄을 넣지 않는다.** `git interpret-trailers` 는 메시지의 **마지막 문단만** 트레일러로 보므로, 빈 줄로 떨어져 있으면 `Change-Track:` 이 조용히 측정에서 빠진다. 에러도 경고도 없고 커밋은 정상 생성되므로 알아채기 어렵다. 확인: `mangolove impact triage-commit <sha>` 가 `undeclared` 로 나오면 이 경우다.
 
 ## 트랙 내 단계 스킵 금지
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # ─────────────────────────────────────────────
-# MangoLove — DoD gate (Stop hook) 계약 테스트
+# MangoLove: DoD gate (Stop hook) 계약 테스트
 # dod.sh 없음→allow / PASS→allow+제거 / FAIL→block(exit2) / MAX→backstop / 우회 / cwd 파싱
 # ─────────────────────────────────────────────
 
@@ -41,7 +41,7 @@ run_gate() { printf '%s' "$JSON" | "$GATE"; }
     [ -f "$PROJ/.mangolove/dod.sh" ]   # 실패 시 dod.sh 유지(재검증)
 }
 
-@test "dod-gate: backstop — after MAX attempts, release gate (exit 0)" {
+@test "dod-gate: backstop: after MAX attempts, release gate (exit 0)" {
     printf '#!/usr/bin/env bash\nexit 1\n' > "$PROJ/.mangolove/dod.sh"
     echo 3 > "$PROJ/.mangolove/.dod-gate-attempts"
     run run_gate

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────
-# MangoLove — status line
+# MangoLove: status line
 # settings.json 의 statusLine 로 주입된다(claude --settings). stdin=JSON.
 # context window 사용률·세션 비용·메서드러지 모드를 한 줄로 노출해 다이어트 효과를 가시화한다.
 # (context_window.used_percentage, cost.total_cost_usd, model.display_name 등은 claude 가 제공.)
@@ -9,7 +9,7 @@
 # ─────────────────────────────────────────────
 set -uo pipefail
 
-# 스크립트를 -c 로 전달한다 — 이렇게 해야 python 의 stdin 이 (heredoc 이 아니라) 파이프된 JSON 이 된다.
+# 스크립트를 -c 로 전달한다: 이렇게 해야 python 의 stdin 이 (heredoc 이 아니라) 파이프된 JSON 이 된다.
 # python3 로 파싱해 중첩 필드/null 을 견고하게 처리한다. MangoLove 는 python3 를 요구한다.
 _ML_SL_PY=$(cat <<'PY'
 import sys, os, json
@@ -56,7 +56,7 @@ if isinstance(used, (int, float)):
 elif g("exceeds_200k_tokens") is True:
     parts.append(f"{RED}ctx >200k{R}")
 else:
-    parts.append(f"{DIM}ctx —{R}")
+    parts.append(f"{DIM}ctx -{R}")
 
 cost = g("cost.total_cost_usd")
 if isinstance(cost, (int, float)) and cost > 0:

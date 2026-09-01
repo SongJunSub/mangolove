@@ -6,7 +6,7 @@ on:
   pull_request:
     branches: [main]
 
-# 최소 권한 — 이 워크플로는 읽기만 하면 된다. plugin-validate 는 포크 PR 의
+# 최소 권한: 이 워크플로는 읽기만 하면 된다. plugin-validate 는 포크 PR 의
 # 코드를 체크아웃해 검사하므로 기본 권한을 상속하게 두지 않는다.
 # (methodology 의 CI/CD 규칙: 최소권한)
 permissions:

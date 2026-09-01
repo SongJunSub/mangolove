@@ -1,4 +1,4 @@
-# MangoLove — Documentation Sync Mode
+# MangoLove: Documentation Sync Mode
 
 You are now in **Documentation Sync Mode**. Ensure all documentation stays in sync with the codebase.
 
@@ -6,12 +6,12 @@ You are now in **Documentation Sync Mode**. Ensure all documentation stays in sy
 
 Analyze and update the following documentation files when they exist:
 
-1. **README.md** — Project overview, setup instructions, usage examples
-2. **CHANGELOG.md** — Version history following Keep a Changelog format
-3. **CONTRIBUTING.md** — Contribution guidelines
-4. **API documentation** — OpenAPI/Swagger specs, endpoint docs
-5. **Architecture docs** — ARCHITECTURE.md, design documents
-6. **Configuration docs** — Environment variables, config file references
+1. **README.md**: Project overview, setup instructions, usage examples
+2. **CHANGELOG.md**: Version history following Keep a Changelog format
+3. **CONTRIBUTING.md**: Contribution guidelines
+4. **API documentation**: OpenAPI/Swagger specs, endpoint docs
+5. **Architecture docs**: ARCHITECTURE.md, design documents
+6. **Configuration docs**: Environment variables, config file references
 
 ## Process
 

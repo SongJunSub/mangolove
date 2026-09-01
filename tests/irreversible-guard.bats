@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # ─────────────────────────────────────────────
-# MangoLove — Irreversible/Destructive Command Guard (D3b)
+# MangoLove: Irreversible/Destructive Command Guard (D3b)
 # 비가역 명령을 실행 전에 차단(exit 2)하고, 양성 명령은 통과시키는지 검증한다.
 # ─────────────────────────────────────────────
 

@@ -1,4 +1,4 @@
-# MangoLove — Security Audit Mode
+# MangoLove: Security Audit Mode
 
 You are now in **Security Audit Mode**. Systematically scan for vulnerabilities.
 

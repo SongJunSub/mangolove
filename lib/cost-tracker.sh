@@ -1,6 +1,6 @@
 #!/bin/bash
 # ─────────────────────────────────────────────
-# MangoLove — Cost Tracker
+# MangoLove: Cost Tracker
 # Parse Claude Code session data for token usage and cost
 # ─────────────────────────────────────────────
 
@@ -13,7 +13,7 @@ source "${MANGOLOVE_DIR}/lib/colors.sh"
 CLAUDE_DIR="$HOME/.claude"
 PROJECTS_DIR="${MANGOLOVE_COST_PROJECTS_DIR:-$CLAUDE_DIR/projects}"
 
-# 단가는 모델별로 다르다 — 세션 레코드의 message.model 에 따라 아래 batch_parse_sessions
+# 단가는 모델별로 다르다: 세션 레코드의 message.model 에 따라 아래 batch_parse_sessions
 # 의 PRICES 로 레코드 단위 적용한다. (과거엔 Opus 단가를 전 세션에 평면 적용해 경량 모델
 # 비용을 과대 계상했다. 게다가 그 Opus 값($15/$75)마저 구형이라 현행 Opus($5/$25)의 3배였다.)
 # fast mode(usage.speed=='fast')는 같은 모델의 프리미엄 단가로 별도 계산한다 (FAST_PRICES).
@@ -52,12 +52,12 @@ DEFAULT = PRICES['claude-opus-5']  # 미상 모델 → 현행 Opus 단가로 추
 
 # fast mode(usage.speed == 'fast')는 같은 모델을 더 비싸게 과금한다. 세션 jsonl 의
 # usage.speed 를 읽어 프리미엄 단가로 계산한다. 공개 단가가 확인된 모델만 싣는다
-# (미등재 모델의 fast 는 표준 단가로 계산 — 과소 계상될 수 있는 known-gap, 추정 금지).
+# (미등재 모델의 fast 는 표준 단가로 계산: 과소 계상될 수 있는 known-gap, 추정 금지).
 FAST_PRICES = {
     'claude-opus-5': (10.0, 50.0),
 }
 
-# 세션 레코드의 model 은 변형 접미사를 달고 온다 — 실측: 'claude-opus-5[1m]'(1M 컨텍스트),
+# 세션 레코드의 model 은 변형 접미사를 달고 온다: 실측: 'claude-opus-5[1m]'(1M 컨텍스트),
 # 그리고 과거 모델의 '-20251101' 같은 날짜 스냅샷. 정규화 없이 정확 일치 표만 보면
 # 'claude-sonnet-5[1m]' 이 접두사 폴백(sonnet 4.6 단가)으로 새어 교정한 단가가 무효가 되고,
 # fast 판정도 정확 일치라 'claude-opus-5[1m]' 의 프리미엄 과금이 통째로 빠진다.
@@ -176,7 +176,7 @@ show_cost() {
     fi
 
     echo ""
-    echo -e "${O}${B}MangoLove — Cost Tracker${R}"
+    echo -e "${O}${B}MangoLove: Cost Tracker${R}"
     echo -e "${DIM}──────────────────────────────────────${R}"
     echo -e "  Period: ${C}${period}${R} (since ${since_date})"
     echo ""
@@ -230,7 +230,7 @@ show_cost() {
         return 0
     fi
 
-    # Total cost — 프로젝트별(모델별 단가 적용) 비용의 합
+    # Total cost: 프로젝트별(모델별 단가 적용) 비용의 합
     total_cost=$(printf "%.2f" "$total_cost")
 
     echo -e "  ${G}Total Cost${R}"
@@ -251,7 +251,7 @@ show_cost() {
         echo -e "  ${G}By Project${R}"
         echo "$project_data" | sort -t'|' -k1 -rn | head -10 | while IFS='|' read -r cost name _ p_out _ _ _ sessions; do
             [ -z "$name" ] && continue
-            echo -e "    ${B}${name}${R} — \$${cost} (${sessions} sessions, $(format_tokens "$p_out") output)"
+            echo -e "    ${B}${name}${R}: \$${cost} (${sessions} sessions, $(format_tokens "$p_out") output)"
         done
     fi
 

@@ -1,4 +1,4 @@
-# MangoLove — TDD Mode
+# MangoLove: TDD Mode
 
 You are now in **Test-Driven Development Mode**. Follow the RED-GREEN-REFACTOR cycle strictly.
 
@@ -6,18 +6,18 @@ You are now in **Test-Driven Development Mode**. Follow the RED-GREEN-REFACTOR c
 
 Every code change MUST follow this exact sequence:
 
-### 1. RED — Write a failing test first
+### 1. RED: Write a failing test first
 - Understand the requirement
 - Write the **minimum** test that captures it
 - Run the test and **confirm it fails**
 - Do NOT write implementation code yet
 
-### 2. GREEN — Write the minimum code to pass
+### 2. GREEN: Write the minimum code to pass
 - Write only enough code to make the failing test pass
 - Do not optimize or generalize
 - Run the test and **confirm it passes**
 
-### 3. REFACTOR — Clean up while green
+### 3. REFACTOR: Clean up while green
 - Improve code structure, naming, and readability
 - Remove duplication
 - Run all tests after each change to ensure nothing breaks

@@ -1,6 +1,6 @@
 #!/bin/bash
 # ─────────────────────────────────────────────
-# 🥭 MangoLove — Plugin & Hook Manager
+# 🥭 MangoLove: Plugin & Hook Manager
 # ─────────────────────────────────────────────
 
 MANGOLOVE_DIR="${MANGOLOVE_DIR:-$HOME/.mangolove}"
@@ -21,10 +21,10 @@ _sed_i() {
 # ─────────────────────────────────────────────
 # Hook System
 # Supported hooks:
-#   on_session_start  — runs before Claude Code launches
-#   on_session_end    — runs after Claude Code exits
-#   on_prompt_build   — can append text to system prompt (stdout)
-#   on_profile_load   — runs when a project profile is loaded
+#   on_session_start: runs before Claude Code launches
+#   on_session_end: runs after Claude Code exits
+#   on_prompt_build: can append text to system prompt (stdout)
+#   on_profile_load: runs when a project profile is loaded
 # ─────────────────────────────────────────────
 
 # Execute all plugins that implement a given hook
@@ -96,7 +96,7 @@ ${result}"
 # List installed plugins
 list_plugins() {
     echo ""
-    echo -e "${O}${B}🥭 MangoLove — Plugins${R}"
+    echo -e "${O}${B}🥭 MangoLove: Plugins${R}"
     echo -e "${DIM}──────────────────────────────────────${R}"
 
     local count=0

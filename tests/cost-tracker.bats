@@ -47,7 +47,7 @@ _run_cost() {
     _run_cost
     [ "$status" -eq 0 ]
     [[ "$output" == *'$15.00'* ]]
-    # 구버그였다면 $75.00 이 나왔어야 한다 — 회귀 방지
+    # 구버그였다면 $75.00 이 나왔어야 한다: 회귀 방지
     [[ "$output" != *'$75.00'* ]]
 }
 
@@ -126,7 +126,7 @@ _run_cost() {
 # 정규화가 없으면 [1m] 이 붙은 순간 정확 일치 표를 빗나가 접두사 폴백으로 새고,
 # 교정한 Sonnet 5 단가와 fast 프리미엄 과금이 조용히 무효가 된다.
 
-@test "sonnet 5 [1m] 변형도 sonnet 5 단가(\$10/M) — 접두사 폴백(\$15) 아님" {
+@test "sonnet 5 [1m] 변형도 sonnet 5 단가(\$10/M), 접두사 폴백(\$15) 아님" {
     _write_output_only_session "claude-sonnet-5[1m]" 1000000 "$PROJ_DIR/s5m.jsonl"
     _run_cost
     [ "$status" -eq 0 ]
@@ -134,7 +134,7 @@ _run_cost() {
     [[ "$output" != *"15.00"* ]]
 }
 
-@test "opus 5 [1m] fast 도 fast 단가(\$50/M) — 정확 일치 실패로 표준 단가 되지 않는다" {
+@test "opus 5 [1m] fast 도 fast 단가(\$50/M), 정확 일치 실패로 표준 단가 되지 않는다" {
     _write_output_only_session_speed "claude-opus-5[1m]" 1000000 "fast" "$PROJ_DIR/o5mf.jsonl"
     _run_cost
     [ "$status" -eq 0 ]

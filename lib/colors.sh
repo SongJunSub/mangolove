@@ -1,6 +1,6 @@
 #!/bin/bash
 # ─────────────────────────────────────────────
-# MangoLove — Shared Color Definitions
+# MangoLove: Shared Color Definitions
 # Source this file from any lib script
 # ─────────────────────────────────────────────
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # ─────────────────────────────────────────────
-# MangoLove — Efficacy Ledger (Phase 2 / D5)
+# MangoLove: Efficacy Ledger (Phase 2 / D5)
 # 게이트/가드 차단이 실시간 기록되고, report 가 결정적 효능을 집계하는지 검증한다.
 # ─────────────────────────────────────────────
 
@@ -133,7 +133,7 @@ _git_repo() {
     python3 -c "import json; [json.loads(l) for l in open('$MANGOLOVE_DIR/efficacy/eff-json.jsonl')]"
 }
 
-# ── under-triage (Phase 2 잔여) — 선언 트랙 vs 코드 floor 갭, 분모=선언된 커밋만 ──
+# ── under-triage (Phase 2 잔여): 선언 트랙 vs 코드 floor 갭, 분모=선언된 커밋만 ──
 
 # 트레일러 포함 커밋 (현재 cwd 레포에 add+commit)
 _commit_track() {

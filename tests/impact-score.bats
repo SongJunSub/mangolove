@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # ─────────────────────────────────────────────
-# MangoLove — Impact Score (Phase 2 / D6) 결정적 트랙 분류
+# MangoLove: Impact Score (Phase 2 / D6) 결정적 트랙 분류
 # ─────────────────────────────────────────────
 
 load test_helper

@@ -1,6 +1,6 @@
 #!/bin/bash
 # ─────────────────────────────────────────────
-# MangoLove — Session Memory
+# MangoLove: Session Memory
 # Persist context across Claude Code sessions
 # ─────────────────────────────────────────────
 
@@ -134,7 +134,7 @@ show_session() {
     fi
 
     echo ""
-    echo -e "${O}${B}MangoLove — Session Memory${R}"
+    echo -e "${O}${B}MangoLove: Session Memory${R}"
     echo -e "${DIM}──────────────────────────────────────${R}"
 
     local last_date
@@ -174,7 +174,7 @@ show_session() {
 # ─────────────────────────────────────────────
 list_sessions() {
     echo ""
-    echo -e "${O}${B}MangoLove — Saved Sessions${R}"
+    echo -e "${O}${B}MangoLove: Saved Sessions${R}"
     echo -e "${DIM}──────────────────────────────────────${R}"
 
     mkdir -p "$SESSIONS_DIR"
@@ -190,7 +190,7 @@ list_sessions() {
         local path
         path=$(grep "^path:" "$session_file" 2>/dev/null | sed 's/^path: *//') || true
 
-        echo -e "  ${G}*${R} ${B}${name}${R} — ${DIM}${last_date}${R}"
+        echo -e "  ${G}*${R} ${B}${name}${R}: ${DIM}${last_date}${R}"
         echo -e "    ${DIM}${path}${R}"
         count=$((count + 1))
     done

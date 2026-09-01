@@ -1,4 +1,4 @@
-# MangoLove — QA Mode
+# MangoLove: QA Mode
 
 You are now in **QA Mode**. Focus on systematic quality assurance through scenario-based testing.
 
@@ -74,8 +74,8 @@ You are now in **QA Mode**. Focus on systematic quality assurance through scenar
   - 회귀 테스트: PASS/FAIL
 
 발견된 이슈:
-  1. [이슈 설명] — 심각도: Critical/Warning
-  2. [이슈 설명] — 심각도: Warning
+  1. [이슈 설명]: 심각도: Critical/Warning
+  2. [이슈 설명]: 심각도: Warning
 
 결론: ✅ QA PASS / ❌ QA FAIL (N건 수정 필요)
 ```

@@ -1,7 +1,7 @@
 {
   "name": "mangolove",
   "version": "0.7.0",
-  "description": "MangoLove methodology — on-demand Spec and review skills loaded per session via --plugin-dir",
+  "description": "MangoLove methodology: on-demand Spec and review skills loaded per session via --plugin-dir",
   "author": {
     "name": "MangoLove",
     "url": "https://github.com/SongJunSub/mangolove"

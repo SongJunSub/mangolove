@@ -1,6 +1,6 @@
 #!/bin/bash
 # ─────────────────────────────────────────────
-# 🥭 MangoLove — Work Logger
+# 🥭 MangoLove: Work Logger
 # Automatically logs session activity to a private GitHub repo
 # ─────────────────────────────────────────────
 
@@ -64,7 +64,7 @@ init_repo() {
     if [ ! -d "$LOCAL_REPO/.git" ]; then
         if ! gh repo view "$REPO_FULL" > /dev/null 2>&1; then
             echo "Creating private repository: ${REPO_FULL}..."
-            gh repo create "$REPO_NAME" --private --description "MangoLove AI Agent — Work Logs"
+            gh repo create "$REPO_NAME" --private --description "MangoLove AI Agent, Work Logs"
 
             mkdir -p "$LOCAL_REPO"
             (
@@ -125,7 +125,7 @@ log_session_start() {
 
     if [ ! -f "$file" ]; then
         cat > "$file" << EOF
-# 📅 ${today} — MangoLove Work Log
+# 📅 ${today}: MangoLove Work Log
 
 ---
 
@@ -145,7 +145,7 @@ EOF
     (
         cd "$LOCAL_REPO" || exit 1
         safe_git add . || true
-        safe_git commit -m "docs: session start — ${project_name} (${now})" || true
+        safe_git commit -m "docs: session start: ${project_name} (${now})" || true
         safe_git push origin main || log_error "Failed to push session start log"
     )
 }
@@ -235,7 +235,7 @@ search_logs() {
     [ ! -d "$LOCAL_REPO/logs" ] && echo "No logs found." && return 1
 
     echo ""
-    echo -e "\033[38;5;208m\033[1m🥭 MangoLove — Log Search\033[0m"
+    echo -e "\033[38;5;208m\033[1m🥭 MangoLove: Log Search\033[0m"
     echo -e "\033[2m──────────────────────────────────────\033[0m"
     echo -e "  \033[2mKeyword:\033[0m ${keyword}"
     echo ""
@@ -253,7 +253,7 @@ show_recent() {
     [ ! -d "$LOCAL_REPO/logs" ] && echo "No logs found." && return 1
 
     echo ""
-    echo -e "\033[38;5;208m\033[1m🥭 MangoLove — Recent Sessions\033[0m"
+    echo -e "\033[38;5;208m\033[1m🥭 MangoLove: Recent Sessions\033[0m"
     echo -e "\033[2m──────────────────────────────────────\033[0m"
 
     local count=0
@@ -261,7 +261,7 @@ show_recent() {
         local date_str=$(basename "$logfile" .md)
         local sessions=$(grep -c "^## 🕐 Session:" "$logfile" 2>/dev/null || echo "0")
         local commits=$(grep -c "^\- \*\*[a-f0-9]" "$logfile" 2>/dev/null || echo "0")
-        echo -e "  \033[38;5;113m▸\033[0m \033[1m${date_str}\033[0m — ${sessions} session(s), ${commits} commit(s)"
+        echo -e "  \033[38;5;113m▸\033[0m \033[1m${date_str}\033[0m: ${sessions} session(s), ${commits} commit(s)"
         count=$((count + 1))
     done
 

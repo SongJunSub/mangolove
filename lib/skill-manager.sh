@@ -1,6 +1,6 @@
 #!/bin/bash
 # ─────────────────────────────────────────────
-# MangoLove — Skill Manager
+# MangoLove: Skill Manager
 # Install, manage, and compose skill packs
 # ─────────────────────────────────────────────
 
@@ -17,7 +17,7 @@ source "${MANGOLOVE_DIR}/lib/colors.sh"
 # ─────────────────────────────────────────────
 list_skills() {
     echo ""
-    echo -e "${O}${B}MangoLove — Skills${R}"
+    echo -e "${O}${B}MangoLove: Skills${R}"
     echo -e "${DIM}──────────────────────────────────────${R}"
 
     # Built-in modes
@@ -27,8 +27,8 @@ list_skills() {
         local name
         name=$(basename "$mode_file" .md)
         local desc
-        desc=$(head -1 "$mode_file" | sed 's/^# MangoLove — //;s/ Mode$//')
-        echo -e "    ${G}*${R} ${B}${name}${R} ${DIM}(built-in)${R} — ${desc}"
+        desc=$(head -1 "$mode_file" | sed 's/^# MangoLove: //;s/ Mode$//')
+        echo -e "    ${G}*${R} ${B}${name}${R} ${DIM}(built-in)${R}: ${desc}"
     done
 
     echo ""
@@ -51,7 +51,7 @@ list_skills() {
         version=$(grep "^version:" "$manifest" 2>/dev/null | sed 's/^version: *//')
         author=$(grep "^author:" "$manifest" 2>/dev/null | sed 's/^author: *//')
 
-        echo -e "    ${C}+${R} ${B}${skill_name}${R} ${DIM}v${version}${R} — ${description}"
+        echo -e "    ${C}+${R} ${B}${skill_name}${R} ${DIM}v${version}${R}: ${description}"
         [ -n "$author" ] && echo -e "      ${DIM}by ${author}${R}"
 
         # List skill's modes/prompts

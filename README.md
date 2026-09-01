@@ -2,20 +2,20 @@
 
 > **이름의 유래**
 >
-> 제가 키우는 두 마리 진돗개 — 망고(Mango)와 사랑이(Love)의 이름에서 따왔습니다.
+> 제가 키우는 두 마리 진돗개, 망고(Mango)와 사랑이(Love)의 이름에서 따왔습니다.
 
 **Claude Code를 제대로 쓰는 방법.** `claude` 대신 `mangolove`를 실행하면 모든 세션에 위험도 기반 품질 방법론과 결정적 안전망이 함께 따라옵니다.
 
-MangoLove는 Claude Code를 감쌉니다 — 4-track 방법론을 시스템 프롬프트로 주입하고, 위험 명령과 시크릿 커밋을 실행 전에 차단하며, 실제로 무엇을 잡았는지 측정합니다. 그래서 품질이 *희망*이 아니라 *기본값이자 숫자*가 됩니다.
+MangoLove는 Claude Code를 감쌉니다. 4-track 방법론을 시스템 프롬프트로 주입하고, 위험 명령과 시크릿 커밋을 실행 전에 차단하며, 실제로 무엇을 잡았는지 측정합니다. 그래서 품질이 *희망*이 아니라 *기본값이자 숫자*가 됩니다.
 
 ## `claude` vs `mangolove`
 
-인자 없이 **`mangolove`**를 실행하면 — 내부적으로 같은 `claude`지만 — 방법론과 안전 게이트가 이미 연결된(`claude --settings`로 시작 시 주입) 대화형 세션이 뜹니다. 프로젝트에 설정 파일을 깔거나 스캐폴딩하는 단계는 없습니다 — **그냥 `mangolove`를 실행하면 됩니다.**
+인자 없이 **`mangolove`**를 실행하면, 내부적으로 같은 `claude`지만, 방법론과 안전 게이트가 이미 연결된(`claude --settings`로 시작 시 주입) 대화형 세션이 뜹니다. 프로젝트에 설정 파일을 깔거나 스캐폴딩하는 단계는 없습니다. **그냥 `mangolove`를 실행하면 됩니다.**
 
 | | `claude` (맨) | `mangolove` (bare, 대화형) |
 |---|---|---|
-| **방법론** | 없음 — 프롬프트에 전적으로 의존 | `strict.md`(4-track Change Impact Score)에서 생성한 린 코어를 시스템 프롬프트로 주입 + 무거운 절차는 온디맨드 스킬 |
-| **위험 명령** | 그대로 실행 | **실행 전 차단** — force-push, `rm -rf /`/`$PWD`, SQL `DROP`/`TRUNCATE`/`WHERE` 없는 `DELETE`, Mongo `dropDatabase`/`deleteMany({})`, `kubectl delete`, `terraform destroy` (PreToolUse 가드, exit 2) |
+| **방법론** | 없음: 프롬프트에 전적으로 의존 | `strict.md`(4-track Change Impact Score)에서 생성한 린 코어를 시스템 프롬프트로 주입 + 무거운 절차는 온디맨드 스킬 |
+| **위험 명령** | 그대로 실행 | **실행 전 차단**: force-push, `rm -rf /`/`$PWD`, SQL `DROP`/`TRUNCATE`/`WHERE` 없는 `DELETE`, Mongo `dropDatabase`/`deleteMany({})`, `kubectl delete`, `terraform destroy` (PreToolUse 가드, exit 2) |
 | **시크릿 커밋** | 미검사 | 커밋 시점에 시크릿 스캔 게이트로 **차단** |
 | **작업 분류** | 없음 | **Trivial / Small / Medium / Large** 자동 분류, 비례 워크플로우 |
 | **코드 리뷰** | 요청해야 수행 | Large 트랙에서 **find → verify** 탈상관 멀티에이전트 리뷰 |
@@ -25,15 +25,15 @@ MangoLove는 Claude Code를 감쌉니다 — 4-track 방법론을 시스템 프�
 
 **`claude`**는 의견도 오버헤드도 0인 즉석 탐색에, **`mangolove`**는 안전망·일관된 절차·측정 가능한 품질이 중요한 실제 프로젝트 작업에 쓰세요.
 
-> **리뷰 게이트의 경계**: 리뷰 게이트는 품질 장치이지 보안 경계가 아닙니다. 원장은 `PostToolUse(Skill)` 훅이 남기므로 "정말 스킬이 실행됐는가"는 결정적이지만, "그 스킬이 실제로 리뷰를 했는가"까지는 보장하지 않습니다 — 프로젝트에 `simplify` 라는 이름의 빈 스킬을 두면 게이트는 통과합니다. 의도적 우회를 막는 장치가 아니라, 잊고 지나가는 것을 막는 장치입니다. 명시적 우회는 `MANGOLOVE_SKIP_REVIEW=1` 로 감사 가능하게 남기세요.
+> **리뷰 게이트의 경계**: 리뷰 게이트는 품질 장치이지 보안 경계가 아닙니다. 원장은 `PostToolUse(Skill)` 훅이 남기므로 "정말 스킬이 실행됐는가"는 결정적이지만, "그 스킬이 실제로 리뷰를 했는가"까지는 보장하지 않습니다. 프로젝트에 `simplify` 라는 이름의 빈 스킬을 두면 게이트는 통과합니다. 의도적 우회를 막는 장치가 아니라, 잊고 지나가는 것을 막는 장치입니다. 명시적 우회는 `MANGOLOVE_SKIP_REVIEW=1` 로 감사 가능하게 남기세요.
 
-> **정직한 경계**: 방법론은 *프롬프트*로 주입됩니다 — 모델에게 따르라고 *요청*하는 것. **게이트·가드는 결정적**(exit code로 실제 차단)이지만, 산문 규율은 확률적으로 지켜집니다. MangoLove는 그 규율을 기본값으로 만들고 단단한 결정적 안전망을 더하는 것이지, 모델을 무오류로 만들지는 않습니다. 실제로 무엇이 측정되고 무엇이 안 되는지는 `mangolove eval` 참조.
+> **정직한 경계**: 방법론은 *프롬프트*로 주입됩니다. 즉 모델에게 따르라고 *요청*하는 것입니다. **게이트·가드는 결정적**(exit code로 실제 차단)이지만, 산문 규율은 확률적으로 지켜집니다. MangoLove는 그 규율을 기본값으로 만들고 단단한 결정적 안전망을 더하는 것이지, 모델을 무오류로 만들지는 않습니다. 실제로 무엇이 측정되고 무엇이 안 되는지는 `mangolove eval` 참조.
 
 ## Strict Mode: 위험도 기반 품질 워크플로우
 
 모든 작업이 **Change Impact Score**로 4개 트랙(**Trivial / Small / Medium / Large**)으로 자동 분류되고, 트랙별로 비례하는 워크플로우가 적용됩니다. 방법론의 단일 출처는 [`methodology/strict.md`](methodology/strict.md)이며 **런타임에 시스템 프롬프트로 주입**됩니다(`CLAUDE.md`에 복제하지 않으므로 낡지 않음).
 
-네 트랙은 위험도에 비례해 절차를 키웁니다 — 무거운 트랙은 가벼운 단계를 **건너뛰지 않고 추가**합니다:
+네 트랙은 위험도에 비례해 절차를 키웁니다. 무거운 트랙은 가벼운 단계를 **건너뛰지 않고 추가**합니다:
 
 | 트랙 | 언제 | 워크플로우 |
 |---|---|---|
@@ -42,26 +42,26 @@ MangoLove는 Claude Code를 감쌉니다 — 4-track 방법론을 시스템 프�
 | **Medium** | 새 비즈니스 로직, API 수정, 서비스 연동 | + Spec → 승인 → `/simplify` + `/code-review` |
 | **Large** | 신규 API, DB 스키마, 인증 변경, 대규모 리팩토링 | + 적대적 Spec 리뷰 → Product/Engineering 리뷰 → `/security-review` → 3인 탈상관 리뷰 |
 
-트랙별 **필수 리뷰**는 [`methodology/strict.md`](methodology/strict.md)의 「트랙별 필수 리뷰」 표가 단일 출처이고, [`lib/review-gate.sh`](lib/review-gate.sh)가 같은 표를 커밋 경계에서 코드로 강제합니다(아래 안전 게이트). 트랙 판정도 모델의 암산이 아니라 `mangolove impact`가 계산한 `track_floor`를 씁니다 — 산술은 코드가, 의미론은 모델이.
+트랙별 **필수 리뷰**는 [`methodology/strict.md`](methodology/strict.md)의 「트랙별 필수 리뷰」 표가 단일 출처이고, [`lib/review-gate.sh`](lib/review-gate.sh)가 같은 표를 커밋 경계에서 코드로 강제합니다(아래 안전 게이트). 트랙 판정도 모델의 암산이 아니라 `mangolove impact`가 계산한 `track_floor`를 씁니다. 산술은 코드가, 의미론은 모델이 맡습니다.
 
-트랙은 파일 수 + 신호로 계산되고, [`lib/impact-score.sh`](lib/impact-score.sh)의 결정적 floor가 점수와 무관하게 **승격 트리거**를 강제합니다 — DB 스키마 변경은 최소 **Medium**, 외부 API 연동은 최소 **Medium**, 인증 변경은 최소 **Large**. (`mangolove impact`로 임의 변경의 계산된 트랙 확인.)
+트랙은 파일 수 + 신호로 계산되고, [`lib/impact-score.sh`](lib/impact-score.sh)의 결정적 floor가 점수와 무관하게 **승격 트리거**를 강제합니다. DB 스키마 변경은 최소 **Medium**, 외부 API 연동은 최소 **Medium**, 인증 변경은 최소 **Large**. (`mangolove impact`로 임의 변경의 계산된 트랙 확인.)
 
-### 멀티에이전트 리뷰 (Medium & Large) — find → verify
+### 멀티에이전트 리뷰 (Medium & Large): find → verify
 
 리뷰는 이슈를 *찾기만* 하지 않습니다. 각 발견은 수정 대상이 되기 전에 **적대적으로 검증**됩니다:
 
-- **탈상관 렌즈** — 리뷰어를 도메인(보안 / 성능 / 비즈니스 로직)만이 아니라 *방법*(정독 / 적대적 반증 / 반례 생성)으로도 나눕니다. 같은 모델·같은 프레임은 같은 맹점을 공유하기 때문.
-- **find → verify** — 각 Critical/Major 발견은 별도 에이전트가 반증(기본값 refuted)을 시도해 살아남은 것만 수정 대상이 되고, 고위험 변경은 다수결 검증을 씁니다. 정밀도가 올라 — 그럴듯하나 틀린 발견이 불필요한 수정을 유발하지 않습니다.
+- **탈상관 렌즈**: 리뷰어를 도메인(보안 / 성능 / 비즈니스 로직)만이 아니라 *방법*(정독 / 적대적 반증 / 반례 생성)으로도 나눕니다. 같은 모델·같은 프레임은 같은 맹점을 공유하기 때문.
+- **find → verify**: 각 Critical/Major 발견은 별도 에이전트가 반증(기본값 refuted)을 시도해 살아남은 것만 수정 대상이 되고, 고위험 변경은 다수결 검증을 씁니다. 정밀도가 올라, 그럴듯하나 틀린 발견이 불필요한 수정을 유발하지 않습니다.
 - 신뢰의 근거는 **검증을 통과한 발견**이지 "N명이 동의함"이 아닙니다(상관된 동의는 독립 검증이 아님).
 
 ### 완료 보고
-무엇이 바뀌었는지, 빌드/린트/테스트 결과(산출물 경로 포함), Medium/Large는 **확정 vs 반증** 발견까지 보고합니다. 목표는 자동 코드 리뷰(Gemini, CodeRabbit 등)를 첫 제출에 통과하되 — *왜 믿을 수 있는지의 근거와 함께* — "PASS"만 보고하지 않는 것입니다.
+무엇이 바뀌었는지, 빌드/린트/테스트 결과(산출물 경로 포함), Medium/Large는 **확정 vs 반증** 발견까지 보고합니다. 목표는 자동 코드 리뷰(Gemini, CodeRabbit 등)를 첫 제출에 통과하되(*왜 믿을 수 있는지의 근거와 함께*) "PASS"만 보고하지 않는 것입니다.
 
-### 메서드러지 전달 — split / monolith
+### 메서드러지 전달: split / monolith
 방법론의 단일 출처는 [`methodology/strict.md`](methodology/strict.md)입니다. 전달 방식은 두 가지:
 
-- **`split`** (기본) — 린 [`methodology/core.md`](methodology/core.md)만 주입하고, 무거운 절차(Spec 템플릿, Large 리뷰, CI/CD, worktree)는 `cc-plugin` 네이티브 스킬로 **온디맨드 로드**(`--plugin-dir`, mangolove 세션 한정 → bare `claude`는 0 오버헤드). 안전 절차(dry-run, 메모리, 경계면)와 트랙 판정은 코어에 상주. 상시 주입 부피 **36% 감소**(69,659 → 44,315 문자).
-- **`monolith`** — strict.md 전체를 시스템 프롬프트로 주입.
+- **`split`** (기본): 린 [`methodology/core.md`](methodology/core.md)만 주입하고, 무거운 절차(Spec 템플릿, Large 리뷰, CI/CD, worktree)는 `cc-plugin` 네이티브 스킬로 **온디맨드 로드**(`--plugin-dir`, mangolove 세션 한정 → bare `claude`는 0 오버헤드). 안전 절차(dry-run, 메모리, 경계면)와 트랙 판정은 코어에 상주. 상시 주입 부피 **36% 감소**(69,659 → 44,315 문자).
+- **`monolith`**: strict.md 전체를 시스템 프롬프트로 주입.
 
 split 이 기본인 이유는 토큰 절감만이 아닙니다. 상시 주입이 길수록 개별 지시의 효력이 희석되고, 실제로 관측된 실패("Medium 트랙인데 리뷰를 돌리지 않았습니다")의 배경 원인이 그것입니다. `core.md`/스킬은 [`lib/gen-methodology.sh`](lib/gen-methodology.sh)가 strict.md에서 생성하며(손 편집 금지), `tests/methodology-split.bats`가 재생성 일치와 커버리지를 강제합니다. 되돌리기: `MANGOLOVE_METHODOLOGY_MODE=monolith`.
 
@@ -99,32 +99,32 @@ mangolove sessions            # 저장된 세션 목록
 ```bash
 mangolove impact [sha]        # 변경의 결정적 트랙/영향도 (워킹트리 또는 커밋)
 mangolove efficacy            # 게이트/가드가 실제로 막은 것 + 트랙 under-triage
-mangolove eval                # 자가평가 — impact-score 보정도 + 가드 정밀도/재현율 (정직한 known-gap 포함)
+mangolove eval                # 자가평가: impact-score 보정도 + 가드 정밀도/재현율 (정직한 known-gap 포함)
 mangolove ab                  # A/B 하니스 (방법론 vs 맨 claude): 게이트 보호 + 채점 엔진
-mangolove audit-methodology   # 방법론 파일 감사 — 섹션별 부피·강제표현 밀도·발동 0건 (삭제 후보)
+mangolove audit-methodology   # 방법론 파일 감사: 섹션별 부피·강제표현 밀도·발동 0건 (삭제 후보)
 ```
 세션 중 타이핑하는 명령이 아니라, 프로젝트에서 시스템을 점검할 때 쓰는 ops/CI용 명령입니다.
 
-`audit-methodology`는 **컨텍스트 파일이 단조 증가하는 것을 막기 위한** 명령입니다. 방법론은 줄이 늘수록 개별 지시의 효력이 희석되는데, "어떤 줄이 값을 못 내는가"를 볼 수 없으면 삭제 결정을 내릴 수 없습니다. 부피(줄/문자)·강제표현 밀도·최종수정일·게이트 발동 건수만 결정적으로 산출하고(합성 점수 없음), 삭제/유지/코드 이관 **판정은 세션에 넘깁니다** — 수치는 코드가, 판단은 모델이. 읽기 전용이라 어떤 파일도 고치지 않습니다.
+`audit-methodology`는 **컨텍스트 파일이 단조 증가하는 것을 막기 위한** 명령입니다. 방법론은 줄이 늘수록 개별 지시의 효력이 희석되는데, "어떤 줄이 값을 못 내는가"를 볼 수 없으면 삭제 결정을 내릴 수 없습니다. 부피(줄/문자)·강제표현 밀도·최종수정일·게이트 발동 건수만 결정적으로 산출하고(합성 점수 없음), 삭제/유지/코드 이관 **판정은 세션에 넘깁니다**. 수치는 코드가, 판단은 모델이 합니다. 읽기 전용이라 어떤 파일도 고치지 않습니다.
 
 ### 안전 게이트 (모든 `mangolove` 세션에서 활성)
-훅이 자동 동작합니다 — 설정이나 설치는 필요 없습니다:
-- **커밋 게이트** — 스테이징된 변경에서 시크릿(+선택적 lint/test)을 스캔해 발견 시 **커밋을 차단**.
-- **비가역 명령 가드** — force-push, 위험 루트의 `rm -rf`, 파괴적 SQL/Mongo, `kubectl delete`, `terraform destroy` 를 실행 전 차단. 의도된 실행: `MANGOLOVE_ALLOW_DANGER=1`(감사 대상).
-- **DoD 게이트**(기본 on) — Stop 훅이 완료 직전 `./.mangolove/dod.sh`(모델이 외부화한 실행형 DoD)를 검증해, **통과 전에는 턴을 끝내지 못하게** 차단. 자기채점이 아니라 코드로 닫는 검증 루프. DoD 를 외부화하지 않은 턴은 즉시 통과하므로 idle 비용이 없습니다. `MANGOLOVE_DOD_MAX_ATTEMPTS`(기본 3) 회 후 무한루프 방지 해제. 끄기: `MANGOLOVE_DOD_GATE=off`.
-- **리뷰 게이트**(기본 on) — `git commit` 시점에 staged 변경의 `track_floor`를 코드로 계산해, **Medium 이상인데 트랙별 필수 리뷰가 실행되지 않았으면 커밋을 차단**. 실행 여부의 근거는 모델의 자기보고가 아니라 PostToolUse(Skill) 훅이 남긴 원장, 즉 도구 호출 사실입니다. Trivial/Small 은 아무 것도 요구하지 않아 사소한 작업에는 무비용. 끄기: `MANGOLOVE_REVIEW_GATE=off`, 우회(감사됨): `MANGOLOVE_SKIP_REVIEW=1`.
+훅이 자동 동작합니다. 설정이나 설치는 필요 없습니다:
+- **커밋 게이트**: 스테이징된 변경에서 시크릿(+선택적 lint/test)을 스캔해 발견 시 **커밋을 차단**.
+- **비가역 명령 가드**: force-push, 위험 루트의 `rm -rf`, 파괴적 SQL/Mongo, `kubectl delete`, `terraform destroy` 를 실행 전 차단. 의도된 실행: `MANGOLOVE_ALLOW_DANGER=1`(감사 대상).
+- **DoD 게이트**(기본 on): Stop 훅이 완료 직전 `./.mangolove/dod.sh`(모델이 외부화한 실행형 DoD)를 검증해, **통과 전에는 턴을 끝내지 못하게** 차단. 자기채점이 아니라 코드로 닫는 검증 루프. DoD 를 외부화하지 않은 턴은 즉시 통과하므로 idle 비용이 없습니다. `MANGOLOVE_DOD_MAX_ATTEMPTS`(기본 3) 회 후 무한루프 방지 해제. 끄기: `MANGOLOVE_DOD_GATE=off`.
+- **리뷰 게이트**(기본 on): `git commit` 시점에 staged 변경의 `track_floor`를 코드로 계산해, **Medium 이상인데 트랙별 필수 리뷰가 실행되지 않았으면 커밋을 차단**. 실행 여부의 근거는 모델의 자기보고가 아니라 PostToolUse(Skill) 훅이 남긴 원장, 즉 도구 호출 사실입니다. Trivial/Small 은 아무 것도 요구하지 않아 사소한 작업에는 무비용. 끄기: `MANGOLOVE_REVIEW_GATE=off`, 우회(감사됨): `MANGOLOVE_SKIP_REVIEW=1`.
 
 차단된 건은 로컬 효능 원장에 기록돼 `mangolove efficacy`가 무엇을 잡았는지 보고합니다.
 
 ### 상태줄 (기본 on)
 모든 `mangolove` 세션의 상태줄에 **context 사용률·세션 비용·메서드러지 모드**를 노출합니다(`🥭 · Opus · proj · ctx 42% · $0.12 · split`). context window 가 가장 중요한 자원이라, 사용률을 상시 눈으로 확인해 `/clear`·`/compact` 시점을 잡을 수 있습니다. 자체 statusLine 을 쓰면 `MANGOLOVE_STATUSLINE=off`.
 
-### 커밋 트레일러 — `Change-Track:`
+### 커밋 트레일러: `Change-Track:`
 방법론은 에이전트가 사용한 트랙을 커밋 footer에 기록하도록 요청합니다:
 ```
 Change-Track: <Trivial|Small|Medium|Large>
 ```
-`mangolove efficacy`가 이 선언값을 코드가 계산한 floor와 대조해 **under-triage**(영향도보다 가볍게 선언된 변경 — 리뷰 누락 신호)를 보고합니다. 미기재 시 측정에서만 빠질 뿐 동작에는 영향 없습니다.
+`mangolove efficacy`가 이 선언값을 코드가 계산한 floor와 대조해 **under-triage**(영향도보다 가볍게 선언된 변경, 리뷰 누락 신호)를 보고합니다. 미기재 시 측정에서만 빠질 뿐 동작에는 영향 없습니다.
 
 ### 기타
 ```bash
@@ -143,14 +143,14 @@ mangolove help                # 전체 명령 목록
 - **Databases**: MySQL, PostgreSQL, MongoDB, Redis, ElasticSearch
 - **Infrastructure**: Docker, Kubernetes, GitHub Actions, Jenkins, Terraform
 
-(impact-score의 결정적 트랙 분류는 위에 더해 C#/.NET·PHP/Laravel·Ruby/Elixir의 일부 관용구도 커버합니다 — 정확한 커버리지는 `mangolove eval`이 known-gap과 함께 보고.)
+(impact-score의 결정적 트랙 분류는 위에 더해 C#/.NET·PHP/Laravel·Ruby/Elixir의 일부 관용구도 커버합니다. 정확한 커버리지는 `mangolove eval`이 known-gap과 함께 보고.)
 
 ## 요구사항
 
-- [Claude Code](https://claude.ai/claude-code) — `claude` 명령이 PATH에 있어야 함
-- [GitHub CLI](https://cli.github.com/) (`gh`) — 선택(작업 로깅용)
+- [Claude Code](https://claude.ai/claude-code): `claude` 명령이 PATH에 있어야 함
+- [GitHub CLI](https://cli.github.com/) (`gh`): 선택(작업 로깅용)
 - Git
-- python3 — 비용 추적에 필요
+- python3: 비용 추적에 필요
 
 ## 설치
 
@@ -189,7 +189,7 @@ shellcheck -x bin/mangolove lib/*.sh     # 린트
 
 ## 라이선스
 
-MIT License — 자세한 내용은 [LICENSE](LICENSE) 참조.
+MIT License, 자세한 내용은 [LICENSE](LICENSE) 참조.
 
 ---
 

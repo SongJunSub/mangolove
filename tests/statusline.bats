@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # ─────────────────────────────────────────────
-# MangoLove — status line 렌더 + 세션 설정 주입 테스트
+# MangoLove: status line 렌더 + 세션 설정 주입 테스트
 # ─────────────────────────────────────────────
 
 setup() {
@@ -18,7 +18,7 @@ setup() {
     [[ "$output" == *"myproj"* ]]
 }
 
-@test "statusline: null context → 'ctx —', zero cost hidden" {
+@test "statusline: null context → 'ctx -', zero cost hidden" {
     json='{"model":{"display_name":"Opus"},"context_window":{"used_percentage":null},"cost":{"total_cost_usd":0}}'
     run bash -c "printf '%s' '$json' | '$SL'"
     [ "$status" -eq 0 ]

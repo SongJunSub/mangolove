@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # ─────────────────────────────────────────────
-# MangoLove — A/B Harness (Phase 4 v2 skeleton)
+# MangoLove: A/B Harness (Phase 4 v2 skeleton)
 # 환경 수준 게이트 보호(실측)·결과 채점 엔진(자체검증)·정직 라벨·teeth 를 검증한다.
 # ─────────────────────────────────────────────
 
@@ -34,7 +34,7 @@ AB() { echo "$MANGOLOVE_DIR/lib/ab-harness.sh"; }
 @test "ab: report shows the gate-protection delta with honest (non-overclaiming) framing" {
     run bash "$(AB)" report
     [ "$status" -eq 0 ]
-    [[ "$output" == *"환경 차이 — 안전망"* ]]
+    [[ "$output" == *"환경 차이, 안전망"* ]]
     [[ "$output" == *"대표 위험 카테고리 5/5 차단"* ]]
     # 과장 금지: '새 측정 아님' + demo arm 명시
     [[ "$output" == *"새 측정 아님"* ]]

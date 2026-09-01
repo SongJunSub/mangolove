@@ -3,7 +3,7 @@ name: mangolove-cicd
 description: "MangoLove에서 CI/CD 워크플로우·GitHub Actions·빌드 설정을 변경할 때 사용한다. 외부 Action/CLI 실존 검증, 버전 업그레이드 시 사용처 전수 감사, 설정 대체 시 old/new diff 대조, CI/CD 최소권한·시크릿·보안 규칙을 제공한다."
 ---
 
-# MangoLove — CI/CD 작업 규칙 (mangolove-cicd)
+# MangoLove: CI/CD 작업 규칙 (mangolove-cicd)
 
 이 스킬은 strict 방법론의 **CI/CD 워크플로우 작업 규칙** 상세다. 트랙 판정·승인·안전 절차는 코어(core.md)가 단일 기준이다.
 

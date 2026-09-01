@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # ─────────────────────────────────────────────
-# MangoLove — Deterministic Self-Eval Harness (Phase 4 / v1)
+# MangoLove: Deterministic Self-Eval Harness (Phase 4 / v1)
 # 결정적 부품(impact-score 보정도, 비가역 가드 정밀도/재현율)을 라벨 픽스처로 측정하고,
 # 하니스가 회귀를 실제로 잡는지(teeth)까지 검증한다.
 # ─────────────────────────────────────────────
@@ -44,7 +44,7 @@ EVAL() { echo "$MANGOLOVE_DIR/lib/eval-harness.sh"; }
     [[ "$output" == *"known-gap"* ]]
 }
 
-# ── 하니스가 회귀를 실제로 잡는가 (teeth) — 항상 초록인 eval 은 허영 ──
+# ── 하니스가 회귀를 실제로 잡는가 (teeth): 항상 초록인 eval 은 허영 ──
 
 @test "eval: a broken guard is caught as a regression (exit 1, FN reported)" {
     # 가드를 항상-통과 스텁으로 교체 → 막아야 할 명령이 통과 → FN → 회귀 감지
@@ -63,7 +63,7 @@ EVAL() { echo "$MANGOLOVE_DIR/lib/eval-harness.sh"; }
 }
 
 @test "eval: an impact-score emitting non-track output is flagged as measurement failure (no silent inflation)" {
-    # impact-score 가 트랙이 아닌 출력/오류를 내면 — 가짜 일치나 분모 축소가 아니라 '측정실패'로 회귀 처리
+    # impact-score 가 트랙이 아닌 출력/오류를 내면: 가짜 일치나 분모 축소가 아니라 '측정실패'로 회귀 처리
     printf '#!/usr/bin/env bash\necho "Error: boom" >&2\nexit 1\n' > "$MANGOLOVE_DIR/lib/impact-score.sh"
     run bash "$(EVAL)" impact
     [ "$status" -eq 1 ]

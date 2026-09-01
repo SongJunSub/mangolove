@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────
-# MangoLove — Efficacy Ledger (Phase 2 / D5)
+# MangoLove: Efficacy Ledger (Phase 2 / D5)
 #
 # 방법론(게이트·가드·트랙)이 "실제로 무엇을 잡았나"를 결정적 신호에만 앵커해
 # 기록·집계한다. cost/stats(노력·부피)와 달리 효능(무엇을 막았나)을 측정.
@@ -11,26 +11,26 @@
 # 저장: ${MANGOLOVE_DIR:-~/.mangolove}/efficacy/<project>.jsonl (로컬 전용)
 # 절대원칙: 분자/분모는 HARD 신호(차단 exit code, git diff, git revert)에만 앵커.
 #   under-triage: floor 는 git diff 로 결정적, 분모는 '선언된' 커밋만(미선언은 거짓 통과로
-#   세지 않고 coverage 로 분리) — 선언 자체는 모델 주장이나 갭의 기준값은 코드가 강제한다.
+#   세지 않고 coverage 로 분리): 선언 자체는 모델 주장이나 갭의 기준값은 코드가 강제한다.
 # ─────────────────────────────────────────────
 set -uo pipefail
 
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EFF_DIR="${MANGOLOVE_DIR:-$HOME/.mangolove}/efficacy"
 
-# 프로젝트 식별 — 단일 규칙(git toplevel basename)으로 고정(cost-tracker 휴리스틱과 충돌 방지).
+# 프로젝트 식별: 단일 규칙(git toplevel basename)으로 고정(cost-tracker 휴리스틱과 충돌 방지).
 _project() {
     local top
     if top="$(git rev-parse --show-toplevel 2>/dev/null)"; then basename "$top"; else echo "_no-git"; fi
 }
 _ledger() { printf '%s/%s.jsonl' "$EFF_DIR" "$(_project)"; }
 
-# 게이트/가드 차단 1건 기록 (비차단·실패무시 — 게이트 동작을 절대 방해하지 않음)
+# 게이트/가드 차단 1건 기록 (비차단·실패무시: 게이트 동작을 절대 방해하지 않음)
 record_block() {
     mkdir -p "$EFF_DIR" 2>/dev/null || return 0
     local ts p k
     ts="$(date '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || echo '')"
-    # JSON 이스케이프 (역슬래시 먼저, 그다음 따옴표) — 향후 명령유래 문자열 호출에도 유효 JSON 보장
+    # JSON 이스케이프 (역슬래시 먼저, 그다음 따옴표): 향후 명령유래 문자열 호출에도 유효 JSON 보장
     p="${1:-?}"; p="${p//\\/\\\\}"; p="${p//\"/\\\"}"
     k="${2:-?}"; k="${k//\\/\\\\}"; k="${k//\"/\\\"}"
     printf '{"ts":"%s","type":"block","phase":"%s","kind":"%s"}\n' "$ts" "$p" "$k" \
@@ -39,11 +39,11 @@ record_block() {
 
 report() {
     local lg; lg="$(_ledger)"
-    echo "방법론 효능 — $(_project)"
+    echo "방법론 효능, $(_project)"
     echo ""
     echo "게이트가 막은 것 (결정적, 세션 중 실시간 기록):"
     if [ -f "$lg" ]; then
-        # (phase,kind) 결합으로 상호배타 분류 — 버킷합 == 총합 보장
+        # (phase,kind) 결합으로 상호배타 분류: 버킷합 == 총합 보장
         local sec dng lt rev tot other
         sec="$(grep -cE '"phase":"gate","kind":"secret"' "$lg" 2>/dev/null)"; sec="${sec:-0}"
         dng="$(grep -cE '"phase":"guard"' "$lg" 2>/dev/null)"; dng="${dng:-0}"
@@ -56,12 +56,12 @@ report() {
         printf '  커밋 게이트(lint/test):  %s\n' "$lt"
         printf '  리뷰 미실행 커밋 차단:   %s\n' "$rev"
         [ "$other" -gt 0 ] && printf '  기타 차단:               %s\n' "$other"
-        printf '  (총 %s회 게이트/가드 차단 — 재시도 포함, 고유 사고 수 아님)\n' "$tot"
+        printf '  (총 %s회 게이트/가드 차단, 재시도 포함, 고유 사고 수 아님)\n' "$tot"
     else
-        echo "  (아직 기록 없음 — 막을 게 없었거나 세션 게이트 미활성)"
+        echo "  (아직 기록 없음, 막을 게 없었거나 세션 게이트 미활성)"
     fi
     echo ""
-    echo "참고 — 최근 mainline 히스토리 리스크 분포 (막은 것 아님; impact-score 커버 스택 한정, --first-parent):"
+    echo "참고, 최근 mainline 히스토리 리스크 분포 (막은 것 아님; impact-score 커버 스택 한정, --first-parent):"
     local imp="$SELF_DIR/impact-score.sh"
     if [ -f "$imp" ] && git rev-parse --git-dir >/dev/null 2>&1; then
         local n=0 t=0 s=0 m=0 l=0 risky=0 declared=0 under=0 sha j floor verdict
@@ -77,7 +77,7 @@ report() {
                 Large)   l=$((l + 1)) ;;
             esac
             if printf '%s' "$j" | grep -qE '"(db|auth|ext)":true'; then risky=$((risky + 1)); fi
-            # under-triage 집계 — 분모는 '선언된' 커밋만(undeclared 는 거짓 통과로 세지 않음)
+            # under-triage 집계: 분모는 '선언된' 커밋만(undeclared 는 거짓 통과로 세지 않음)
             verdict="$(printf '%s' "$j" | sed -E 's/.*"verdict":"([^"]+)".*/\1/')"
             case "$verdict" in
                 under_triage)   declared=$((declared + 1)); under=$((under + 1)) ;;
@@ -88,26 +88,26 @@ report() {
         printf '  점수화된 최근 %s커밋:  Trivial %s / Small %s / Medium %s / Large %s\n' "$n" "$t" "$s" "$m" "$l"
         printf '  인증/DB/외부API 터치: %s건 (무거운 트랙이어야 할 변경)\n' "$risky"
         echo ""
-        echo "참고 — 트랙 under-triage (선언 트랙 < 코드 floor; 선언은 자기보고·floor는 git diff 결정적):"
+        echo "참고, 트랙 under-triage (선언 트랙 < 코드 floor; 선언은 자기보고·floor는 git diff 결정적):"
         echo "  (분모=선언된 커밋만; --first-parent 기준이라 merge-커밋으로 들어온 선언은 미집계)"
         if [ "$declared" -gt 0 ]; then
-            # 커버리지를 명시적으로 — '미선언 N건은 측정 대상 외'로 오독(높은 선언율로 위장) 차단
-            printf '  선언 커버리지: %s커밋 중 %s건 선언 (%s%%) — 미선언 %s건은 측정 대상 외\n' \
+            # 커버리지를 명시적으로: '미선언 N건은 측정 대상 외'로 오독(높은 선언율로 위장) 차단
+            printf '  선언 커버리지: %s커밋 중 %s건 선언 (%s%%), 미선언 %s건은 측정 대상 외\n' \
                 "$n" "$declared" "$(( declared * 100 / n ))" "$(( n - declared ))"
-            # 소표본에서 오해를 부르는 단독 %% 대신 raw 분수를 1급으로 — 선언 D건 중 U건
+            # 소표본에서 오해를 부르는 단독 %% 대신 raw 분수를 1급으로: 선언 D건 중 U건
             if [ "$under" -gt 0 ]; then
-                printf '  under-triage: 선언 %s건 중 %s건 — 선언보다 무거운 트랙 필요(Spec/리뷰 누락 신호)\n' "$declared" "$under"
+                printf '  under-triage: 선언 %s건 중 %s건, 선언보다 무거운 트랙 필요(Spec/리뷰 누락 신호)\n' "$declared" "$under"
             else
-                printf '  under-triage: 선언 %s건 중 0건 — 선언 트랙 모두 floor 이상\n' "$declared"
+                printf '  under-triage: 선언 %s건 중 0건, 선언 트랙 모두 floor 이상\n' "$declared"
             fi
         else
-            echo "  (선언된 커밋 없음 — Change-Track: trailer 미사용; coverage 0, 측정 불가)"
+            echo "  (선언된 커밋 없음, Change-Track: trailer 미사용; coverage 0, 측정 불가)"
         fi
     else
         echo "  (impact-score 미설치 또는 비-git)"
     fi
     echo ""
-    echo "참고 — 되돌림(revert) 신호 (결함 무관 롤백 포함 — 효능 측정치 아님, 정밀 결함분류는 후속):"
+    echo "참고, 되돌림(revert) 신호 (결함 무관 롤백 포함, 효능 측정치 아님, 정밀 결함분류는 후속):"
     if git rev-parse --git-dir >/dev/null 2>&1; then
         local rev
         rev="$(git log -n 200 --format='%s' 2>/dev/null | grep -cE '^Revert ')"; rev="${rev:-0}"

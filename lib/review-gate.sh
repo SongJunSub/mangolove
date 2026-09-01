@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────
-# MangoLove — Review gate (트랙별 필수 리뷰의 결정적 강제)
+# MangoLove: Review gate (트랙별 필수 리뷰의 결정적 강제)
 #
 # 왜 존재하나: 방법론은 Medium 이상 변경에 리뷰 단계를 요구하지만 그 요구는 산문이라
 # 확률적으로만 지켜졌다. 실제 관측된 실패 모드는 "트랙을 선언하고 → 리뷰를 생략하고 →
@@ -16,13 +16,13 @@
 #       git commit 일 때만 발화. staged 변경의 track_floor 를 impact-score.sh 로 계산해
 #       필수 리뷰가 원장에 있는지 대조하고, 없으면 커밋을 차단(exit 2)한다.
 #
-# 트랙이 Trivial/Small 이면 아무 것도 요구하지 않는다 — 사소한 변경에 무거운 절차를
+# 트랙이 Trivial/Small 이면 아무 것도 요구하지 않는다: 사소한 변경에 무거운 절차를
 # 씌우지 않는 것이 이 게이트의 절반이다(과대 판정도 실패다).
 #
 # 계약:
 #   review-gate.sh record       stdin=PostToolUse JSON. 항상 exit 0 (게이트가 작업을 막지 않는다).
 #   review-gate.sh pretooluse   stdin=PreToolUse JSON. 통과 exit 0 / 차단 exit 2.
-#   review-gate.sh required <track> <db> <auth> <ext>   필수 스킬 목록 출력 — 정책 단일 출처.
+#   review-gate.sh required <track> <db> <auth> <ext>   필수 스킬 목록 출력: 정책 단일 출처.
 #   review-gate.sh status [ref] 사람용: 계산된 트랙 + 원장 + 부족분.
 #
 # 우회(감사됨): .mangolove/.review-skip 파일(1회용, 세션 도중 가능)
@@ -47,7 +47,7 @@ SKIP_REL=".mangolove/.review-skip"
 # .mangolove/ 는 프로젝트가 버전관리할 수도 있는 디렉토리다(.mangolove/hooks/ 는 감사 대상).
 # 그러니 통째로 무시하지 않고, 게이트가 만드는 **일시 파일만** 자기 자신을 무시하게 한다.
 # 이게 없으면 게이트를 켠 모든 레포에서 사용자가 손으로 .gitignore 를 고쳐야 한다.
-# (dod-gate.sh 에 같은 함수가 있다. 훅 스크립트는 서로를 source 하지 않는다 — 한 파일이
+# (dod-gate.sh 에 같은 함수가 있다. 훅 스크립트는 서로를 source 하지 않는다: 한 파일이
 #  없거나 깨져도 다른 게이트가 같이 죽지 않게 하는 기존 설계를 따른다.)
 _ml_seed_gitignore() {
     local d="./.mangolove"
@@ -55,7 +55,7 @@ _ml_seed_gitignore() {
     [ -f "$d/.gitignore" ] && return 0
     {
         echo "# MangoLove 게이트의 일시 상태 (자동 생성). 레포 내용이 아니다."
-        echo "# 이 파일 자신도 무시한다 — 게이트가 어느 머신에서든 다시 만든다."
+        echo "# 이 파일 자신도 무시한다. 게이트가 어느 머신에서든 다시 만든다."
         echo ".gitignore"
         echo "dod.sh"
         echo ".dod-gate-attempts"
@@ -66,7 +66,7 @@ _ml_seed_gitignore() {
 }
 
 
-# ── stdin JSON 에서 문자열 필드 하나를 꺼낸다 (jq 비의존 — 다른 게이트와 같은 방식).
+# ── stdin JSON 에서 문자열 필드 하나를 꺼낸다 (jq 비의존: 다른 게이트와 같은 방식).
 _json_str() {
     local input="$1" key="$2" raw
     raw="$(printf '%s' "$input" | grep -oE "\"${key}\"[[:space:]]*:[[:space:]]*\"([^\"\\\\]|\\\\.)*\"" | head -1)"
@@ -124,7 +124,7 @@ _drop_stale_ledger() {
 
 # ── 정책 단일 출처 ──────────────────────────────────────────────
 # 트랙별 필수 리뷰. strict.md 의 표와 이 함수가 어긋나면 tests/review-gate.bats 가 RED.
-#   Trivial / Small : 없음 (셀프 리뷰는 산문 규율로 충분 — 게이트를 걸지 않는다)
+#   Trivial / Small : 없음 (셀프 리뷰는 산문 규율로 충분: 게이트를 걸지 않는다)
 #   Medium          : simplify + code-review
 #   Large           : simplify + code-review + security-review
 #   + DB/인증/외부API 신호가 있으면 트랙과 무관하게 security-review 추가
@@ -150,7 +150,7 @@ do_record() {
     input="$(cat)"
     _cd_to_hook_cwd "$input"
     # 필드 이름은 런타임에서 실측했다: Skill 도구의 tool_input 은 {"skill":"simplify"} 다.
-    # 훅 문서는 skill_name 이라고 적고 있어 양쪽을 다 받는다 — 한쪽만 읽고 맞췄다가는
+    # 훅 문서는 skill_name 이라고 적고 있어 양쪽을 다 받는다: 한쪽만 읽고 맞췄다가는
     # 원장이 영영 비어 Medium 이상 커밋이 전부 막힌다(경계면 교차검증).
     # 두 패턴은 서로 오탐하지 않는다: "skill" 뒤에 곧바로 콜론이 와야 매칭된다.
     session="$(_json_str "$input" session_id)"
@@ -162,12 +162,12 @@ do_record() {
     _ml_seed_gitignore
     _drop_stale_ledger "$session"
     [ -f "$LEDGER_REL" ] || _ledger_stamp "$session" > "$LEDGER_BASE_REL" 2>/dev/null || true
-    # 같은 스킬을 여러 번 호출해도 한 줄만 남긴다 — 원장은 집합이지 호출 로그가 아니다.
+    # 같은 스킬을 여러 번 호출해도 한 줄만 남긴다: 원장은 집합이지 호출 로그가 아니다.
     grep -qxF "$skill" "$LEDGER_REL" 2>/dev/null || printf '%s\n' "$skill" >> "$LEDGER_REL" 2>/dev/null || true
     exit 0
 }
 
-# ── 변경을 분석해 전역에 채운다. **명령치환으로 호출하지 않는다** — 서브셸이면 전역이 안 남는다.
+# ── 변경을 분석해 전역에 채운다. **명령치환으로 호출하지 않는다**: 서브셸이면 전역이 안 남는다.
 #    반환 1 = impact 계산 실패(비-git 등) → 호출자는 fail-open 한다.
 REVIEW_TRACK=""; REVIEW_JSON=""; REVIEW_REQUIRED=""; REVIEW_MISSING=""
 _analyze() {
@@ -202,7 +202,7 @@ do_pretooluse() {
     git rev-parse --git-dir >/dev/null 2>&1 || exit 0
 
     if [ "${MANGOLOVE_SKIP_REVIEW:-}" = "1" ]; then
-        echo "MangoLove review gate: MANGOLOVE_SKIP_REVIEW=1 (게이트 우회 — 감사 대상)" >&2
+        echo "MangoLove review gate: MANGOLOVE_SKIP_REVIEW=1 (게이트 우회, 감사 대상)" >&2
         exit 0
     fi
     # 환경변수 우회는 mangolove 실행 **전에** export 돼 있어야 한다. 훅은 Claude Code
@@ -223,11 +223,11 @@ do_pretooluse() {
     after="${line#*commit}"
     if printf '%s' "$after" | grep -qE '(^|[[:space:]])(--all|-[a-zA-Z]*a[a-zA-Z]*)([[:space:]]|$)'; then ref="--working"; fi
 
-    # impact 계산 실패는 fail-open — 게이트가 작업을 인질로 잡지 않는다.
+    # impact 계산 실패는 fail-open: 게이트가 작업을 인질로 잡지 않는다.
     _analyze "$ref" "$(_json_str "$input" session_id)" || exit 0
 
     if [ -z "$REVIEW_MISSING" ]; then
-        # 통과. 원장은 여기서 지우지 않는다 — 커밋이 실제로 성공했는지 알 수 없기 때문이다.
+        # 통과. 원장은 여기서 지우지 않는다: 커밋이 실제로 성공했는지 알 수 없기 때문이다.
         # 커밋이 성공하면 HEAD 가 움직이고, 그때 _drop_stale_ledger 가 버린다.
         if [ -n "$REVIEW_REQUIRED" ]; then
             echo "MangoLove review gate: ${REVIEW_TRACK} 필수 리뷰 충족 (${REVIEW_REQUIRED})" >&2
@@ -246,7 +246,7 @@ do_pretooluse() {
         echo "생략을 사후에 보고하지 말고 실행하세요. 과하다고 판단되면 실행하는 대신"
         echo "**커밋 전에** 사용자에게 물으세요."
         echo "부득이한 1회 우회(감사됨): touch .mangolove/.review-skip 후 다시 커밋"
-        echo "(MANGOLOVE_SKIP_REVIEW=1 은 mangolove 실행 전에 export 돼 있어야 합니다 —"
+        echo "(MANGOLOVE_SKIP_REVIEW=1 은 mangolove 실행 전에 export 돼 있어야 합니다."
         echo " 명령 앞에 붙인 값은 훅에 닿지 않습니다.)"
     } >&2
 
@@ -261,7 +261,7 @@ do_status() {
     if ! _analyze "$ref"; then
         echo "review-gate: impact 계산 실패 (git 저장소인지 확인)" >&2; exit 1
     fi
-    echo "Review gate — ${ref}"
+    echo "Review gate: ${ref}"
     echo "  계산된 트랙: ${REVIEW_TRACK}"
     echo "  필수 리뷰: ${REVIEW_REQUIRED:-(없음)}"
     if [ -f "$LEDGER_REL" ]; then
@@ -272,7 +272,7 @@ do_status() {
     if [ -z "$REVIEW_MISSING" ]; then
         echo "  판정: PASS"
     else
-        echo "  판정: BLOCK — 부족: ${REVIEW_MISSING}"
+        echo "  판정: BLOCK, 부족: ${REVIEW_MISSING}"
     fi
 }
 

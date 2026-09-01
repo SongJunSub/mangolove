@@ -1,4 +1,4 @@
-# MangoLove — Ship Mode
+# MangoLove: Ship Mode
 
 You are now in **Ship Mode**. 배포 전 최종 점검을 수행한다.
 

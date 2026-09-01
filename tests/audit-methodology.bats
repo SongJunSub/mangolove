@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # ─────────────────────────────────────────────
-# MangoLove — Methodology Audit
+# MangoLove: Methodology Audit
 # 감사 수치가 결정적으로(=합성 점수 없이) 산출되고, 읽기 전용이며,
 # git·원장이 없어도 죽지 않는지 검증한다.
 # ─────────────────────────────────────────────
@@ -11,7 +11,7 @@ setup() {
     setup_test_env
     AUD="$MANGOLOVE_DIR/lib/audit-methodology.sh"
     FIX="$TEST_DIR/fixture.md"
-    # 펜스 안의 "## ..." 는 Spec/.progress.md 템플릿 예시 — 섹션으로 세면 안 된다.
+    # 펜스 안의 "## ..." 는 Spec/.progress.md 템플릿 예시: 섹션으로 세면 안 된다.
     cat > "$FIX" <<'EOF'
 # 제목
 머리말 한 줄
@@ -98,7 +98,7 @@ teardown() {
     [[ "$output" != *"원장 없음"* ]]
 }
 
-@test "audit: 읽기 전용 — 어떤 파일도 만들거나 고치지 않는다" {
+@test "audit: 읽기 전용, 어떤 파일도 만들거나 고치지 않는다" {
     local before after fixsum_before fixsum_after
     before="$(find "$TEST_DIR" -type f | sort | md5 2>/dev/null || find "$TEST_DIR" -type f | sort | md5sum)"
     fixsum_before="$(md5 -q "$FIX" 2>/dev/null || md5sum "$FIX" | awk '{print $1}')"

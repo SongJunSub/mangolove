@@ -1,6 +1,6 @@
 #!/bin/bash
 # ─────────────────────────────────────────────
-# MangoLove — Productivity Stats
+# MangoLove: Productivity Stats
 # Analyze git history and report metrics
 # ─────────────────────────────────────────────
 
@@ -33,7 +33,7 @@ show_stats() {
     project_name=$(basename "$(pwd)")
 
     echo ""
-    echo -e "${O}${B}MangoLove — Productivity Stats${R}"
+    echo -e "${O}${B}MangoLove: Productivity Stats${R}"
     echo -e "${DIM}──────────────────────────────────────${R}"
     echo -e "  Project : ${B}${project_name}${R}"
     echo -e "  Period  : ${C}${period}${R} (since ${since})"

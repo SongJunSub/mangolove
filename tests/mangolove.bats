@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # ─────────────────────────────────────────────
-# MangoLove — Main CLI Tests
+# MangoLove: Main CLI Tests
 # ─────────────────────────────────────────────
 
 load test_helper
@@ -24,7 +24,7 @@ teardown() {
     run bash "$MANGOLOVE_DIR/bin/mangolove" --version
     [ "$status" -eq 0 ]
     [[ "$output" == *"MangoLove"* ]]
-    # 버전은 bin/mangolove 의 MANGOLOVE_VERSION 이 단일 출처 — 하드코딩하면 릴리스마다 깨진다.
+    # 버전은 bin/mangolove 의 MANGOLOVE_VERSION 이 단일 출처: 하드코딩하면 릴리스마다 깨진다.
     local expected_version
     expected_version=$(grep -m1 '^MANGOLOVE_VERSION=' "$BATS_TEST_DIRNAME/../bin/mangolove" | cut -d'"' -f2)
     [ -n "$expected_version" ]
@@ -185,7 +185,7 @@ teardown() {
       MANGOLOVE_REVIEW_GATE=on  generate_session_settings '$on'
       MANGOLOVE_REVIEW_GATE=off generate_session_settings '$off'"
     [ "$status" -eq 0 ]
-    # 두 훅은 짝이어야 한다 — record 없이 pretooluse 만 있으면 원장이 비어 항상 차단된다.
+    # 두 훅은 짝이어야 한다: record 없이 pretooluse 만 있으면 원장이 비어 항상 차단된다.
     python3 -c "import json; json.load(open('$on'))"
     grep -qF 'review-gate.sh\" pretooluse' "$on"
     grep -qF 'review-gate.sh\" record' "$on"

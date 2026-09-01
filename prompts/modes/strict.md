@@ -1,4 +1,4 @@
-# MangoLove — Strict Mode
+# MangoLove: Strict Mode
 
 You are now in **Strict Mode**. Every code change MUST be validated before completion.
 

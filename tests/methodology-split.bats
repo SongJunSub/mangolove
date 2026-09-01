@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # ─────────────────────────────────────────────
-# MangoLove — Methodology split (core.md + cc-plugin) integrity
+# MangoLove: Methodology split (core.md + cc-plugin) integrity
 # core.md/skills 는 strict.md 에서 gen-methodology.sh 로 생성된다. 이 테스트가 RED면
 # (a) 손 편집 드리프트, (b) strict.md 변경 후 미재생성, (c) 섹션 누락,
 # (d) 안전 절차 이탈, (e) 플러그인 매니페스트/훅 오류 중 하나다.
@@ -24,7 +24,7 @@ setup() {
 @test "split: every strict.md line lands in core or a skill (only moved section header dropped)" {
     local total; total="$(wc -l < "$REPO/methodology/strict.md")"
     [ "$total" -gt 0 ]
-    # 추출 범위는 생성기에서 파싱한다 — 여기에 다시 적으면 두 번째 진실 출처가 되어
+    # 추출 범위는 생성기에서 파싱한다: 여기에 다시 적으면 두 번째 진실 출처가 되어
     # strict.md 를 고칠 때마다 생성기와 테스트를 손으로 맞춰야 한다(드리프트 원인 자체).
     local ranges
     ranges="$(grep -oE "sed -n '[0-9]+,[0-9]+p'" "$REPO/lib/gen-methodology.sh" \
@@ -39,7 +39,7 @@ setup() {
         print miss
     }')"
     # 합집합이 빠뜨리는 줄은 '이동된 섹션 헤더 + 뒤 공백' 2줄뿐이어야 한다.
-    # 줄번호가 아니라 내용으로 검증한다 — strict.md 가 길어져도 이 단언은 유효하다.
+    # 줄번호가 아니라 내용으로 검증한다: strict.md 가 길어져도 이 단언은 유효하다.
     [ "$(printf '%s' "$missing" | wc -w)" -eq 2 ]
     local l content
     for l in $missing; do
@@ -49,14 +49,14 @@ setup() {
 }
 
 @test "split: safety-critical procedures stay resident in core.md (not on-demand skills)" {
-    grep -q '## 되돌리기 어려운 작업 — Dry-run 게이트' "$REPO/methodology/core.md"
-    grep -q '## 메모리 루프 — 검증 게이트' "$REPO/methodology/core.md"
+    grep -q '## 되돌리기 어려운 작업: Dry-run 게이트' "$REPO/methodology/core.md"
+    grep -q '## 메모리 루프: 검증 게이트' "$REPO/methodology/core.md"
     grep -q '## 경계면 교차검증' "$REPO/methodology/core.md"
     # 트랙 판정·승인 게이트도 코어에 남아야 한다
     grep -qE '\| 합산 점수 \| 규모 \| 트랙 \|' "$REPO/methodology/core.md"
     grep -q '## 사용자 승인 원칙' "$REPO/methodology/core.md"
     # 온디맨드 스킬 라우팅 표
-    grep -q '트랙 워크플로우 상세 — 온디맨드 스킬' "$REPO/methodology/core.md"
+    grep -q '트랙 워크플로우 상세: 온디맨드 스킬' "$REPO/methodology/core.md"
 }
 
 @test "split: heavy procedures moved OUT of core into skills" {
@@ -96,7 +96,7 @@ setup() {
 }
 
 @test "methodology: 실존하지 않는 스킬 이름(/review)을 지시로 쓰지 않는다" {
-    # F1 회귀의 나머지 절반 — 생성되는 스킬 본문에도 /review 지시가 있었다.
+    # F1 회귀의 나머지 절반: 생성되는 스킬 본문에도 /review 지시가 있었다.
     # "그런 스킬은 없다"고 밝히는 부정 언급(없다 포함 줄)은 의도된 것이라 예외로 둔다.
     local hits
     hits="$(grep -rnE '(^|[^a-z-])/review([^a-z-]|$)' \

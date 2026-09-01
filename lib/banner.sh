@@ -1,6 +1,6 @@
 #!/bin/bash
 # ─────────────────────────────────────────────
-# MangoLove — Banner Display
+# MangoLove: Banner Display
 # Mango:  happy Jindo, cream face, yellowish ear tips, tongue out
 # Sarang: calm Jindo, pure white, mouth closed, composed
 # ─────────────────────────────────────────────
@@ -24,7 +24,7 @@ FGR=$'\033[38;5;245m'
 FBW=$'\033[97m'
 
 # ── Braille Jindo dog art (from mangolove.png) ──
-# Mango (left, yellow) — standing, tongue out
+# Mango (left, yellow): standing, tongue out
 MANGO_ART=(
 "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠐⠢⣀⠀⠀⢀⣀⣠⣾⠁⢠⣶"
 "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣼⣿⣿⣿⣿⣿⣿⣷⣿⠋"
@@ -43,7 +43,7 @@ MANGO_ART=(
 "⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣶⣶⢀⡐⠿⢶⢀⣀⣀"
 )
 
-# Sarang (right, white) — sitting, calm
+# Sarang (right, white): sitting, calm
 SARANG_ART=(
 "⣴⣶⡶⠾⠿⢿⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣦⣤⣤⣤⡀⠀⠀⠀⠀"
 "⠉⠀⢷⣶⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣮⣽⣿⣿⣿⣿⣿⠀⠀⠀⠀"
@@ -103,7 +103,7 @@ VERSION="0.1.0"
 
 cat << EOF
 
-    ${FO}${B}Mango${R}${FY}Love${R} ${FGR}v${VERSION}${R} ${DIM}— Autonomous Dev Agent${R}
+    ${FO}${B}Mango${R}${FY}Love${R} ${FGR}v${VERSION}${R} ${DIM}- Autonomous Dev Agent${R}
 
     ${FGR}┌─────────────────────────────────────────┐${R}
 EOF

@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # ─────────────────────────────────────────────
-# MangoLove — Multi-project root detection
+# MangoLove: Multi-project root detection
 # bin/mangolove: detect_multi_project_root / _ml_has_build_marker
 # ─────────────────────────────────────────────
 
@@ -62,7 +62,7 @@ run_detect() {
 }
 
 # ─────────────────────────────────────────────
-# Guard: CWD is itself a project — unified 7-marker set (go.mod used to slip through)
+# Guard: CWD is itself a project: unified 7-marker set (go.mod used to slip through)
 # ─────────────────────────────────────────────
 
 @test "multi-project: no picker when CWD is itself a Go project (go.mod)" {

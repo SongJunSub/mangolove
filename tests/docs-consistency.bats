@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # ─────────────────────────────────────────────
-# MangoLove — Docs <-> Methodology Consistency
+# MangoLove: Docs <-> Methodology Consistency
 # 방법론의 단일 출처(strict.md)와 대외 문서/버전이 어긋나지 않게 강제한다.
 # (이 테스트가 RED면 드리프트가 발생했다는 뜻이다.)
 # ─────────────────────────────────────────────
@@ -15,7 +15,7 @@ setup() {
     ! grep -qi "5-phase" "$REPO/README.md"
     ! grep -qi "4-phase" "$REPO/README.md"
     ! grep -q "5단계 품질 워크플로우" "$REPO/README.md"
-    # 3인 리뷰는 Large 트랙 전용 — '자동으로 ... 3인 병렬 리뷰' 무조건 흐름 표현은 드리프트다.
+    # 3인 리뷰는 Large 트랙 전용: '자동으로 ... 3인 병렬 리뷰' 무조건 흐름 표현은 드리프트다.
     ! grep -qE 'automatically follows.*3-agent parallel review' "$REPO/README.md"
     ! grep -qE '자동으로.*3인 병렬 리뷰' "$REPO/README.md"
     # 옛 고정 5-Phase 리뷰 루프 헤더의 재발 방지 (방법론은 4-track)
@@ -66,7 +66,7 @@ setup() {
 }
 
 @test "methodology: multi-agent review mandates an adversarial find->verify stage (decorrelation)" {
-    # Phase 3 — 리뷰 탈상관: 3인 페르소나(도메인 분리)만으로는 같은 맹점을 공유하므로
+    # Phase 3: 리뷰 탈상관: 3인 페르소나(도메인 분리)만으로는 같은 맹점을 공유하므로
     # (a) 발견을 반증으로 검증하는 단계와 (b) 방법(method) 탈상관을 방법론이 강제해야 한다.
     # 이 가드가 RED면 리뷰 규율이 '찾기만 하고 검증 안 함'으로 후퇴했다는 뜻이다.
     grep -qE 'find → verify|찾기 → 검증|적대적 검증' "$REPO/methodology/strict.md"
@@ -118,7 +118,7 @@ setup() {
 }
 
 @test "boundary: strict.md 의 필수 리뷰 표와 review-gate.sh 의 코드가 일치한다" {
-    # 경계면 교차검증 — 산문(표)과 게이트(코드)가 어긋나면 모델은 표를 따르고
+    # 경계면 교차검증: 산문(표)과 게이트(코드)가 어긋나면 모델은 표를 따르고
     # 게이트는 코드를 따라 서로 다른 것을 요구한다. 양쪽을 같이 읽어 대조한다.
     local gate="$REPO/lib/review-gate.sh" md="$REPO/methodology/strict.md"
     local doc_medium doc_large code_medium code_large

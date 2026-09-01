@@ -1,6 +1,6 @@
 #!/bin/bash
 # ─────────────────────────────────────────────
-# 🥭 MangoLove — Bash Completion
+# 🥭 MangoLove: Bash Completion
 # ─────────────────────────────────────────────
 
 _mangolove_completions() {

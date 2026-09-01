@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # ─────────────────────────────────────────────
-# MangoLove — Work Logger Tests
+# MangoLove: Work Logger Tests
 # ────────────────────────────────────���────────
 
 load test_helper

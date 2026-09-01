@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # ─────────────────────────────────────────────
-# MangoLove — Plugin Manager Tests
+# MangoLove: Plugin Manager Tests
 # ─────────────────────────────────────────────
 
 load test_helper

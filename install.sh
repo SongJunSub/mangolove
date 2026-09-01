@@ -64,7 +64,7 @@ if [ -d "$MANGOLOVE_DIR/.git" ]; then
     echo -e "${G}✓${R} Updated to latest version."
 else
     if [ -d "$MANGOLOVE_DIR" ]; then
-        # Existing non-git mangolove dir — back it up
+        # Existing non-git mangolove dir: back it up
         echo -e "${Y}Backing up existing ~/.mangolove...${R}"
         BACKUP_DIR="$MANGOLOVE_DIR.backup.$(date +%s)"
         mv "$MANGOLOVE_DIR" "$BACKUP_DIR"

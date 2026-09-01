@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────
-# MangoLove — Irreversible/Destructive Command Guard (Claude PreToolUse)
+# MangoLove: Irreversible/Destructive Command Guard (Claude PreToolUse)
 #
 # 되돌리기 어려운 명령을 실행 전에 차단한다 (exit 2 = 도구 호출 차단).
 # strict.md dry-run 게이트 철학("AI가 DB를 9초 만에 삭제한 사례는 dry-run 부재가
@@ -11,11 +11,11 @@
 # ─────────────────────────────────────────────
 set -uo pipefail
 
-# 명시적 허용 — 감사됨
+# 명시적 허용: 감사됨
 [ "${MANGOLOVE_ALLOW_DANGER:-}" = "1" ] && exit 0
 
 input="$(cat)"
-# 세션 hook 으로 다른 cwd 에서 실행될 수 있으므로 stdin 의 cwd 로 이동 (게이트와 동일 — 효능 기록을 정확한 프로젝트 원장으로)
+# 세션 hook 으로 다른 cwd 에서 실행될 수 있으므로 stdin 의 cwd 로 이동 (게이트와 동일: 효능 기록을 정확한 프로젝트 원장으로)
 _cwd="$(printf '%s' "$input" | grep -oE '"cwd"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"' | head -1)"
 _cwd="${_cwd#*\"cwd\"*:*\"}"; _cwd="${_cwd%\"}"
 if [ -n "$_cwd" ] && [ -d "$_cwd" ]; then cd "$_cwd" 2>/dev/null || true; fi
@@ -27,7 +27,7 @@ cmd="${raw#*\"command\"*:*\"}"
 cmd="${cmd%\"}"
 cmd="${cmd//\"/}"
 # JSON 은 개행/캐리지리턴/탭을 \n \r \t 로 이스케이프한다. 아래 백슬래시 제거 '전에'
-# 이들을 명령 구분자로 치환한다 — 안 그러면 \n 이 글자 'n' 이 되어 여러 줄 명령이 한 줄로
+# 이들을 명령 구분자로 치환한다: 안 그러면 \n 이 글자 'n' 이 되어 여러 줄 명령이 한 줄로
 # 붙고, push 세그먼트 격리([^;|&])가 깨져 다른 명령의 -f/--force(예: 'git commit -F -')가
 # push 의 force 로 오탐된다. (개행=명령 경계이므로 ';' 로 치환)
 cmd="${cmd//\\n/;}"
@@ -43,12 +43,12 @@ block() {
     # 효능 원장에 차단 기록 (비차단·실패무시)
     local rec; rec="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/efficacy-recorder.sh"
     if [ -f "$rec" ]; then bash "$rec" record-block guard "$1" 2>/dev/null || true; fi
-    echo "MangoLove guard 차단 — 비가역/파괴적 명령 의심: $1" >&2
+    echo "MangoLove guard 차단, 비가역/파괴적 명령 의심: $1" >&2
     echo "  의도적이면 MANGOLOVE_ALLOW_DANGER=1 로 재실행하세요 (감사 대상)." >&2
     exit 2
 }
 
-# git 강제 푸시 — push '세그먼트'에 한해서만 --force/-f 를 검출한다.
+# git 강제 푸시: push '세그먼트'에 한해서만 --force/-f 를 검출한다.
 # 명령줄 전체를 보면 체인된 무관 명령의 -f/--force 가 push 의 force 로 오탐된다:
 #   'git push origin --delete X && rm -f y'                 → '-f' 가 rm 의 것인데 push -f 로 오탐
 #   'git push origin --delete X && git worktree remove --force …' → '--force' 가 worktree 의 것인데 push --force 로 오탐
@@ -66,11 +66,11 @@ fi
 
 has 'git[[:space:]]+reset[[:space:]]+--hard' && block "git reset --hard"
 
-# rm 위험 루트 — 분리/롱폼 플래그(-r -f, --recursive --force)와 따옴표 우회까지 차단.
+# rm 위험 루트: 분리/롱폼 플래그(-r -f, --recursive --force)와 따옴표 우회까지 차단.
 # 위험 루트엔 리터럴(/,~)·환경변수(\$HOME,\$PWD,\${HOME},\${PWD})·명령치환(\$(pwd))까지 포함.
-# 보수적: 이 루트 '아래 하위경로'(예: \$PWD/build, \$HOME/.ssh)도 함께 막는다 — 안전한 하위삭제와
+# 보수적: 이 루트 '아래 하위경로'(예: \$PWD/build, \$HOME/.ssh)도 함께 막는다: 안전한 하위삭제와
 # 위험한 하위삭제(.ssh 등)를 정규식으로 구분할 수 없으므로 안전을 택한다. 의도된 삭제는 override.
-# 4개 조건을 명령 전체가 아니라 각 rm '세그먼트'에서만 확인 — 위 git push 검사와 동일 원리.
+# 4개 조건을 명령 전체가 아니라 각 rm '세그먼트'에서만 확인: 위 git push 검사와 동일 원리.
 # 무관한 토큰(다른 명령의 -r, jq '//=' 의 '/', 설정 경로의 $HOME 등)이 합쳐져 생기던 오탐 제거.
 # 진짜 'rm -rf $HOME' / 'rm -rf /' 는 그 세그먼트에서 3조건이 모두 참이므로 그대로 차단.
 while IFS= read -r rm_seg; do
@@ -81,17 +81,17 @@ while IFS= read -r rm_seg; do
     block "rm -rf on dangerous root"
 done < <(printf '%s' "$cmd" | grep -oiE '(^|[;|&])[[:space:]]*rm[[:space:]][^;|&]*')
 
-# 파괴적 SQL — sql 클라이언트 호출에 앵커링 (echo/grep/sed/커밋 메시지의 키워드 오차단 방지)
+# 파괴적 SQL: sql 클라이언트 호출에 앵커링 (echo/grep/sed/커밋 메시지의 키워드 오차단 방지)
 if has '(psql|mysql|mariadb|sqlite3|mongosh|mongo|clickhouse-client|cqlsh)([[:space:]]|$)'; then
     has 'drop[[:space:]]+(table|database|schema)'        && block "destructive SQL (DROP)"
     has 'truncate([[:space:]]+table)?[[:space:]]+[a-z_]' && block "destructive SQL (TRUNCATE)"
     if has 'delete[[:space:]]+from'; then
-        # 각 DELETE 문(;로 구분)에 WHERE 가 없으면 차단 — 다른 문의 WHERE 로 면제되지 않게
+        # 각 DELETE 문(;로 구분)에 WHERE 가 없으면 차단: 다른 문의 WHERE 로 면제되지 않게
         printf '%s' "$cmd" | grep -oiE 'delete[[:space:]]+from[^;]*' | grep -qivE 'where' && block "SQL DELETE without WHERE"
     fi
 fi
 
-# 파괴적 Mongo — mongo/mongosh 호출에 앵커링 (SQL 구문이 아닌 문서 메서드라 위 블록이 못 잡음).
+# 파괴적 Mongo: mongo/mongosh 호출에 앵커링 (SQL 구문이 아닌 문서 메서드라 위 블록이 못 잡음).
 # 조건 없는 전체 삭제·컬렉션/DB drop 만 차단; 필터가 있는 deleteMany 는 통과(정밀도 보존).
 if has '(mongosh|mongo)([[:space:]]|$)'; then
     has 'dropDatabase[[:space:]]*\(' && block "destructive Mongo (dropDatabase)"

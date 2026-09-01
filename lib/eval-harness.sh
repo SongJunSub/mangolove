@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────
-# MangoLove — Deterministic Self-Eval Harness  [Phase 4 / v1]
+# MangoLove: Deterministic Self-Eval Harness  [Phase 4 / v1]
 #
 # 방법론의 **결정적 부품**(impact-score 트랙 분류, 비가역 가드)이 "스펙대로 동작하는가"를
 # 라벨된 픽스처에 대해 LLM 없이 측정한다. 결과는 재현 가능하고 CI 에 올릴 수 있다.
@@ -12,9 +12,9 @@
 #
 # 정직성 원칙:
 # - 점수를 부풀리지 않도록 **known-gap 픽스처**(커버 안 되는 스택 등 결정적 부품이 *원리상*
-#   못 잡는 경우)를 함께 싣고, 별도로 표기한다(회귀 임계엔 미포함, 리포트엔 노출 — 침묵 캡 금지).
+#   못 잡는 경우)를 함께 싣고, 별도로 표기한다(회귀 임계엔 미포함, 리포트엔 노출: 침묵 캡 금지).
 # - 이 하니스는 **결정적 계층만** 측정한다. "방법론이 모델 행동을 바꾸는가"의 end-to-end A/B 는
-#   실세션이 필요하므로 v2 범위(여기서 측정하지 않음 — 과장 금지).
+#   실세션이 필요하므로 v2 범위(여기서 측정하지 않음: 과장 금지).
 #
 # 사용:
 #   eval-harness.sh report   결정적 부품 전체 평가(사람용)
@@ -53,7 +53,7 @@ EOF
 # 형식: "<block|pass>|<command>"
 # 가드 커버 범위(정직): SQL 구문(DROP/TRUNCATE/WHERE 없는 DELETE)·Mongo 파괴 구문(dropDatabase/.drop()/
 # 빈 필터 deleteMany)·리터럴+환경변수 위험 루트(/,~,$HOME,$PWD,${HOME},$(pwd)). 잔여 미커버(정직):
-# 백틱 `pwd`(검사 전 제거됨)·base64/eval 난독화·새 CLI 도구 — 정규식 가드의 구조적 한계(잔여 위험).
+# 백틱 `pwd`(검사 전 제거됨)·base64/eval 난독화·새 CLI 도구: 정규식 가드의 구조적 한계(잔여 위험).
 _guard_fixtures() {
     cat <<'EOF'
 block|git push --force origin main
@@ -98,7 +98,7 @@ eval_impact() {
     local expect gap rel content repo got
     while IFS='|' read -r expect gap rel content; do
         [ -z "$expect" ] && continue
-        # 분모를 측정 전에 센다 — mktemp/측정 실패가 분모를 조용히 줄여 점수를 부풀리지 않도록(침묵 캡 금지)
+        # 분모를 측정 전에 센다: mktemp/측정 실패가 분모를 조용히 줄여 점수를 부풀리지 않도록(침묵 캡 금지)
         if [ "$gap" = "1" ]; then IMP_GAP_TOTAL=$((IMP_GAP_TOTAL + 1)); else IMP_TOTAL=$((IMP_TOTAL + 1)); fi
         got=""
         if repo="$(mktemp -d 2>/dev/null)"; then
@@ -110,7 +110,7 @@ eval_impact() {
             got="$(cd "$repo" && bash "$IMPACT" score HEAD 2>/dev/null | sed -E 's/.*"track_floor":"([^"]+)".*/\1/')"
             rm -rf "$repo" 2>/dev/null
         fi
-        # 유효 트랙이 아니면(mktemp 실패·impact 오류·추출 실패) MISS 가 아니라 '측정실패'로 — 점수를 부풀리지 않고 회귀로 드러낸다
+        # 유효 트랙이 아니면(mktemp 실패·impact 오류·추출 실패) MISS 가 아니라 '측정실패'로: 점수를 부풀리지 않고 회귀로 드러낸다
         case "$got" in Trivial|Small|Medium|Large) ;; *) got="<측정실패>" ;; esac
         if [ "$gap" = "1" ]; then
             if [ "$got" = "$expect" ]; then IMP_GAP_MATCH=$((IMP_GAP_MATCH + 1))
@@ -130,7 +130,7 @@ eval_guard() {
     local label cmd esc rc
     while IFS='|' read -r label cmd; do
         [ -z "$label" ] && continue
-        # 유효 JSON 으로 가드에 전달 — 역슬래시 먼저, 그다음 따옴표 이스케이프(순서 중요; 픽스처는 단일 라인이라 개행 없음)
+        # 유효 JSON 으로 가드에 전달: 역슬래시 먼저, 그다음 따옴표 이스케이프(순서 중요; 픽스처는 단일 라인이라 개행 없음)
         esc="${cmd//\\/\\\\}"; esc="${esc//\"/\\\"}"
         printf '{"tool_input":{"command":"%s"}}' "$esc" | bash "$GUARD" >/dev/null 2>&1
         rc=$?  # 2 = 차단, 0 = 통과
@@ -149,14 +149,14 @@ _pct() { if [ "${2:-0}" -gt 0 ]; then echo $(( $1 * 100 / $2 )); else echo 0; fi
 
 report() {
     local regressions=0
-    echo "MangoLove 자가평가 (결정적 부품 — LLM 없이 측정, 재현 가능)"
+    echo "MangoLove 자가평가 (결정적 부품, LLM 없이 측정, 재현 가능)"
     echo ""
 
     eval_impact
     echo "① impact-score 트랙 보정도 (방법론 규칙 적합):"
     printf '  적합: %s/%s (%s%%)\n' "$IMP_MATCH" "$IMP_TOTAL" "$(_pct "$IMP_MATCH" "$IMP_TOTAL")"
     if [ "$IMP_GAP_TOTAL" -gt 0 ]; then
-        printf '  known-gap(커버 밖, 회귀 임계 제외): %s건 — 결정적 부품이 원리상 못 잡는 한계\n' "$IMP_GAP_TOTAL"
+        printf '  known-gap(커버 밖, 회귀 임계 제외): %s건, 결정적 부품이 원리상 못 잡는 한계\n' "$IMP_GAP_TOTAL"
     fi
     [ "$IMP_MATCH" -lt "$IMP_TOTAL" ] && regressions=$((regressions + 1))
 
@@ -181,10 +181,10 @@ report() {
 
     echo ""
     if [ "$regressions" -eq 0 ]; then
-        echo "결과: 회귀 없음 (결정적 부품이 스펙대로 동작). end-to-end 모델 A/B 는 v2 범위 — 여기서 측정 안 함."
+        echo "결과: 회귀 없음 (결정적 부품이 스펙대로 동작). end-to-end 모델 A/B 는 v2 범위, 여기서 측정 안 함."
         return 0
     else
-        echo "결과: 회귀 감지 — 위 [MISS]/[FP]/[FN] 를 확인하세요."
+        echo "결과: 회귀 감지, 위 [MISS]/[FP]/[FN] 를 확인하세요."
         return 1
     fi
 }

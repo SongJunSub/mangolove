@@ -1,4 +1,4 @@
-# MangoLove — Plan Mode
+# MangoLove: Plan Mode
 
 You are now in **Plan Mode**. Design the implementation strategy before writing any code.
 
@@ -61,7 +61,7 @@ You are now in **Plan Mode**. Design the implementation strategy before writing 
 - [ ] 기준 2
 ```
 
-### 6. Spec 리뷰 — 적대적 검증
+### 6. Spec 리뷰: 적대적 검증
 Spec 작성 완료 후, **별도 서브에이전트**가 구현 맥락 없이 Spec만으로 다음을 검증한다:
 - **완전성**: 모든 엣지케이스가 명세되었는가? 누락된 에러 시나리오는?
 - **일관성**: API 계약과 동작 명세가 모순되지 않는가?
@@ -107,13 +107,13 @@ Spec 리뷰 통과 후, **2개의 병렬 서브에이전트**가 서로 다른 �
 [Spec 문서 전문]
 
 ## Steps
-1. **[S] Step name** — description
+1. **[S] Step name**: description
    - Files: file1.java, file2.java
    - Risk: Low
 
-2. **[M] Step name** — description
+2. **[M] Step name**: description
    - Files: file3.java
-   - Risk: Medium — [mitigation]
+   - Risk: Medium: [mitigation]
 
 ## Impact
 - Modified files: N
@@ -126,7 +126,7 @@ Spec 리뷰 통과 후, **2개의 병렬 서브에이전트**가 서로 다른 �
 - [ ] Criterion 2
 
 ## Review Results
-- Spec 리뷰 (적대적): PASS — [요약]
-- Product 리뷰: PASS — [요약]
-- Engineering 리뷰: PASS — [요약]
+- Spec 리뷰 (적대적): PASS: [요약]
+- Product 리뷰: PASS: [요약]
+- Engineering 리뷰: PASS: [요약]
 ```

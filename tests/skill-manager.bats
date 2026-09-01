@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # ─────────────────────────────────────────────
-# MangoLove — Skill Manager Tests
+# MangoLove: Skill Manager Tests
 # ─────────────────────────────────────────────
 
 load test_helper

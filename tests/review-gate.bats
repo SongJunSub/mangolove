@@ -1,9 +1,9 @@
 #!/usr/bin/env bats
 # ─────────────────────────────────────────────
-# MangoLove — Review gate (트랙별 필수 리뷰의 결정적 강제)
+# MangoLove: Review gate (트랙별 필수 리뷰의 결정적 강제)
 #
 # 회귀 대상 행동: "Medium 트랙인데 /simplify 와 코드 리뷰를 돌리지 않았습니다,
-# 필요하시면 지금 돌리겠습니다" — 트랙을 선언하고 절차를 생략한 뒤 사후에 고백하는 것.
+# 필요하시면 지금 돌리겠습니다": 트랙을 선언하고 절차를 생략한 뒤 사후에 고백하는 것.
 # 이 게이트는 커밋 경계에서 코드가 트랙을 계산해 그 답변 자체가 불가능하게 만든다.
 # ─────────────────────────────────────────────
 
@@ -26,14 +26,14 @@ teardown() {
     teardown_test_env
 }
 
-# PreToolUse(Bash) JSON — 명령 + cwd + session_id
+# PreToolUse(Bash) JSON: 명령 + cwd + session_id
 _json_cmd() {
     local c="${1//\"/\\\"}"
     printf '{"tool_name":"Bash","session_id":"%s","cwd":"%s","tool_input":{"command":"%s"}}' \
         "${SESSION:-s1}" "$REPO_DIR" "$c"
 }
 
-# PostToolUse(Skill) JSON — 실행된 스킬 이름 + cwd
+# PostToolUse(Skill) JSON: 실행된 스킬 이름 + cwd
 # 필드 이름은 실제 세션 트랜스크립트에서 실측한 것이다: {"skill":"simplify"}.
 _json_skill() {
     printf '{"tool_name":"Skill","session_id":"%s","cwd":"%s","tool_input":{"skill":"%s"}}' \
@@ -58,7 +58,7 @@ _stage_external_api() {
     git -C "$REPO_DIR" add -A
 }
 
-# ── 정책 표 (required_skills) — strict.md 의 트랙별 리뷰 표와 단일 출처를 공유한다 ──
+# ── 정책 표 (required_skills): strict.md 의 트랙별 리뷰 표와 단일 출처를 공유한다 ──
 
 @test "policy: Trivial/Small 은 아무 리뷰도 요구하지 않는다 (과대 판정 방지)" {
     run bash "$GATE" required Trivial false false false
@@ -204,14 +204,14 @@ _stage_external_api() {
 
 @test "gate: 원장 디렉토리를 만들 때 .mangolove/.gitignore 를 심는다 (레포 오염 방지)" {
     # 게이트를 켠 모든 레포에서 사용자가 손으로 .gitignore 를 고치게 만들지 않는다.
-    # 단, .mangolove/ 를 통째로 무시하면 안 된다 — .mangolove/hooks/ 는 버전관리 감사 대상이다.
+    # 단, .mangolove/ 를 통째로 무시하면 안 된다: .mangolove/hooks/ 는 버전관리 감사 대상이다.
     printf '%s' "$(_json_skill simplify)" | bash "$GATE" record
     [ -f "$REPO_DIR/.mangolove/.gitignore" ]
     grep -qx '.review-ledger' "$REPO_DIR/.mangolove/.gitignore"
     grep -qx 'dod.sh' "$REPO_DIR/.mangolove/.gitignore"
     # 자기 자신도 무시해야 사용자 레포에 요청하지 않은 파일이 생기지 않는다.
     grep -qx '.gitignore' "$REPO_DIR/.mangolove/.gitignore"
-    # 통째 무시(*)는 안 된다 — .mangolove/hooks/ 는 버전관리 감사 대상이다.
+    # 통째 무시(*)는 안 된다: .mangolove/hooks/ 는 버전관리 감사 대상이다.
     ! grep -qx '\*' "$REPO_DIR/.mangolove/.gitignore"
     [ -z "$(git -C "$REPO_DIR" status --porcelain -- .mangolove)" ]
 }
@@ -238,7 +238,7 @@ _stage_external_api() {
     # command 는 JSON 문자열이라 개행이 역슬래시+n 두 글자로 온다. 되돌리지 않으면
     # 둘째 줄 git 앞 글자가 'n'(영숫자)이라 경계에 안 걸려 명령 전체가 게이트를 빠져나간다.
     _stage_external_api
-    # JSON 안에서의 개행은 역슬래시+n 두 글자다 — 런타임이 실제로 보내는 형태 그대로 쓴다.
+    # JSON 안에서의 개행은 역슬래시+n 두 글자다: 런타임이 실제로 보내는 형태 그대로 쓴다.
     run bash -c "printf '%s' '$(_json_cmd 'git add -A\ngit commit -m x')' | bash '$GATE' pretooluse"
     [ "$status" -eq 2 ]
 }

@@ -1,4 +1,4 @@
-# MangoLove — Debug Mode
+# MangoLove: Debug Mode
 
 You are now in **Debug Mode**. Focus on systematic root-cause analysis.
 
@@ -15,7 +15,7 @@ You are now in **Debug Mode**. Focus on systematic root-cause analysis.
 - Check recent changes (git log, git diff) that might have introduced the bug
 
 ### 3. Root Cause Analysis
-- Don't fix symptoms — find the actual root cause
+- Don't fix symptoms: find the actual root cause
 - Trace data flow through the entire call chain
 - Check assumptions: null values, type mismatches, race conditions
 - Verify external dependencies: DB state, API responses, config values

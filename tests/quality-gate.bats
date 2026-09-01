@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # ─────────────────────────────────────────────
-# MangoLove — Commit-boundary Quality Gate (D2)
+# MangoLove: Commit-boundary Quality Gate (D2)
 # 산문 강제 -> 결정적 차단 게이트. 설치 + 동작(block/warn/bypass)을 검증한다.
 # ─────────────────────────────────────────────
 
@@ -130,7 +130,7 @@ _secret_repo() {
 
 @test "gate: secret scan blocks staged GitHub token" {
     local repo; repo=$(_secret_repo "sec-ghp")
-    # 토큰을 런타임 조립한다 — GitHub 푸시 보호가 .bats 파일의 리터럴을 시크릿으로 막지 않도록.
+    # 토큰을 런타임 조립한다: GitHub 푸시 보호가 .bats 파일의 리터럴을 시크릿으로 막지 않도록.
     local tok="ghp""_$(printf '0%.0s' $(seq 36))"
     printf 'const t = "%s";\n' "$tok" > "$repo/leak.js"
     git -C "$repo" add leak.js

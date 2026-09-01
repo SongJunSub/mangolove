@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────
-# MangoLove — DoD gate (Stop hook)
+# MangoLove: DoD gate (Stop hook)
 #
 # 선언한 DoD 를 모델의 자기채점이 아니라 결정적 게이트로 닫는다(best-practices #1: Stop hook).
 # bare mangolove 세션에 Stop 훅으로 런타임 주입된다(claude --settings), MANGOLOVE_DOD_GATE=on 일 때만.
 # Stop 은 매 턴 종료마다 발화하나, DoD 가 외부화되지 않았으면 즉시 통과하므로 idle 비용이 없다.
 #
 # 계약(stdin=JSON, exit code 로 제어):
-#   ./.mangolove/dod.sh 없음        → exit 0  (allow stop — DoD 미외부화)
+#   ./.mangolove/dod.sh 없음        → exit 0  (allow stop: DoD 미외부화)
 #   dod.sh 있고 전 항목 PASS        → dod.sh + 카운터 제거 → exit 0 (게이트 충족, allow)
 #   dod.sh 있고 하나라도 FAIL       → 카운터++, 실패 출력 stderr → exit 2 (block: 모델이 계속 수정)
 #   FAIL 이 MAX회 연속             → exit 0 + 경고 (무한루프 backstop; stop_hook_active 미문서라 자체 종료 보장)
@@ -23,7 +23,7 @@ GATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MAX_ATTEMPTS="${MANGOLOVE_DOD_MAX_ATTEMPTS:-3}"
 case "$MAX_ATTEMPTS" in ''|*[!0-9]*) MAX_ATTEMPTS=3 ;; esac
 
-# Stop hook stdin JSON 에서 cwd 추출 — 세션 훅은 다른 cwd 에서 실행될 수 있어 프로젝트를 정확히 식별한다.
+# Stop hook stdin JSON 에서 cwd 추출: 세션 훅은 다른 cwd 에서 실행될 수 있어 프로젝트를 정확히 식별한다.
 input="$(cat)"
 cwd_field="$(printf '%s' "$input" | grep -oE '"cwd"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*"' | head -1)"
 cwd_field="${cwd_field#*\"cwd\"*:*\"}"
@@ -35,7 +35,7 @@ fi
 # .mangolove/ 는 프로젝트가 버전관리할 수도 있는 디렉토리다(.mangolove/hooks/ 는 감사 대상).
 # 그러니 통째로 무시하지 않고, 게이트가 만드는 **일시 파일만** 자기 자신을 무시하게 한다.
 # 이게 없으면 게이트를 켠 모든 레포에서 사용자가 손으로 .gitignore 를 고쳐야 한다.
-# (review-gate.sh 에 같은 함수가 있다. 훅 스크립트는 서로를 source 하지 않는다 — 한 파일이
+# (review-gate.sh 에 같은 함수가 있다. 훅 스크립트는 서로를 source 하지 않는다: 한 파일이
 #  없거나 깨져도 다른 게이트가 같이 죽지 않게 하는 기존 설계를 따른다.)
 _ml_seed_gitignore() {
     local d="./.mangolove"
@@ -43,7 +43,7 @@ _ml_seed_gitignore() {
     [ -f "$d/.gitignore" ] && return 0
     {
         echo "# MangoLove 게이트의 일시 상태 (자동 생성). 레포 내용이 아니다."
-        echo "# 이 파일 자신도 무시한다 — 게이트가 어느 머신에서든 다시 만든다."
+        echo "# 이 파일 자신도 무시한다. 게이트가 어느 머신에서든 다시 만든다."
         echo ".gitignore"
         echo "dod.sh"
         echo ".dod-gate-attempts"
@@ -55,12 +55,12 @@ _ml_seed_gitignore() {
 DOD="./.mangolove/dod.sh"
 STATE="./.mangolove/.dod-gate-attempts"
 
-# DoD 가 외부화되지 않았으면 게이트 비활성 — 즉시 통과(무비용).
+# DoD 가 외부화되지 않았으면 게이트 비활성: 즉시 통과(무비용).
 [ -f "$DOD" ] || exit 0
 
-# 감사되는 우회구 — strict.md 는 우회를 금지하나 물리적으로는 존재한다.
+# 감사되는 우회구: strict.md 는 우회를 금지하나 물리적으로는 존재한다.
 if [ "${MANGOLOVE_SKIP_DOD:-}" = "1" ]; then
-    echo "MangoLove DoD gate: MANGOLOVE_SKIP_DOD=1 (게이트 우회 — 감사 대상)" >&2
+    echo "MangoLove DoD gate: MANGOLOVE_SKIP_DOD=1 (게이트 우회, 감사 대상)" >&2
     exit 0
 fi
 
@@ -70,7 +70,7 @@ case "$attempts" in ''|*[!0-9]*) attempts=0 ;; esac
 
 # 무한루프 backstop: MAX회 연속 실패면 게이트를 놓아준다(자체 종료 보장).
 if [ "$attempts" -ge "$MAX_ATTEMPTS" ]; then
-    echo "--- MangoLove DoD gate: ${attempts}회 시도에도 DoD 미통과 — 게이트 해제(무한루프 방지). 수동 확인 필요. ---" >&2
+    echo "--- MangoLove DoD gate: ${attempts}회 시도에도 DoD 미통과, 게이트 해제(무한루프 방지). 수동 확인 필요. ---" >&2
     rm -f "$STATE"
     exit 0
 fi
@@ -89,7 +89,7 @@ mkdir -p ./.mangolove 2>/dev/null || true
 _ml_seed_gitignore
 printf '%s' "$attempts" > "$STATE" 2>/dev/null || true
 {
-    echo "--- MangoLove DoD gate: DoD 미통과 (시도 ${attempts}/${MAX_ATTEMPTS}) — 완료를 주장하기 전에 아래를 해결하세요 ---"
+    echo "--- MangoLove DoD gate: DoD 미통과 (시도 ${attempts}/${MAX_ATTEMPTS}), 완료를 주장하기 전에 아래를 해결하세요 ---"
     printf '%s\n' "$out" | tail -30
 } >&2
 

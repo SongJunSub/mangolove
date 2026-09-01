@@ -33,4 +33,4 @@
 
 넷 다 읽기 전용이다(`Edit`/`Write` 없음). 리뷰어가 코드를 고칠 수 있으면 리뷰가 아니라 두 번째 구현이다.
 
-재생성: `bash lib/gen-methodology.sh` — strict.md 변경 시 반드시 재실행하고 diff 를 커밋한다.
+재생성: `bash lib/gen-methodology.sh`, strict.md 변경 시 반드시 재실행하고 diff 를 커밋한다.

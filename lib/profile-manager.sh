@@ -1,6 +1,6 @@
 #!/bin/bash
 # ─────────────────────────────────────────────
-# 🥭 MangoLove — Project Profile Manager
+# 🥭 MangoLove: Project Profile Manager
 # ─────────────────────────────────────────────
 
 MANGOLOVE_DIR="${MANGOLOVE_DIR:-$HOME/.mangolove}"
@@ -11,7 +11,7 @@ source "${MANGOLOVE_DIR}/lib/colors.sh"
 
 list_profiles() {
     echo ""
-    echo -e "${O}${B}🥭 MangoLove — Project Profiles${R}"
+    echo -e "${O}${B}🥭 MangoLove: Project Profiles${R}"
     echo -e "${DIM}──────────────────────────────────────${R}"
 
     local count=0
@@ -47,7 +47,7 @@ list_profiles() {
 
 add_profile() {
     echo ""
-    echo -e "${O}${B}🥭 MangoLove — Add Project Profile${R}"
+    echo -e "${O}${B}🥭 MangoLove: Add Project Profile${R}"
     echo -e "${DIM}──────────────────────────────────────${R}"
     echo ""
 
@@ -114,7 +114,7 @@ auto_generate_profile() {
     fi
 
     echo ""
-    echo -e "${O}${B}🥭 MangoLove — Auto-Generate Profile${R}"
+    echo -e "${O}${B}🥭 MangoLove: Auto-Generate Profile${R}"
     echo -e "${DIM}──────────────────────────────────────${R}"
     echo -e "  ${DIM}Scanning:${R} ${target_dir}"
     echo ""

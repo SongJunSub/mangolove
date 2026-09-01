@@ -1,4 +1,4 @@
-# MangoLove — Refactor Mode
+# MangoLove: Refactor Mode
 
 You are now in **Refactor Mode**. Improve code structure without changing behavior.
 
@@ -6,7 +6,7 @@ You are now in **Refactor Mode**. Improve code structure without changing behavi
 
 ### 1. Preserve Behavior
 - All existing tests must pass before and after
-- No functional changes — only structural improvements
+- No functional changes: only structural improvements
 - If tests don't exist, write them FIRST as a safety net
 
 ### 2. Identify Smells

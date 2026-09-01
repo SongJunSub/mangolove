@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────
-# MangoLove — Impact Score (결정적 트랙 분류)  [Phase 2 / D6]
+# MangoLove: Impact Score (결정적 트랙 분류)  [Phase 2 / D6]
 #
 # strict.md §44-76 Change Impact Score 의 "셀 수 있는 항목"을 LLM 추정이 아니라
-# git diff 로 코드가 계산한다. 핵심 출력은 track_floor — 경로/심볼 패턴에 따른
+# git diff 로 코드가 계산한다. 핵심 출력은 track_floor: 경로/심볼 패턴에 따른
 # 트랙 하한으로, 동일 변경에 대해 결정적이다(DB→Medium, 외부API→Medium, 인증→Large).
 # "새 로직 vs 기존 패턴 내 변경" 같은 의미론은 코드로 못 세므로 LLM 몫(이 스크립트 밖).
 #
 # 콘텐츠 패턴은 **실제 추가된 코드 라인**(diff 헤더/순수 주석/문서(.md 등) 제외)에만 적용해
 # 파일명·주석·산문에 의한 오탐을 막는다. 정규식 커버 스택: Java/Kotlin/Spring, JS/TS,
 # Python, Go, Rails/Django, C#/.NET(EF·[Authorize]), Rust(reqwest·tower/axum auth), PHP/Laravel(Schema),
-# Ruby/Elixir HTTP (그 밖 스택·관용구는 미커버 — track_floor 보장은 커버 스택 한정).
+# Ruby/Elixir HTTP (그 밖 스택·관용구는 미커버: track_floor 보장은 커버 스택 한정).
 #
 # 사용:
 #   impact-score.sh score          <sha|--working|--staged>    → JSON 1줄 (점수 분해 + track_floor)
@@ -21,10 +21,10 @@
 # ─────────────────────────────────────────────
 set -uo pipefail
 
-# diff 추출 — 커밋(sha; 머지는 --first-parent 로 mainline 기준), 워킹트리(--working),
+# diff 추출: 커밋(sha; 머지는 --first-parent 로 mainline 기준), 워킹트리(--working),
 # 인덱스(--staged) 지원.
 # --working 은 untracked(아직 git add 안 한) 신규 파일도 포함한다(인덱스 변경 없이).
-# --staged 는 인덱스에 올라간 것만 본다 — `git commit` 이 실제로 담을 범위와 일치하므로
+# --staged 는 인덱스에 올라간 것만 본다: `git commit` 이 실제로 담을 범위와 일치하므로
 # 커밋 경계 게이트(review-gate)가 이걸 쓴다. (`commit -a` 는 호출자가 --working 으로 넓힌다.)
 _ref_names() {
     case "$1" in
@@ -108,7 +108,7 @@ compute() {
     elif [ "$files" -ge 1 ];  then file_pts=1
     fi
 
-    # 결정적 플래그 — 경로(names) 또는 추가-코드-라인(added) 패턴
+    # 결정적 플래그: 경로(names) 또는 추가-코드-라인(added) 패턴
     local db=0 auth=0 ext=0 api=0
     if printf '%s' "$names" | grep -qiE '(^|/)(migrations?|db/(migration|migrate|changelog)|flyway|liquibase)/' \
        || printf '%s' "$added" | grep -qiE '(CREATE[[:space:]]+TABLE|ALTER[[:space:]]+TABLE|@Entity|@Table([^A-Za-z]|$)|AutoMigrate|create_table|add_column|change_column|models\.Model|migrations\.(CreateModel|AddField)|migrationBuilder\.(CreateTable|DropTable|AddColumn|RenameColumn)|(^|[^A-Za-z])Schema::(create|table|dropIfExists))'; then
@@ -121,7 +121,7 @@ compute() {
     if printf '%s' "$added" | grep -qiE '(RestTemplate|WebClient|HttpClient|OkHttp|@FeignClient|RestClient|[^A-Za-z]axios[.(]|[^A-Za-z]fetch\(|requests\.(get|post|put|delete|patch|head)\(|httpx\.|urllib|http\.(Get|Post|NewRequest|Do)\(|reqwest::(get|post|put|delete|Client)|HTTPoison\.|Faraday\.)'; then
         ext=1
     fi
-    # 라우팅 등록만 — getter 오탐 방지로 router/app 메서드는 첫 인자가 라우트 경로 리터럴("/...)일 때만.
+    # 라우팅 등록만: getter 오탐 방지로 router/app 메서드는 첫 인자가 라우트 경로 리터럴("/...)일 때만.
     local api_q="['\"]" api_re
     api_re="(@(Get|Post|Put|Delete|Patch|Request)Mapping|@app\\.route|HandleFunc|[a-zA-Z_]+\\.(get|post|put|delete|patch)\\([[:space:]]*${api_q}/)"
     if printf '%s' "$added" | grep -qiE "$api_re"; then
@@ -175,7 +175,7 @@ triage() {
 }
 
 # declared-track <ref> → 커밋 메시지의 Change-Track: trailer 를 정규화해 출력(없으면 빈 문자열).
-# git interpret-trailers --parse 로 **footer 트레일러 블록만** 파싱 — 본문(prose) 속
+# git interpret-trailers --parse 로 **footer 트레일러 블록만** 파싱: 본문(prose) 속
 # "Change-Track: ..." 라인을 트레일러로 오인하지 않는다(FP 차단). 마지막 트레일러 우선,
 # 값의 첫 토큰만, 유효하지 않으면 undeclared 취급(빈 출력). --working/--staged 는 메시지가 없어 빈 출력.
 declared_track() {
@@ -200,7 +200,7 @@ declared_track() {
 
 # triage-commit <ref> → compute JSON 에 선언트랙(declared)과 verdict 를 합친 1줄.
 # verdict: 선언이 없으면 undeclared, 있으면 floor 와 비교해 under_triage|over_triage|ok.
-# (트리아지 판정의 단일 출처 — efficacy 집계는 이 verdict 만 읽는다.)
+# (트리아지 판정의 단일 출처: efficacy 집계는 이 verdict 만 읽는다.)
 triage_commit() {
     local ref="$1" json floor decl dr fr verdict declared_json
     json="$(compute "$ref")"

@@ -1,4 +1,4 @@
-# MangoLove — PR Creation Mode
+# MangoLove: PR Creation Mode
 
 You are now in **PR Creation Mode**. Focus on creating a well-structured pull request.
 

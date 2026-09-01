@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # ─────────────────────────────────────────────
-# MangoLove — Profile Manager Tests
+# MangoLove: Profile Manager Tests
 # ─────────────────────────────────────────────
 
 load test_helper
@@ -69,7 +69,7 @@ EOF
 }
 
 # ─────────────────────────────────────────────
-# auto command — tech stack detection
+# auto command: tech stack detection
 # ─────────────────────────────────────────────
 
 @test "auto: detects Gradle + Java project" {
@@ -214,7 +214,7 @@ EOF
     [[ "$output" == *"GitHub Actions"* ]]
 }
 
-@test "auto: detects package manager — yarn" {
+@test "auto: detects package manager: yarn" {
     local proj=$(create_fake_project "yarn-app")
     cat > "$proj/package.json" << 'EOF'
 {"name":"app","scripts":{"build":"next build","test":"jest"}}
@@ -226,7 +226,7 @@ EOF
     [[ "$output" == *"yarn"* ]]
 }
 
-@test "auto: detects package manager — pnpm" {
+@test "auto: detects package manager: pnpm" {
     local proj=$(create_fake_project "pnpm-app")
     cat > "$proj/package.json" << 'EOF'
 {"name":"app","scripts":{"build":"next build","test":"jest"}}

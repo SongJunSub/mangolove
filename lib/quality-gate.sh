@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────
-# MangoLove — Quality Gate (커밋 경계 결정적 차단 게이트)
+# MangoLove: Quality Gate (커밋 경계 결정적 차단 게이트)
 #
 # bare mangolove 세션에 PreToolUse 훅으로 런타임 주입된다(claude --settings).
 # 이 게이트 로직은 버전관리 대상이라 diff로 리뷰/감사된다 (어조가 아니라 코드로 강제).
@@ -35,7 +35,7 @@ if [ "$MODE" = "pretooluse" ]; then
         exit 0
     fi
     # git commit -a/-am 은 tracked 변경을 자동 스테이징하므로 시크릿 스캔을 인덱스+워킹트리(HEAD)로 확대.
-    # 플래그가 commit 바로 뒤에 없어도(git commit -m msg -a) 잡는다 — 넓게 스캔하는 쪽이 안전하다.
+    # 플래그가 commit 바로 뒤에 없어도(git commit -m msg -a) 잡는다: 넓게 스캔하는 쪽이 안전하다.
     if printf '%s' "${commit_line#*commit}" | grep -qE '(^|[[:space:]])(--all|-[a-zA-Z]*a[a-zA-Z]*)([[:space:]]|$)'; then
         SECRET_DIFF_REF="HEAD"
     fi
@@ -48,13 +48,13 @@ if [ "$MODE" = "pretooluse" ]; then
     fi
 fi
 
-# 감사되는 우회구 — strict.md 는 우회를 금지하나 물리적으로는 존재한다.
+# 감사되는 우회구: strict.md 는 우회를 금지하나 물리적으로는 존재한다.
 if [ "${MANGOLOVE_SKIP_GATE:-}" = "1" ]; then
-    echo "MangoLove gate: MANGOLOVE_SKIP_GATE=1 (게이트 우회 — 감사 대상)" >&2
+    echo "MangoLove gate: MANGOLOVE_SKIP_GATE=1 (게이트 우회, 감사 대상)" >&2
     exit 0
 fi
 
-# gate.conf 를 셸로 source 하지 않는다 — 클론/공유된 레포의 악성 gate.conf 가 source
+# gate.conf 를 셸로 source 하지 않는다: 클론/공유된 레포의 악성 gate.conf 가 source
 # 시점에 임의 코드를 실행하는 공급망 위험(RCE)을 차단. 화이트리스트 KEY=VALUE 만 파싱한다.
 if [ -f "$GATE_DIR/gate.conf" ]; then
     while IFS='=' read -r _k _v; do
@@ -95,7 +95,7 @@ run_step() {
 }
 
 # 스테이징된 변경에서 시크릿/자격증명 의심 패턴을 스캔한다 (값은 절대 출력하지 않음).
-# 시크릿은 한 번 커밋되면 회수 불가 — 비가역 표면이라 고신뢰 패턴은 결정적으로 막는다.
+# 시크릿은 한 번 커밋되면 회수 불가: 비가역 표면이라 고신뢰 패턴은 결정적으로 막는다.
 # 고신뢰 prefix 패턴(오탐 거의 없음)은 차단, 제네릭 keyword=value 휴리스틱은 오탐 위험이 커 경고만.
 # SECRET_SCANNER=gitleaks 면 gitleaks 로 위임(설치 시).
 
@@ -153,26 +153,26 @@ if [ "$GATE_SECRET" != "off" ]; then
         definite)
             if [ "$GATE_SECRET" = "block" ]; then
                 failures="${failures} secret"
-                echo "--- MangoLove gate: secret 의심 (값은 표시하지 않음) — 노출 시 즉시 회전(rotate) 필요 ---" >&2
+                echo "--- MangoLove gate: secret 의심 (값은 표시하지 않음), 노출 시 즉시 회전(rotate) 필요 ---" >&2
             else
                 warnings="${warnings} secret"
             fi ;;
         heuristic)
             warnings="${warnings} secret?"
-            echo "--- MangoLove gate 경고: 시크릿 의심(휴리스틱, 비차단) — 확인 권장. 정밀 검사는 gitleaks ---" >&2 ;;
+            echo "--- MangoLove gate 경고: 시크릿 의심(휴리스틱, 비차단), 확인 권장. 정밀 검사는 gitleaks ---" >&2 ;;
     esac
 fi
 
 [ -n "$warnings" ] && echo "MangoLove gate 경고(비차단):${warnings}" >&2
 
 if [ -n "$failures" ]; then
-    # 효능 원장에 차단 기록 (비차단·실패무시 — 게이트 동작을 방해하지 않음)
+    # 효능 원장에 차단 기록 (비차단·실패무시: 게이트 동작을 방해하지 않음)
     rec="$GATE_DIR/efficacy-recorder.sh"
     if [ -f "$rec" ]; then
         read -ra _fk <<< "$failures"
         for _f in "${_fk[@]+"${_fk[@]}"}"; do bash "$rec" record-block gate "$_f" 2>/dev/null || true; done
     fi
-    echo "MangoLove gate 차단 — 실패 단계:${failures}" >&2
+    echo "MangoLove gate 차단, 실패 단계:${failures}" >&2
     echo "  수정 후 재커밋하거나, 부득이하면 MANGOLOVE_SKIP_GATE=1 로 우회(감사됨)." >&2
     [ "$MODE" = "pretooluse" ] && exit 2
     exit 1

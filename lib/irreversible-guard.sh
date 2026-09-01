@@ -73,11 +73,37 @@ has 'git[[:space:]]+reset[[:space:]]+--hard' && block "git reset --hard"
 # 4개 조건을 명령 전체가 아니라 각 rm '세그먼트'에서만 확인: 위 git push 검사와 동일 원리.
 # 무관한 토큰(다른 명령의 -r, jq '//=' 의 '/', 설정 경로의 $HOME 등)이 합쳐져 생기던 오탐 제거.
 # 진짜 'rm -rf $HOME' / 'rm -rf /' 는 그 세그먼트에서 3조건이 모두 참이므로 그대로 차단.
+#
+# 단 하나의 예외: OS 가 정의한 임시 디렉토리의 **하위** 경로만 지우는 경우.
+# 근거는 두 가지다. (1) /tmp 계열은 OS 가 재부팅마다 비우는 영역이라 그 아래를 지우는 것은
+# 정의상 비가역이 아니다. (2) MangoLove 자신이 에이전트에게 스크래치 작업을
+# /private/tmp/.../scratchpad 에서 하라고 지시한다. 지시한 워크플로를 게이트가 막으면
+# 사용자는 MANGOLOVE_ALLOW_DANGER=1 을 습관적으로 붙이게 되고, 그게 진짜 위험이다.
+# 예외는 '증명된 경우'에만 적용한다: 모든 피연산자가 임시 루트 아래의 리터럴 경로여야 하고,
+# 확장($ ` * ? )이나 상위 이동(..)이 하나라도 있으면 예외를 포기하고 차단한다.
+# 서브셸 본문 `( )` 로 둔다: 아래 set -f 가 호출자의 셸 옵션을 건드리지 않게.
+_rm_operands_all_ephemeral() (
+    local seg="$1" tok found=0
+    seg="${seg#*[Rr][Mm]}"          # 명령 이름까지 잘라내고 피연산자만 본다
+    # 확장/글롭/상위이동은 **분해 전 원문에서** 본다. 단어 분리는 경로 확장을 수행하므로
+    # 'rm -rf /tmp/*' 를 나눈 뒤에 검사하면 * 가 이미 실제 경로들로 바뀌어 사라진다.
+    printf '%s' "$seg" | grep -qE '[$`*?[]|\.\.' && return 1
+    set -f                          # 아래 단어 분리에서 경로 확장 금지 (이중 방어)
+    for tok in $seg; do
+        case "$tok" in -*) continue ;; esac
+        found=1
+        # 임시 루트 '아래' 한 세그먼트 이상이어야 한다 (루트 자체 삭제는 예외 대상 아님)
+        printf '%s' "$tok" | grep -qE '^(/tmp|/private/tmp|/var/tmp|/var/folders)/[^/]' || return 1
+    done
+    [ "$found" -eq 1 ]
+)
+
 while IFS= read -r rm_seg; do
     [ -z "$rm_seg" ] && continue
     printf '%s' "$rm_seg" | grep -qiE '(--recursive|[[:space:]]-[a-z]*r)' || continue
     printf '%s' "$rm_seg" | grep -qiE '(--force|[[:space:]]-[a-z]*f)'     || continue
     printf '%s' "$rm_seg" | grep -qiE '[[:space:]](/|~|\$HOME|\$PWD|\$\{HOME\}|\$\{PWD\}|\$\(pwd\))' || continue
+    _rm_operands_all_ephemeral "$rm_seg" && continue
     block "rm -rf on dangerous root"
 done < <(printf '%s' "$cmd" | grep -oiE '(^|[;|&])[[:space:]]*rm[[:space:]][^;|&]*')
 

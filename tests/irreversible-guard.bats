@@ -273,3 +273,52 @@ _json() {
     run bash "$(_guard)" <<< "$(_json 'echo hi\nrm -rf /')"
     [ "$status" -eq 2 ]
 }
+
+# ── 임시 스크래치 예외 (정밀도 개선) ────────────────────────────
+# 가드가 임시 디렉토리 하위까지 막으면 MangoLove 자신이 지시한 스크래치 워크플로가 막힌다.
+# 그러면 사용자는 MANGOLOVE_ALLOW_DANGER=1 을 습관적으로 붙이게 되고, 그게 진짜 위험이다.
+# 예외는 '증명된 경우'에만 준다: 모든 피연산자가 임시 루트 아래의 리터럴 경로일 때만.
+
+@test "guard: allows recursive delete of a subpath under /tmp (scratch cleanup)" {
+    run bash "$(_guard)" <<< "$(_json 'rm -rf /tmp/mangolove-scratch')"
+    [ "$status" -eq 0 ]
+}
+
+@test "guard: allows recursive delete under the harness scratchpad" {
+    run bash "$(_guard)" <<< "$(_json 'rm -rf /private/tmp/claude-501/sess/scratchpad/e2e')"
+    [ "$status" -eq 0 ]
+}
+
+@test "guard: allows recursive delete under macOS temp (/var/folders)" {
+    run bash "$(_guard)" <<< "$(_json 'rm -rf /var/folders/xy/T/build')"
+    [ "$status" -eq 0 ]
+}
+
+@test "guard: still blocks deleting the temp root itself" {
+    run bash "$(_guard)" <<< "$(_json 'rm -rf /tmp')"
+    [ "$status" -eq 2 ]
+    run bash "$(_guard)" <<< "$(_json 'rm -rf /tmp/')"
+    [ "$status" -eq 2 ]
+}
+
+@test "guard: still blocks a glob under temp (실제 대상을 알 수 없다)" {
+    # 회귀 방지: 단어 분리는 경로 확장을 수행하므로, 분해한 뒤에 검사하면 글롭 문자가
+    # 이미 실제 경로들로 바뀌어 사라진다. 반드시 분해 전 원문에서 봐야 한다.
+    run bash "$(_guard)" <<< "$(_json 'rm -rf /tmp/[ab]')"
+    [ "$status" -eq 2 ]
+}
+
+@test "guard: still blocks a variable expansion under temp" {
+    run bash "$(_guard)" <<< "$(_json 'rm -rf /tmp/$SOMEVAR')"
+    [ "$status" -eq 2 ]
+}
+
+@test "guard: still blocks parent traversal out of temp" {
+    run bash "$(_guard)" <<< "$(_json 'rm -rf /tmp/x/../../etc')"
+    [ "$status" -eq 2 ]
+}
+
+@test "guard: one non-temp operand voids the exception" {
+    run bash "$(_guard)" <<< "$(_json 'rm -rf /tmp/a /etc')"
+    [ "$status" -eq 2 ]
+}

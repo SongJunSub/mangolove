@@ -64,6 +64,12 @@ block|rm -rf $HOME/data
 block|rm -rf $PWD
 block|rm -rf ${HOME}
 block|rm -rf $(pwd)
+block|rm -rf /tmp
+block|rm -rf /tmp/[ab]
+block|rm -rf /tmp/a /etc
+pass|rm -rf /tmp/mangolove-scratch/build
+pass|rm -rf /private/tmp/claude-501/sess/scratchpad
+pass|rm -rf /var/folders/xy/T/build
 block|psql mydb -c "DROP TABLE users"
 block|mysql -e "TRUNCATE TABLE orders"
 block|psql -c "DELETE FROM accounts"

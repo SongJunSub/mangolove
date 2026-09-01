@@ -128,14 +128,14 @@ _mangolove() {
         --model)
             if (( CURRENT == 3 )); then
                 local -a models
-                models=('opus' 'sonnet' 'haiku')
+                models=('fable' 'opus' 'sonnet' 'haiku')
                 _describe 'model' models
             fi
             ;;
         --effort)
             if (( CURRENT == 3 )); then
                 local -a efforts
-                efforts=('low' 'medium' 'high' 'max' 'auto')
+                efforts=('low' 'medium' 'high' 'xhigh' 'max')
                 _describe 'effort' efforts
             fi
             ;;

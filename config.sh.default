@@ -20,9 +20,12 @@ MANGOLOVE_SHOW_BANNER=true
 MANGOLOVE_EXTRA_PROMPT=""
 
 # Default Claude model (leave empty to use Claude Code default)
+#   Aliases: fable / opus / sonnet / haiku, or a full id such as claude-opus-5.
 MANGOLOVE_MODEL=""
 
-# Default effort level (low / medium / high / max / auto)
+# Default effort level (low / medium / high / xhigh / max)
+#   Leave empty to use the Claude Code default (xhigh), which is the recommended
+#   level for coding and agentic work. Lower it for cheap, routine turns.
 MANGOLOVE_EFFORT=""
 
 # Methodology delivery (monolith / split)

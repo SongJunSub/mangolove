@@ -16,6 +16,7 @@ PROJECTS_DIR="${MANGOLOVE_COST_PROJECTS_DIR:-$CLAUDE_DIR/projects}"
 # 단가는 모델별로 다르다 — 세션 레코드의 message.model 에 따라 아래 batch_parse_sessions
 # 의 PRICES 로 레코드 단위 적용한다. (과거엔 Opus 단가를 전 세션에 평면 적용해 경량 모델
 # 비용을 과대 계상했다. 게다가 그 Opus 값($15/$75)마저 구형이라 현행 Opus($5/$25)의 3배였다.)
+# fast mode(usage.speed=='fast')는 같은 모델의 프리미엄 단가로 별도 계산한다 (FAST_PRICES).
 # cache write=input×1.25, cache read=input×0.1 (5분 ephemeral 기준)로 유도한다.
 
 # ─────────────────────────────────────────────
@@ -35,20 +36,30 @@ from collections import defaultdict
 
 # 모델별 (input, output) 달러/1M 토큰. cache write=input*1.25, read=input*0.1 로 유도.
 PRICES = {
+    'claude-opus-5': (5.0, 25.0),
     'claude-opus-4-8': (5.0, 25.0),
     'claude-opus-4-7': (5.0, 25.0),
     'claude-opus-4-6': (5.0, 25.0),
     'claude-opus-4-5': (5.0, 25.0),
-    'claude-sonnet-5': (3.0, 15.0),
+    'claude-sonnet-5': (2.0, 10.0),
     'claude-sonnet-4-6': (3.0, 15.0),
     'claude-sonnet-4-5': (3.0, 15.0),
     'claude-haiku-4-5': (1.0, 5.0),
     'claude-fable-5': (10.0, 50.0),
     'claude-mythos-5': (10.0, 50.0),
 }
-DEFAULT = PRICES['claude-opus-4-8']  # 미상 모델 → 현행 Opus 단가로 추정
+DEFAULT = PRICES['claude-opus-5']  # 미상 모델 → 현행 Opus 단가로 추정
 
-def price_for(model):
+# fast mode(usage.speed == 'fast')는 같은 모델을 더 비싸게 과금한다. 세션 jsonl 의
+# usage.speed 를 읽어 프리미엄 단가로 계산한다. 공개 단가가 확인된 모델만 싣는다
+# (미등재 모델의 fast 는 표준 단가로 계산 — 과소 계상될 수 있는 known-gap, 추정 금지).
+FAST_PRICES = {
+    'claude-opus-5': (10.0, 50.0),
+}
+
+def price_for(model, speed=None):
+    if speed == 'fast' and model in FAST_PRICES:
+        return FAST_PRICES[model]
     if not model:
         return DEFAULT
     if model in PRICES:
@@ -91,7 +102,7 @@ for line in file_list.strip().split('\n'):
                     o = usage.get('output_tokens', 0) or 0
                     cw = usage.get('cache_creation_input_tokens', 0) or 0
                     cr = usage.get('cache_read_input_tokens', 0) or 0
-                    p_in, p_out = price_for(msg.get('model'))
+                    p_in, p_out = price_for(msg.get('model'), usage.get('speed'))
                     cost = (i * p_in + o * p_out + cw * (p_in * 1.25) + cr * (p_in * 0.1)) / 1_000_000
                     projects[proj_name][0] += i
                     projects[proj_name][1] += o
@@ -235,7 +246,7 @@ show_cost() {
 
     echo ""
     echo -e "${DIM}──────────────────────────────────────${R}"
-    echo -e "  ${DIM}단가(모델별, /1M in·out): opus \$5/\$25 · sonnet \$3/\$15 · haiku \$1/\$5 · fable \$10/\$50 (cache 추정)${R}"
+    echo -e "  ${DIM}단가(모델별, /1M in-out): opus \$5/\$25, sonnet 5 \$2/\$10, sonnet 4.6 \$3/\$15, haiku \$1/\$5, fable \$10/\$50, opus 5 fast \$10/\$50 (cache 추정)${R}"
     echo ""
 }
 

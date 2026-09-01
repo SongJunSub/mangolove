@@ -111,7 +111,9 @@ EOF
 # ── Session info ──
 CURRENT_DIR=$(pwd)
 CLAUDE_VER=$(claude --version 2>/dev/null | sed 's/ (Claude Code)//')
-CLAUDE_MODEL="${MANGOLOVE_MODEL:-opus}"
+# 세션 모델은 MANGOLOVE_MODEL 이 있을 때만 확정된다. 미설정이면 Claude Code 기본값을
+# 그대로 쓰므로 특정 모델명을 표시하면 거짓 정보가 된다(예전엔 항상 "opus"로 찍혔다).
+CLAUDE_MODEL="${MANGOLOVE_MODEL:-(claude default)}"
 
 echo "    ${FGR}│${R} ${FC}${B}⟩${R} ${FW}${B}Claude${R}    ${FGR}·${R} ${FG}v${CLAUDE_VER}${R}"
 echo "    ${FGR}│${R} ${FC}${B}⟩${R} ${FW}${B}Model${R}     ${FGR}·${R} ${FG}${CLAUDE_MODEL}${R}"

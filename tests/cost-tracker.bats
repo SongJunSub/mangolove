@@ -28,6 +28,14 @@ _write_output_only_session() {
       > "$file"
 }
 
+# 위와 같되 usage.speed 를 실어 fast mode 프리미엄 단가 적용을 검증한다.
+_write_output_only_session_speed() {
+    local model="$1" out_tokens="$2" speed="$3" file="$4"
+    printf '%s\n' \
+      "{\"message\":{\"model\":\"$model\",\"usage\":{\"input_tokens\":0,\"output_tokens\":$out_tokens,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"speed\":\"$speed\"}}}" \
+      > "$file"
+}
+
 _run_cost() {
     run env MANGOLOVE_COST_PROJECTS_DIR="$TEST_DIR/claude-projects" \
             MANGOLOVE_DIR="$MANGOLOVE_DIR" \
@@ -73,4 +81,43 @@ _run_cost() {
     _run_cost
     [ "$status" -eq 0 ]
     [[ "$output" == *'$.30'* || "$output" == *'$0.30'* ]]
+}
+
+# ── Claude 5 계열 회귀 (Opus 5 / Sonnet 5 / Fable 5 / fast mode) ──
+# Sonnet 5 는 Sonnet 4.6($3/$15)보다 싸다($2/$10). 4.6 단가를 재사용하면 50% 과대 계상된다.
+
+@test "opus 5 1M output → \$25.00 (현행 Opus 단가)" {
+    _write_output_only_session "claude-opus-5" 1000000 "$PROJ_DIR/o5.jsonl"
+    _run_cost
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"25.00"* ]]
+}
+
+@test "sonnet 5 1M output → \$10.00 (sonnet 4.6 의 \$15 아님)" {
+    _write_output_only_session "claude-sonnet-5" 1000000 "$PROJ_DIR/s5.jsonl"
+    _run_cost
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"10.00"* ]]
+    [[ "$output" != *"15.00"* ]]
+}
+
+@test "fable 5 1M output → \$50.00" {
+    _write_output_only_session "claude-fable-5" 1000000 "$PROJ_DIR/f5.jsonl"
+    _run_cost
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"50.00"* ]]
+}
+
+@test "opus 5 fast mode 1M output → \$50.00 (표준 \$25 의 프리미엄 단가)" {
+    _write_output_only_session_speed "claude-opus-5" 1000000 "fast" "$PROJ_DIR/o5f.jsonl"
+    _run_cost
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"50.00"* ]]
+}
+
+@test "speed=standard 는 표준 단가 그대로 (\$25.00)" {
+    _write_output_only_session_speed "claude-opus-5" 1000000 "standard" "$PROJ_DIR/o5s.jsonl"
+    _run_cost
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"25.00"* ]]
 }

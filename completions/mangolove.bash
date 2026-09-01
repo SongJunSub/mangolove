@@ -13,8 +13,8 @@ _mangolove_completions() {
     local plugin_cmds="create enable disable"
     local log_cmds="init view search recent"
     local modes=""
-    local models="opus sonnet haiku"
-    local efforts="low medium high max auto"
+    local models="fable opus sonnet haiku"
+    local efforts="low medium high xhigh max"
 
     # Dynamically load available modes
     local modes_dir="${MANGOLOVE_DIR:-$HOME/.mangolove}/prompts/modes"

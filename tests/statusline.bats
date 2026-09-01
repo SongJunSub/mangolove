@@ -56,3 +56,17 @@ setup() {
     [ "${lines[0]}" = "True" ]
     [ "${lines[1]}" = "False" ]
 }
+
+@test "statusline: ctx 85% 이상이면 다음 행동(/clear|/compact)을 붙인다" {
+    json='{"model":{"display_name":"Opus"},"context_window":{"used_percentage":91.0}}'
+    run bash -c "printf '%s' '$json' | '$SL'"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"/clear|/compact"* ]]
+}
+
+@test "statusline: ctx 85% 미만에서는 힌트를 붙이지 않는다 (상시 소음 방지)" {
+    json='{"model":{"display_name":"Opus"},"context_window":{"used_percentage":42.0}}'
+    run bash -c "printf '%s' '$json' | '$SL'"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"/clear"* ]]
+}

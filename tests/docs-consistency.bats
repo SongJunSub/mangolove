@@ -86,3 +86,46 @@ setup() {
     done < <(git -C "$REPO" ls-files -- 'lib/*.sh')
     [ -z "$bad" ] || { echo "non-executable in git:$bad"; false; }
 }
+
+@test "methodology: 트랙별 필수 리뷰 표가 strict.md 에 단일 출처로 존재한다" {
+    # F2 회귀: 트랙별 리뷰 요구가 system-prompt 와 strict.md 두 곳에서 다르게 정의되면
+    # 모델은 둘 중 아무거나 인용하고("Medium 인데 3인 리뷰 대상") 그 다음 생략한다.
+    grep -q '### 트랙별 필수 리뷰 (단일 출처)' "$REPO/methodology/strict.md"
+    grep -qE '^\| Medium \| `simplify`, `code-review` \|$' "$REPO/methodology/strict.md"
+    grep -qE '^\| Large \| `simplify`, `code-review`, `security-review` \|$' "$REPO/methodology/strict.md"
+}
+
+@test "methodology: 실존하지 않는 스킬(/plan, /review)을 필수로 지정하지 않는다" {
+    # F1 회귀: 실행 불가능한 의무는 "돌리지 않았습니다" 보고로 귀결된다.
+    # 실존 이름은 simplify / code-review / security-review 이고, 계획은 EnterPlanMode 도구다.
+    local sp="$REPO/prompts/system-prompt.md"
+    ! grep -qE 'Skill\("plan"\)|Skill\("review"\)' "$sp"
+    ! grep -qE '^\| *[0-9]?단계?:? *분석 *\| *`/plan`' "$sp"
+    grep -q 'EnterPlanMode' "$sp"
+    grep -q 'Skill("code-review")' "$sp"
+}
+
+@test "methodology: 생략 후 사후 보고 금지 규칙이 strict.md 에 있다" {
+    # F4 회귀: "생략하고 → 완료 보고하고 → 그 안에서 고백하며 → 돌릴까요" 를 금지하는 규칙.
+    grep -q '### 생략을 사후에 보고하지 않는다' "$REPO/methodology/strict.md"
+    grep -q '필요하시면 지금 돌리겠습니다' "$REPO/methodology/strict.md"
+}
+
+@test "methodology: 트랙 판정을 mangolove impact 로 확정하도록 배선돼 있다" {
+    # F3 회귀: 결정적 계산기가 있는데 모델이 표를 보고 암산하면 과대 판정이 나온다.
+    grep -q '트랙 판정은 암산이 아니라' "$REPO/methodology/strict.md"
+    grep -q 'mangolove impact' "$REPO/methodology/strict.md"
+}
+
+@test "boundary: strict.md 의 필수 리뷰 표와 review-gate.sh 의 코드가 일치한다" {
+    # 경계면 교차검증 — 산문(표)과 게이트(코드)가 어긋나면 모델은 표를 따르고
+    # 게이트는 코드를 따라 서로 다른 것을 요구한다. 양쪽을 같이 읽어 대조한다.
+    local gate="$REPO/lib/review-gate.sh" md="$REPO/methodology/strict.md"
+    local doc_medium doc_large code_medium code_large
+    doc_medium="$(grep -E '^\| Medium \|' "$md" | sed -E 's/^\| Medium \| //; s/ \|$//; s/`//g; s/, / /g')"
+    doc_large="$(grep -E '^\| Large \|' "$md" | sed -E 's/^\| Large \| //; s/ \|$//; s/`//g; s/, / /g')"
+    code_medium="$(bash "$gate" required Medium false false false)"
+    code_large="$(bash "$gate" required Large false false false)"
+    [ "$doc_medium" = "$code_medium" ] || { echo "Medium 불일치: doc=[$doc_medium] code=[$code_medium]"; false; }
+    [ "$doc_large" = "$code_large" ] || { echo "Large 불일치: doc=[$doc_large] code=[$code_large]"; false; }
+}

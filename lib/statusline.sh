@@ -49,6 +49,10 @@ used = g("context_window.used_percentage")
 if isinstance(used, (int, float)):
     col = G if used < 60 else (Y if used < 85 else RED)
     parts.append(f"ctx {col}{used:.0f}%{R}")
+    # context 는 가장 비싼 자원이다. 임계에서 숫자만 붉게 만드는 대신 다음 행동을 붙인다
+    # (무관한 다음 작업이면 /clear, 같은 작업을 이어가면 /compact).
+    if used >= 85:
+        parts.append(f"{RED}/clear|/compact{R}")
 elif g("exceeds_200k_tokens") is True:
     parts.append(f"{RED}ctx >200k{R}")
 else:

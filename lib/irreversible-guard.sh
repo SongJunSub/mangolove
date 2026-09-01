@@ -40,7 +40,7 @@ cmd="${cmd//\`/}"
 has() { printf '%s' "$cmd" | grep -qiE "$1"; }
 
 block() {
-    # 효능 원장에 차단 기록 (비차단·실패무시)
+    # 효능 원장에 차단 기록 (비차단, 실패무시)
     local rec; rec="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/efficacy-recorder.sh"
     if [ -f "$rec" ]; then bash "$rec" record-block guard "$1" 2>/dev/null || true; fi
     echo "MangoLove guard 차단, 비가역/파괴적 명령 의심: $1" >&2
@@ -67,7 +67,7 @@ fi
 has 'git[[:space:]]+reset[[:space:]]+--hard' && block "git reset --hard"
 
 # rm 위험 루트: 분리/롱폼 플래그(-r -f, --recursive --force)와 따옴표 우회까지 차단.
-# 위험 루트엔 리터럴(/,~)·환경변수(\$HOME,\$PWD,\${HOME},\${PWD})·명령치환(\$(pwd))까지 포함.
+# 위험 루트엔 리터럴(/,~), 환경변수(\$HOME,\$PWD,\${HOME},\${PWD}), 명령치환(\$(pwd))까지 포함.
 # 보수적: 이 루트 '아래 하위경로'(예: \$PWD/build, \$HOME/.ssh)도 함께 막는다: 안전한 하위삭제와
 # 위험한 하위삭제(.ssh 등)를 정규식으로 구분할 수 없으므로 안전을 택한다. 의도된 삭제는 override.
 # 4개 조건을 명령 전체가 아니라 각 rm '세그먼트'에서만 확인: 위 git push 검사와 동일 원리.
@@ -92,7 +92,7 @@ if has '(psql|mysql|mariadb|sqlite3|mongosh|mongo|clickhouse-client|cqlsh)([[:sp
 fi
 
 # 파괴적 Mongo: mongo/mongosh 호출에 앵커링 (SQL 구문이 아닌 문서 메서드라 위 블록이 못 잡음).
-# 조건 없는 전체 삭제·컬렉션/DB drop 만 차단; 필터가 있는 deleteMany 는 통과(정밀도 보존).
+# 조건 없는 전체 삭제, 컬렉션/DB drop 만 차단; 필터가 있는 deleteMany 는 통과(정밀도 보존).
 if has '(mongosh|mongo)([[:space:]]|$)'; then
     has 'dropDatabase[[:space:]]*\(' && block "destructive Mongo (dropDatabase)"
     # drop( 은 인자 유무와 무관히 파괴적(컬렉션 제거). mongo 앵커라 list.drop(n) 등 오탐 없음; .dropIndex 는 제외됨.

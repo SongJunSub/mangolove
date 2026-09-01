@@ -242,7 +242,7 @@ _json() {
     [ "$status" -eq 2 ]
 }
 
-# ── Jul-10 회수분: JSON 이스케이프(\n\r\t) 치환 · push -f 대소문자 구분 · rm 세그먼트 단위 검사 ──
+# ── Jul-10 회수분: JSON 이스케이프(\n\r\t) 치환, push -f 대소문자 구분, rm 세그먼트 단위 검사 ──
 # 아래는 모두 구버전에서 오탐 차단(또는 실제 위험을 오검 통과)하던 케이스다.
 
 @test "guard: allows multi-line safe push, unrelated commit -F on next line (\\n = 경계)" {

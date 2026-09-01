@@ -23,11 +23,11 @@ MangoLove는 Claude Code를 감쌉니다. 4-track 방법론을 시스템 프롬�
 | **품질 측정** | 측정 안 됨 | `mangolove efficacy`(게이트가 막은 것 + under-triage), `mangolove eval`(결정적 부품 점수) |
 | **오버헤드** | 0 | 훅 몇 개 + 크고 위험한 변경에 더 무거운 절차(사소한 작업은 가볍게 유지) |
 
-**`claude`**는 의견도 오버헤드도 0인 즉석 탐색에, **`mangolove`**는 안전망·일관된 절차·측정 가능한 품질이 중요한 실제 프로젝트 작업에 쓰세요.
+**`claude`**는 의견도 오버헤드도 0인 즉석 탐색에, **`mangolove`**는 안전망, 일관된 절차, 측정 가능한 품질이 중요한 실제 프로젝트 작업에 쓰세요.
 
 > **리뷰 게이트의 경계**: 리뷰 게이트는 품질 장치이지 보안 경계가 아닙니다. 원장은 `PostToolUse(Skill)` 훅이 남기므로 "정말 스킬이 실행됐는가"는 결정적이지만, "그 스킬이 실제로 리뷰를 했는가"까지는 보장하지 않습니다. 프로젝트에 `simplify` 라는 이름의 빈 스킬을 두면 게이트는 통과합니다. 의도적 우회를 막는 장치가 아니라, 잊고 지나가는 것을 막는 장치입니다. 명시적 우회는 `MANGOLOVE_SKIP_REVIEW=1` 로 감사 가능하게 남기세요.
 
-> **정직한 경계**: 방법론은 *프롬프트*로 주입됩니다. 즉 모델에게 따르라고 *요청*하는 것입니다. **게이트·가드는 결정적**(exit code로 실제 차단)이지만, 산문 규율은 확률적으로 지켜집니다. MangoLove는 그 규율을 기본값으로 만들고 단단한 결정적 안전망을 더하는 것이지, 모델을 무오류로 만들지는 않습니다. 실제로 무엇이 측정되고 무엇이 안 되는지는 `mangolove eval` 참조.
+> **정직한 경계**: 방법론은 *프롬프트*로 주입됩니다. 즉 모델에게 따르라고 *요청*하는 것입니다. **게이트, 가드는 결정적**(exit code로 실제 차단)이지만, 산문 규율은 확률적으로 지켜집니다. MangoLove는 그 규율을 기본값으로 만들고 단단한 결정적 안전망을 더하는 것이지, 모델을 무오류로 만들지는 않습니다. 실제로 무엇이 측정되고 무엇이 안 되는지는 `mangolove eval` 참조.
 
 ## Strict Mode: 위험도 기반 품질 워크플로우
 
@@ -50,7 +50,7 @@ MangoLove는 Claude Code를 감쌉니다. 4-track 방법론을 시스템 프롬�
 
 리뷰는 이슈를 *찾기만* 하지 않습니다. 각 발견은 수정 대상이 되기 전에 **적대적으로 검증**됩니다:
 
-- **탈상관 렌즈**: 리뷰어를 도메인(보안 / 성능 / 비즈니스 로직)만이 아니라 *방법*(정독 / 적대적 반증 / 반례 생성)으로도 나눕니다. 같은 모델·같은 프레임은 같은 맹점을 공유하기 때문.
+- **탈상관 렌즈**: 리뷰어를 도메인(보안 / 성능 / 비즈니스 로직)만이 아니라 *방법*(정독 / 적대적 반증 / 반례 생성)으로도 나눕니다. 같은 모델, 같은 프레임은 같은 맹점을 공유하기 때문.
 - **find → verify**: 각 Critical/Major 발견은 별도 에이전트가 반증(기본값 refuted)을 시도해 살아남은 것만 수정 대상이 되고, 고위험 변경은 다수결 검증을 씁니다. 정밀도가 올라, 그럴듯하나 틀린 발견이 불필요한 수정을 유발하지 않습니다.
 - 신뢰의 근거는 **검증을 통과한 발견**이지 "N명이 동의함"이 아닙니다(상관된 동의는 독립 검증이 아님).
 
@@ -69,7 +69,7 @@ split 이 기본인 이유는 토큰 절감만이 아닙니다. 상시 주입이
 
 ### 비용 추적
 ```bash
-mangolove cost                # 이번 주 토큰 사용량·비용
+mangolove cost                # 이번 주 토큰 사용량, 비용
 mangolove cost today          # 오늘
 mangolove cost month          # 이번 달
 mangolove cost all            # 전체 기간
@@ -78,7 +78,7 @@ mangolove cost all            # 전체 기간
 ### 생산성
 ```bash
 mangolove stats               # git 기반 생산성 대시보드
-mangolove stats today         # 오늘의 커밋·파일·LOC
+mangolove stats today         # 오늘의 커밋, 파일, LOC
 mangolove stats month         # 월간 유형별 분석
 ```
 
@@ -95,17 +95,17 @@ mangolove resume              # 이전 세션 컨텍스트 이어가기
 mangolove sessions            # 저장된 세션 목록
 ```
 
-### 측정 · 자가평가
+### 측정, 자가평가
 ```bash
 mangolove impact [sha]        # 변경의 결정적 트랙/영향도 (워킹트리 또는 커밋)
 mangolove efficacy            # 게이트/가드가 실제로 막은 것 + 트랙 under-triage
 mangolove eval                # 자가평가: impact-score 보정도 + 가드 정밀도/재현율 (정직한 known-gap 포함)
 mangolove ab                  # A/B 하니스 (방법론 vs 맨 claude): 게이트 보호 + 채점 엔진
-mangolove audit-methodology   # 방법론 파일 감사: 섹션별 부피·강제표현 밀도·발동 0건 (삭제 후보)
+mangolove audit-methodology   # 방법론 파일 감사: 섹션별 부피, 강제표현 밀도, 발동 0건 (삭제 후보)
 ```
 세션 중 타이핑하는 명령이 아니라, 프로젝트에서 시스템을 점검할 때 쓰는 ops/CI용 명령입니다.
 
-`audit-methodology`는 **컨텍스트 파일이 단조 증가하는 것을 막기 위한** 명령입니다. 방법론은 줄이 늘수록 개별 지시의 효력이 희석되는데, "어떤 줄이 값을 못 내는가"를 볼 수 없으면 삭제 결정을 내릴 수 없습니다. 부피(줄/문자)·강제표현 밀도·최종수정일·게이트 발동 건수만 결정적으로 산출하고(합성 점수 없음), 삭제/유지/코드 이관 **판정은 세션에 넘깁니다**. 수치는 코드가, 판단은 모델이 합니다. 읽기 전용이라 어떤 파일도 고치지 않습니다.
+`audit-methodology`는 **컨텍스트 파일이 단조 증가하는 것을 막기 위한** 명령입니다. 방법론은 줄이 늘수록 개별 지시의 효력이 희석되는데, "어떤 줄이 값을 못 내는가"를 볼 수 없으면 삭제 결정을 내릴 수 없습니다. 부피(줄/문자), 강제표현 밀도, 최종수정일, 게이트 발동 건수만 결정적으로 산출하고(합성 점수 없음), 삭제/유지/코드 이관 **판정은 세션에 넘깁니다**. 수치는 코드가, 판단은 모델이 합니다. 읽기 전용이라 어떤 파일도 고치지 않습니다.
 
 ### 안전 게이트 (모든 `mangolove` 세션에서 활성)
 훅이 자동 동작합니다. 설정이나 설치는 필요 없습니다:
@@ -117,7 +117,7 @@ mangolove audit-methodology   # 방법론 파일 감사: 섹션별 부피·강�
 차단된 건은 로컬 효능 원장에 기록돼 `mangolove efficacy`가 무엇을 잡았는지 보고합니다.
 
 ### 상태줄 (기본 on)
-모든 `mangolove` 세션의 상태줄에 **context 사용률·세션 비용·메서드러지 모드**를 노출합니다(`🥭 · Opus · proj · ctx 42% · $0.12 · split`). context window 가 가장 중요한 자원이라, 사용률을 상시 눈으로 확인해 `/clear`·`/compact` 시점을 잡을 수 있습니다. 자체 statusLine 을 쓰면 `MANGOLOVE_STATUSLINE=off`.
+모든 `mangolove` 세션의 상태줄에 **context 사용률, 세션 비용, 메서드러지 모드**를 노출합니다(`🥭 · Opus · proj · ctx 42% · $0.12 · split`). context window 가 가장 중요한 자원이라, 사용률을 상시 눈으로 확인해 `/clear` 나 `/compact` 시점을 잡을 수 있습니다. 자체 statusLine 을 쓰면 `MANGOLOVE_STATUSLINE=off`.
 
 ### 커밋 트레일러: `Change-Track:`
 방법론은 에이전트가 사용한 트랙을 커밋 footer에 기록하도록 요청합니다:
@@ -143,7 +143,7 @@ mangolove help                # 전체 명령 목록
 - **Databases**: MySQL, PostgreSQL, MongoDB, Redis, ElasticSearch
 - **Infrastructure**: Docker, Kubernetes, GitHub Actions, Jenkins, Terraform
 
-(impact-score의 결정적 트랙 분류는 위에 더해 C#/.NET·PHP/Laravel·Ruby/Elixir의 일부 관용구도 커버합니다. 정확한 커버리지는 `mangolove eval`이 known-gap과 함께 보고.)
+(impact-score의 결정적 트랙 분류는 위에 더해 C#/.NET, PHP/Laravel, Ruby/Elixir의 일부 관용구도 커버합니다. 정확한 커버리지는 `mangolove eval`이 known-gap과 함께 보고.)
 
 ## 요구사항
 

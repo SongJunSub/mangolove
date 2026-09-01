@@ -108,7 +108,7 @@ _staged_added() {
     printf '%s\n' "$staged" | grep -E '^\+' | grep -vE '^\+\+\+'
 }
 
-# 고신뢰: 매치 시 0(found). private key / 클라우드·서비스 토큰 / 비밀번호 포함 접속 URL.
+# 고신뢰: 매치 시 0(found). private key / 클라우드, 서비스 토큰 / 비밀번호 포함 접속 URL.
 _secret_definite() {
     local a="$1"
     printf '%s\n' "$a" | grep -qE 'BEGIN [A-Z ]*PRIVATE KEY' && return 0
@@ -166,7 +166,7 @@ fi
 [ -n "$warnings" ] && echo "MangoLove gate 경고(비차단):${warnings}" >&2
 
 if [ -n "$failures" ]; then
-    # 효능 원장에 차단 기록 (비차단·실패무시: 게이트 동작을 방해하지 않음)
+    # 효능 원장에 차단 기록 (비차단, 실패무시: 게이트 동작을 방해하지 않음)
     rec="$GATE_DIR/efficacy-recorder.sh"
     if [ -f "$rec" ]; then
         read -ra _fk <<< "$failures"

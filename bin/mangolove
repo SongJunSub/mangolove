@@ -47,7 +47,7 @@ MANGOLOVE_METHODOLOGY_MODE="split"
 # 기본 on. dod.sh 가 외부화되지 않았으면 즉시 통과하므로 idle 오버헤드가 없다.
 # 세션 게이트 번들에 함께 주입되므로 MANGOLOVE_SESSION_GATES=true 필요.
 MANGOLOVE_DOD_GATE=on
-# Status line (on / off): context 사용률·비용·메서드러지 모드를 상태줄에 노출. 기본 on.
+# Status line (on / off): context 사용률, 비용, 메서드러지 모드를 상태줄에 노출. 기본 on.
 # mangolove 세션 동안 사용자 자체 statusLine 을 override 하므로 보존하려면 off.
 MANGOLOVE_STATUSLINE=on
 # Review gate (on / off): 커밋 경계에서 staged 변경의 track_floor 를 코드로 계산해
@@ -472,7 +472,7 @@ do_doctor() {
 
     # Status line
     if ! _ml_is_off "${MANGOLOVE_STATUSLINE:-on}" && [ -f "$MANGOLOVE_DIR/lib/statusline.sh" ]; then
-        echo -e "  \033[38;5;113m✓\033[0m Status line: on (context 사용률·비용·모드)"
+        echo -e "  \033[38;5;113m✓\033[0m Status line: on (context 사용률, 비용, 모드)"
     else
         echo -e "  \033[38;5;220m△\033[0m Status line: off (MANGOLOVE_STATUSLINE)"
     fi
@@ -1002,7 +1002,7 @@ STOPEOF
 )
     fi
 
-    # 상태줄: context 사용률·비용·모드 노출. MANGOLOVE_STATUSLINE=off 로 비활성(사용자 statusLine 보존).
+    # 상태줄: context 사용률, 비용, 모드 노출. MANGOLOVE_STATUSLINE=off 로 비활성(사용자 statusLine 보존).
     local statusline_block=""
     if ! _ml_is_off "${MANGOLOVE_STATUSLINE:-on}" && [ -f "$statusline" ]; then
         local eff_mode="monolith"

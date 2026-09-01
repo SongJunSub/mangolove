@@ -89,7 +89,7 @@ _git_repo() {
     [[ "$output" == *"방법론 효능"* ]]
 }
 
-# ── 적대적 리뷰 회귀 (실설치 배선·cwd·게이트 비차단·invariant·JSON) ──
+# ── 적대적 리뷰 회귀 (실설치 배선, cwd, 게이트 비차단, invariant, JSON) ──
 
 @test "efficacy: guard records to the project ledger using stdin cwd" {
     local r; r=$(_git_repo "eff-guard-cwd")

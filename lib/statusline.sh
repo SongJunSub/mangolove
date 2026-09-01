@@ -2,7 +2,7 @@
 # ─────────────────────────────────────────────
 # MangoLove: status line
 # settings.json 의 statusLine 로 주입된다(claude --settings). stdin=JSON.
-# context window 사용률·세션 비용·메서드러지 모드를 한 줄로 노출해 다이어트 효과를 가시화한다.
+# context window 사용률, 세션 비용, 메서드러지 모드를 한 줄로 노출해 다이어트 효과를 가시화한다.
 # (context_window.used_percentage, cost.total_cost_usd, model.display_name 등은 claude 가 제공.)
 #
 # 모드/게이트는 명령 문자열에 env 로 baked 된다 (generate_session_settings 참조).

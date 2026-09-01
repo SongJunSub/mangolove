@@ -8,9 +8,9 @@
 # "새 로직 vs 기존 패턴 내 변경" 같은 의미론은 코드로 못 세므로 LLM 몫(이 스크립트 밖).
 #
 # 콘텐츠 패턴은 **실제 추가된 코드 라인**(diff 헤더/순수 주석/문서(.md 등) 제외)에만 적용해
-# 파일명·주석·산문에 의한 오탐을 막는다. 정규식 커버 스택: Java/Kotlin/Spring, JS/TS,
-# Python, Go, Rails/Django, C#/.NET(EF·[Authorize]), Rust(reqwest·tower/axum auth), PHP/Laravel(Schema),
-# Ruby/Elixir HTTP (그 밖 스택·관용구는 미커버: track_floor 보장은 커버 스택 한정).
+# 파일명, 주석, 산문에 의한 오탐을 막는다. 정규식 커버 스택: Java/Kotlin/Spring, JS/TS,
+# Python, Go, Rails/Django, C#/.NET(EF, [Authorize]), Rust(reqwest, tower/axum auth), PHP/Laravel(Schema),
+# Ruby/Elixir HTTP (그 밖 스택, 관용구는 미커버: track_floor 보장은 커버 스택 한정).
 #
 # 사용:
 #   impact-score.sh score          <sha|--working|--staged>    → JSON 1줄 (점수 분해 + track_floor)

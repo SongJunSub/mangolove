@@ -2,8 +2,8 @@
 # ─────────────────────────────────────────────
 # MangoLove: Efficacy Ledger (Phase 2 / D5)
 #
-# 방법론(게이트·가드·트랙)이 "실제로 무엇을 잡았나"를 결정적 신호에만 앵커해
-# 기록·집계한다. cost/stats(노력·부피)와 달리 효능(무엇을 막았나)을 측정.
+# 방법론(게이트, 가드, 트랙)이 "실제로 무엇을 잡았나"를 결정적 신호에만 앵커해
+# 기록, 집계한다. cost/stats(노력, 부피)와 달리 효능(무엇을 막았나)을 측정.
 #
 #   record-block <phase> <kind>  게이트/가드 차단 시 실시간 append (결정적: 게이트 자신의 차단 결정)
 #   report                       차단 원장 + 리스크 분포 + under-triage(선언 vs floor) + revert 신호
@@ -25,7 +25,7 @@ _project() {
 }
 _ledger() { printf '%s/%s.jsonl' "$EFF_DIR" "$(_project)"; }
 
-# 게이트/가드 차단 1건 기록 (비차단·실패무시: 게이트 동작을 절대 방해하지 않음)
+# 게이트/가드 차단 1건 기록 (비차단, 실패무시: 게이트 동작을 절대 방해하지 않음)
 record_block() {
     mkdir -p "$EFF_DIR" 2>/dev/null || return 0
     local ts p k
@@ -67,7 +67,7 @@ report() {
         local n=0 t=0 s=0 m=0 l=0 risky=0 declared=0 under=0 sha j floor verdict
         while IFS= read -r sha; do
             [ -z "$sha" ] && continue
-            # triage-commit 1회로 floor·리스크플래그·선언트랙·verdict 를 함께 얻는다(커밋당 1콜).
+            # triage-commit 1회로 floor, 리스크플래그, 선언트랙, verdict 를 함께 얻는다(커밋당 1콜).
             j="$(bash "$imp" triage-commit "$sha" 2>/dev/null)" || continue
             floor="$(printf '%s' "$j" | sed -E 's/.*"track_floor":"([^"]+)".*/\1/')"
             case "$floor" in
@@ -88,7 +88,7 @@ report() {
         printf '  점수화된 최근 %s커밋:  Trivial %s / Small %s / Medium %s / Large %s\n' "$n" "$t" "$s" "$m" "$l"
         printf '  인증/DB/외부API 터치: %s건 (무거운 트랙이어야 할 변경)\n' "$risky"
         echo ""
-        echo "참고, 트랙 under-triage (선언 트랙 < 코드 floor; 선언은 자기보고·floor는 git diff 결정적):"
+        echo "참고, 트랙 under-triage (선언 트랙 < 코드 floor; 선언은 자기보고, floor는 git diff 결정적):"
         echo "  (분모=선언된 커밋만; --first-parent 기준이라 merge-커밋으로 들어온 선언은 미집계)"
         if [ "$declared" -gt 0 ]; then
             # 커버리지를 명시적으로: '미선언 N건은 측정 대상 외'로 오독(높은 선언율로 위장) 차단

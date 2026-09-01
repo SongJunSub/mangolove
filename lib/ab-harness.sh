@@ -7,16 +7,16 @@
 #
 #   ① 환경 차이: 안전망(가드) 유무 (결정적 계층, LLM 없이 CI 에서 돈다):
 #      대표 위험 카테고리에서 처치군(가드 on)은 차단, 대조군(맨 claude, 가드 off)은 그대로 실행.
-#      이는 **결정적 가드 계층**(변종 탐지 재현율은 v1 'mangolove eval' 에서 측정)으로, 새 측정·우월성
+#      이는 **결정적 가드 계층**(변종 탐지 재현율은 v1 'mangolove eval' 에서 측정)으로, 새 측정, 우월성
 #      주장이 아니라 "대조군엔 이 안전망이 아예 없다"는 환경 차이다. end-to-end 모델 행동 차이는 ②+live arm.
 #
-#   ② 결과 채점 엔진: build/test·트랙선언을 결정적으로 채점(impact-score·체크 명령 재사용).
+#   ② 결과 채점 엔진: build/test, 트랙선언을 결정적으로 채점(impact-score, 체크 명령 재사용).
 #      여기 내장 arm 은 **demo(손수 작성)**: 엔진이 좋은/나쁜 결과를 구별하는지 *자체 검증*할 뿐,
 #      실제 모델 출력이 아니다. **실수치**는 AB_TREATMENT_CMD/AB_CONTROL_CMD 로 live arm 을
-#      연결해야 나온다(실세션 = 과금·비결정성 → CI 에서 안 돌림. 별도 opt-in).
+#      연결해야 나온다(실세션 = 과금, 비결정성 → CI 에서 안 돌림. 별도 opt-in).
 #
 # 절대 과장 금지: 이 PR 이 커밋하는 건 '측정 기계 + 그 자체 검증'이다. "mangolove > claude"
-# 는 live arm 을 연결해 충분한 반복으로 돌렸을 때만, 분포·신뢰구간과 함께 말할 수 있다.
+# 는 live arm 을 연결해 충분한 반복으로 돌렸을 때만, 분포, 신뢰구간과 함께 말할 수 있다.
 #
 # 사용: ab-harness.sh report | gate | engine
 # ─────────────────────────────────────────────
@@ -64,7 +64,7 @@ EOF
 # ── ② 결과 채점 엔진 ──
 # score_result <repo> <check_cmd> → "build:<0|1> track:<0|1>"
 #   build/test: check_cmd 가 repo 에서 0 종료하면 1
-#   track: HEAD 선언 트랙이 코드 floor 와 **일치(ok)**하면 1. 과대선언(over)·과소선언(under)·미선언은
+#   track: HEAD 선언 트랙이 코드 floor 와 **일치(ok)**하면 1. 과대선언(over), 과소선언(under), 미선언은
 #          전부 0: 과대선언도 잘못된 트리아지(불필요한 무거운 절차)이므로 성공이 아니다.
 score_result() {
     local repo="$1" check="$2" b=0 t=0 verdict
@@ -111,7 +111,7 @@ ab_engine_selftest() {
 report() {
     echo "A/B 하니스 (Phase 4 v2, 방법론 vs 맨 claude)"
     echo "[정직] ①은 환경 차이(결정적 가드 계층, 새 측정 아님). ②는 채점 엔진 자체검증(demo arm, 실제 모델 출력 아님)."
-    echo "       실모델 A/B 수치는 AB_TREATMENT_CMD/AB_CONTROL_CMD 로 live arm 연결 시 산출(과금·비결정성, CI 미실행)."
+    echo "       실모델 A/B 수치는 AB_TREATMENT_CMD/AB_CONTROL_CMD 로 live arm 연결 시 산출(과금, 비결정성, CI 미실행)."
     echo ""
 
     ab_gate_protection
@@ -127,11 +127,11 @@ report() {
     echo "② 결과 채점 엔진 (demo arm 자체검증, 실수치 아님):"
     printf '  처치-style arm: %s\n' "$ENG_GOOD"
     printf '  대조-style arm: %s\n' "$ENG_BAD"
-    echo "  (엔진이 좋은/나쁜 결과를 build·track 으로 구별함. 실모델 수치는 live arm 필요.)"
+    echo "  (엔진이 좋은/나쁜 결과를 build, track 으로 구별함. 실모델 수치는 live arm 필요.)"
 
     echo ""
     if [ -n "${AB_TREATMENT_CMD:-}" ] && [ -n "${AB_CONTROL_CMD:-}" ]; then
-        echo "live arm 연결됨, 실세션 A/B 는 별도 실행기에서 반복·채점하세요(이 스켈레톤은 채점 엔진을 제공)."
+        echo "live arm 연결됨, 실세션 A/B 는 별도 실행기에서 반복, 채점하세요(이 스켈레톤은 채점 엔진을 제공)."
     else
         echo "live arm 미연결, 실모델 A/B 수치 없음. 연결: AB_TREATMENT_CMD/AB_CONTROL_CMD 환경변수."
     fi

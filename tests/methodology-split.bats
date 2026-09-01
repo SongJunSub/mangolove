@@ -52,7 +52,7 @@ setup() {
     grep -q '## 되돌리기 어려운 작업: Dry-run 게이트' "$REPO/methodology/core.md"
     grep -q '## 메모리 루프: 검증 게이트' "$REPO/methodology/core.md"
     grep -q '## 경계면 교차검증' "$REPO/methodology/core.md"
-    # 트랙 판정·승인 게이트도 코어에 남아야 한다
+    # 트랙 판정, 승인 게이트도 코어에 남아야 한다
     grep -qE '\| 합산 점수 \| 규모 \| 트랙 \|' "$REPO/methodology/core.md"
     grep -q '## 사용자 승인 원칙' "$REPO/methodology/core.md"
     # 온디맨드 스킬 라우팅 표

@@ -7,7 +7,7 @@
 #
 #   ① impact 트랙 보정도(calibration): 픽스처의 변경 → impact-score 의 track_floor 가
 #      방법론 규칙이 지시하는 기대 트랙과 일치하는가 (스펙 적합 점수).
-#   ② 가드 정밀도·재현율(precision/recall): "막아야 할/막지 말아야 할" 명령 라벨에 대해
+#   ② 가드 정밀도, 재현율(precision/recall): "막아야 할/막지 말아야 할" 명령 라벨에 대해
 #      irreversible-guard 가 정확히 차단/통과하는가.
 #
 # 정직성 원칙:
@@ -19,7 +19,7 @@
 # 사용:
 #   eval-harness.sh report   결정적 부품 전체 평가(사람용)
 #   eval-harness.sh impact   impact 트랙 보정도만
-#   eval-harness.sh guard    가드 정밀도·재현율만
+#   eval-harness.sh guard    가드 정밀도, 재현율만
 # 종료코드: 회귀(비-known-gap 픽스처 실패)가 있으면 1, 전부 통과면 0.
 # ─────────────────────────────────────────────
 set -uo pipefail
@@ -49,11 +49,11 @@ Large|1|src/handlers/access.rs|fn require_role(u: User) -> bool { u.is_admin() }
 EOF
 }
 
-# ── 가드 정밀도·재현율 픽스처 ──
+# ── 가드 정밀도, 재현율 픽스처 ──
 # 형식: "<block|pass>|<command>"
-# 가드 커버 범위(정직): SQL 구문(DROP/TRUNCATE/WHERE 없는 DELETE)·Mongo 파괴 구문(dropDatabase/.drop()/
-# 빈 필터 deleteMany)·리터럴+환경변수 위험 루트(/,~,$HOME,$PWD,${HOME},$(pwd)). 잔여 미커버(정직):
-# 백틱 `pwd`(검사 전 제거됨)·base64/eval 난독화·새 CLI 도구: 정규식 가드의 구조적 한계(잔여 위험).
+# 가드 커버 범위(정직): SQL 구문(DROP/TRUNCATE/WHERE 없는 DELETE), Mongo 파괴 구문(dropDatabase/.drop()/
+# 빈 필터 deleteMany), 리터럴+환경변수 위험 루트(/,~,$HOME,$PWD,${HOME},$(pwd)). 잔여 미커버(정직):
+# 백틱 `pwd`(검사 전 제거됨), base64/eval 난독화, 새 CLI 도구: 정규식 가드의 구조적 한계(잔여 위험).
 _guard_fixtures() {
     cat <<'EOF'
 block|git push --force origin main
@@ -110,7 +110,7 @@ eval_impact() {
             got="$(cd "$repo" && bash "$IMPACT" score HEAD 2>/dev/null | sed -E 's/.*"track_floor":"([^"]+)".*/\1/')"
             rm -rf "$repo" 2>/dev/null
         fi
-        # 유효 트랙이 아니면(mktemp 실패·impact 오류·추출 실패) MISS 가 아니라 '측정실패'로: 점수를 부풀리지 않고 회귀로 드러낸다
+        # 유효 트랙이 아니면(mktemp 실패, impact 오류, 추출 실패) MISS 가 아니라 '측정실패'로: 점수를 부풀리지 않고 회귀로 드러낸다
         case "$got" in Trivial|Small|Medium|Large) ;; *) got="<측정실패>" ;; esac
         if [ "$gap" = "1" ]; then
             if [ "$got" = "$expect" ]; then IMP_GAP_MATCH=$((IMP_GAP_MATCH + 1))
@@ -124,7 +124,7 @@ $(_impact_fixtures)
 EOF
 }
 
-# 가드 정밀도·재현율 평가 → 전역 G_TP/G_FP/G_FN/G_TN 설정, 오차 라인 출력
+# 가드 정밀도, 재현율 평가 → 전역 G_TP/G_FP/G_FN/G_TN 설정, 오차 라인 출력
 eval_guard() {
     G_TP=0; G_FP=0; G_FN=0; G_TN=0; G_ERR=""
     local label cmd esc rc
@@ -165,7 +165,7 @@ report() {
     local prec rec
     prec="$(_pct "$G_TP" $((G_TP + G_FP)))"
     rec="$(_pct "$G_TP" $((G_TP + G_FN)))"
-    echo "② 비가역 가드 정밀도·재현율 (막아야 할 것만 정확히):"
+    echo "② 비가역 가드 정밀도, 재현율 (막아야 할 것만 정확히):"
     printf '  정밀도(precision): %s%% (오차단 FP %s건)\n' "$prec" "$G_FP"
     printf '  재현율(recall):    %s%% (누락 FN %s건)\n' "$rec" "$G_FN"
     printf '  분류: TP %s / TN %s / FP %s / FN %s\n' "$G_TP" "$G_TN" "$G_FP" "$G_FN"

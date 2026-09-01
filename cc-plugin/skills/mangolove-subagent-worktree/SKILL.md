@@ -1,11 +1,11 @@
 ---
 name: mangolove-subagent-worktree
-description: "MangoLove에서 메인 세션과 다른 티켓·브랜치를 병렬로 작업할 때 사용한다. worktree 격리 서브에이전트 실행 규칙, 상태 보고(DONE · BLOCKED · NEEDS_CONTEXT), 서브에이전트 결과의 메인 세션 재검증(전수 Read · 영향 grep · 빌드/린트 재실행) 절차를 제공한다."
+description: "MangoLove에서 메인 세션과 다른 티켓, 브랜치를 병렬로 작업할 때 사용한다. worktree 격리 서브에이전트 실행 규칙, 상태 보고(DONE, BLOCKED, NEEDS_CONTEXT), 서브에이전트 결과의 메인 세션 재검증(전수 Read, 영향 grep, 빌드/린트 재실행) 절차를 제공한다."
 ---
 
 # MangoLove: 서브에이전트 병렬 worktree 작업 (mangolove-subagent-worktree)
 
-이 스킬은 strict 방법론의 **서브에이전트 병렬 작업 규칙** 상세다. 트랙 판정·승인·안전 절차는 코어(core.md)가 단일 기준이다.
+이 스킬은 strict 방법론의 **서브에이전트 병렬 작업 규칙** 상세다. 트랙 판정, 승인, 안전 절차는 코어(core.md)가 단일 기준이다.
 
 ## 서브에이전트 병렬 작업 규칙
 

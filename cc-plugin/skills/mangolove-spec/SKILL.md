@@ -1,12 +1,12 @@
 ---
 name: mangolove-spec
-description: "MangoLove Medium/Large 트랙에서 Spec 을 작성·검토할 때 사용한다. 7종 Spec 템플릿(API · 리팩토링 · 인프라/CICD · 배치 · 버그 · UI), Spec 적대적 리뷰 체크리스트, Product/Engineering 리뷰, 단일 최종 승인 제시 형식을 제공한다. 새 기능·API 수정·리팩토링·스키마 변경 등 Spec 이 필요한 작업에서 호출한다."
+description: "MangoLove Medium/Large 트랙에서 Spec 을 작성, 검토할 때 사용한다. 7종 Spec 템플릿(API, 리팩토링, 인프라/CICD, 배치, 버그, UI), Spec 적대적 리뷰 체크리스트, Product/Engineering 리뷰, 단일 최종 승인 제시 형식을 제공한다. 새 기능, API 수정, 리팩토링, 스키마 변경 등 Spec 이 필요한 작업에서 호출한다."
 ---
 
 # MangoLove: Spec 작성 & 사전 리뷰 (mangolove-spec)
 
 이 스킬은 strict 방법론 Large 워크플로우의 **분석 → Spec → Spec 적대적 리뷰 → Product/Engineering 리뷰 → 최종 승인** 단계 상세다.
-트랙 판정 · 승인 원칙 · 안전 절차(dry-run · 메모리 · 경계면)는 **코어(core.md)** 에 있으며 그것이 authoritative 다.
+트랙 판정, 승인 원칙, 안전 절차(dry-run, 메모리, 경계면)는 **코어(core.md)** 에 있으며 그것이 authoritative 다.
 Spec 은 세션 대화(메모리)에만 유지하고 레포에 파일로 남기지 않는다.
 
 ### 1단계: 분석 (항상 먼저)
@@ -225,7 +225,7 @@ Spec 리뷰 통과 후, 2개의 서로 다른 관점에서 Plan을 리뷰한다.
 근본 원인 / 목적: [요약]
 주요 설계 결정: [라이브러리/패턴/API 등, 근거 1줄씩]
 수정 파일: [목록]
-위험·롤백: [요약]
+위험, 롤백: [요약]
 
 ✅ DoD (Definition of Done)
   - [검증 가능한 종료 조건 1]: 검증 수단: [테스트/스크립트/로그/스크린샷]
@@ -234,7 +234,7 @@ Spec 리뷰 통과 후, 2개의 서로 다른 관점에서 Plan을 리뷰한다.
 진행할까요?
 ```
 
-DoD는 9단계 Dashboard·10단계 완료 보고에서 그대로 검증 대상이 된다. "잘 동작함", "기능 추가됨" 같은 검증 불가능한 표현은 DoD가 될 수 없다.
+DoD는 9단계 Dashboard, 10단계 완료 보고에서 그대로 검증 대상이 된다. "잘 동작함", "기능 추가됨" 같은 검증 불가능한 표현은 DoD가 될 수 없다.
 
-Trivial/Small Track도 구현 착수 전에 **DoD를 한 줄로 선언**한다 (예: "린트·테스트 통과 + 추가된 케이스 1건 통과"). Spec을 작성하지 않더라도 DoD는 면제되지 않는다.
+Trivial/Small Track도 구현 착수 전에 **DoD를 한 줄로 선언**한다 (예: "린트, 테스트 통과 + 추가된 케이스 1건 통과"). Spec을 작성하지 않더라도 DoD는 면제되지 않는다.
 

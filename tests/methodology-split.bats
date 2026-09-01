@@ -24,11 +24,11 @@ setup() {
 @test "split: every strict.md line lands in core or a skill (only moved section header dropped)" {
     local total; total="$(wc -l < "$REPO/methodology/strict.md")"
     [ "$total" -gt 0 ]
-    # 추출 범위는 생성기에서 파싱한다: 여기에 다시 적으면 두 번째 진실 출처가 되어
+    # 추출 범위는 생성기에게 물어본다: 여기에 다시 적으면 두 번째 진실 출처가 되어
     # strict.md 를 고칠 때마다 생성기와 테스트를 손으로 맞춰야 한다(드리프트 원인 자체).
+    # 생성기가 헤딩에서 범위를 계산하므로, 소스를 긁는 대신 --print-ranges 를 쓴다.
     local ranges
-    ranges="$(grep -oE "sed -n '[0-9]+,[0-9]+p'" "$REPO/lib/gen-methodology.sh" \
-              | sed -E "s/sed -n '([0-9]+),([0-9]+)p'/\1-\2/" | tr '\n' ' ')"
+    ranges="$(bash "$REPO/lib/gen-methodology.sh" --print-ranges | tr '\n' ' ')"
     [ "$(printf '%s' "$ranges" | wc -w)" -eq 7 ]   # core 3구간 + 스킬 4구간
     local missing
     missing="$(awk -v ranges="$ranges" -v total="$total" 'BEGIN{
@@ -46,6 +46,69 @@ setup() {
         content="$(sed -n "${l}p" "$REPO/methodology/strict.md")"
         [ "$content" = '## Large Track 워크플로우' ] || [ -z "$content" ]
     done
+}
+
+# ── 범위 유도 방식의 가드레일 ──────────────────────────────────
+# 범위를 헤딩에서 계산하도록 바꾸면서 잃을 뻔한 보호를, 변이(mutation)로 고정한다.
+# 섹션 '안'의 편집은 수작업 0으로 통과해야 하고, 구조가 바뀌면 큰소리로 실패해야 한다.
+
+# strict.md 를 복제한 미러 저장소를 만들고 그 사본 경로를 출력한다.
+_mirror() {
+    local m; m="$(mktemp -d)"
+    mkdir -p "$m/lib" "$m/methodology"
+    cp "$REPO/lib/gen-methodology.sh" "$m/lib/"
+    cp "$REPO/methodology/strict.md" "$m/methodology/"
+    printf '%s' "$m"
+}
+
+@test "gen: 섹션 안에 줄을 추가해도 수작업 없이 재생성된다 (범위 자동 이동)" {
+    local m; m="$(_mirror)"
+    # 코어 영역 한복판에 한 줄 삽입
+    awk '{print} /^## 세션 위생/{print ""; print "- 새 규칙 한 줄."}' \
+        "$m/methodology/strict.md" > "$m/s.md" && mv "$m/s.md" "$m/methodology/strict.md"
+    run bash "$m/lib/gen-methodology.sh" "$m/out"
+    [ "$status" -eq 0 ]
+    # 뒤쪽 범위가 삽입한 줄 수만큼 밀렸어야 한다 (하드코딩이면 여기서 깨졌다)
+    run bash "$m/lib/gen-methodology.sh" --print-ranges
+    [ "$status" -eq 0 ]
+    [ "$(printf '%s\n' "$output" | wc -l)" -eq 7 ]
+    rm -rf "$m"
+}
+
+@test "gen: 경계 헤딩이 바뀌면 큰소리로 실패한다" {
+    local m; m="$(_mirror)"
+    sed 's/^## 스마트 리뷰 라우팅$/## 스마트 리뷰 라우팅 (개편)/' \
+        "$m/methodology/strict.md" > "$m/s.md" && mv "$m/s.md" "$m/methodology/strict.md"
+    run bash "$m/lib/gen-methodology.sh" "$m/out"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"헤딩"* ]]
+    rm -rf "$m"
+}
+
+@test "gen: 꼬리에 새 구조 섹션이 생기면 실패한다 (목적지를 사람이 정하게)" {
+    local m; m="$(_mirror)"
+    printf '\n## 새 섹션\n\n내용\n' >> "$m/methodology/strict.md"
+    run bash "$m/lib/gen-methodology.sh" "$m/out"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"목적지"* ]]
+    rm -rf "$m"
+}
+
+@test "gen: 드롭 구간(Large Track 헤더~1단계)에 내용이 끼면 실패한다" {
+    local m; m="$(_mirror)"
+    awk '{print} /^## Large Track 워크플로우$/{print "삽입된 설명."}' \
+        "$m/methodology/strict.md" > "$m/s.md" && mv "$m/s.md" "$m/methodology/strict.md"
+    run bash "$m/lib/gen-methodology.sh" "$m/out"
+    [ "$status" -ne 0 ]
+    rm -rf "$m"
+}
+
+@test "gen: 경계 헤딩이 중복되면 실패한다 (범위가 모호해진다)" {
+    local m; m="$(_mirror)"
+    printf '\n## CI/CD 워크플로우 작업 규칙\n' >> "$m/methodology/strict.md"
+    run bash "$m/lib/gen-methodology.sh" "$m/out"
+    [ "$status" -ne 0 ]
+    rm -rf "$m"
 }
 
 @test "split: safety-critical procedures stay resident in core.md (not on-demand skills)" {

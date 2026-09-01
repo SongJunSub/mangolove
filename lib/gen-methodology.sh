@@ -31,14 +31,14 @@ assert_anchor() {
     fi
 }
 total_lines="$(wc -l < "$SRC")"
-[ "$total_lines" -eq 1121 ] || { echo "gen-methodology: strict.md line count ${total_lines} != 1121 (layout changed)" >&2; exit 1; }
+[ "$total_lines" -eq 1135 ] || { echo "gen-methodology: strict.md line count ${total_lines} != 1135 (layout changed)" >&2; exit 1; }
 assert_anchor 505  '## Large Track 워크플로우'
 assert_anchor 507  '### 1단계: 분석 (항상 먼저)'
 assert_anchor 736  '### 6단계: 구현'
-assert_anchor 1008 '## 스마트 리뷰 라우팅'
-assert_anchor 1020 '## 서브에이전트 병렬 작업 규칙'
-assert_anchor 1064 '## CI/CD 워크플로우 작업 규칙'
-assert_anchor 1086 '## 신뢰성 게이트 — 프롬프트의 "강제 표현"은 신호다'
+assert_anchor 1022 '## 스마트 리뷰 라우팅'
+assert_anchor 1034 '## 서브에이전트 병렬 작업 규칙'
+assert_anchor 1078 '## CI/CD 워크플로우 작업 규칙'
+assert_anchor 1100 '## 신뢰성 게이트 — 프롬프트의 "강제 표현"은 신호다'
 
 mkdir -p "$OUT/methodology" \
          "$OUT/cc-plugin/skills/mangolove-spec" \
@@ -46,8 +46,8 @@ mkdir -p "$OUT/methodology" \
          "$OUT/cc-plugin/skills/mangolove-subagent-worktree" \
          "$OUT/cc-plugin/skills/mangolove-cicd"
 
-# ── core.md = strict head (1-504) + on-demand pointer + smart-review-routing (1008-1019)
-#              + reliability-gate (1086-1121). Safety procedures (dry-run/memory/boundary)
+# ── core.md = strict head (1-504) + on-demand pointer + smart-review-routing (1022-1033)
+#              + reliability-gate (1100-1135). Safety procedures (dry-run/memory/boundary)
 #              live in the head range and therefore stay resident in core.
 {
   sed -n '1,504p' "$SRC"
@@ -72,8 +72,8 @@ Trivial/Small 트랙은 위의 트랙 표만으로 충분하다 (구현 → 빌�
 
 ---
 PTR
-  sed -n '1008,1019p' "$SRC"
-  sed -n '1086,1121p' "$SRC"
+  sed -n '1022,1033p' "$SRC"
+  sed -n '1100,1135p' "$SRC"
 } > "$OUT/methodology/core.md"
 
 # ── mangolove-spec = Large workflow steps 1–5 (507-735)
@@ -94,7 +94,7 @@ FM
   sed -n '507,735p' "$SRC"
 } > "$OUT/cc-plugin/skills/mangolove-spec/SKILL.md"
 
-# ── mangolove-large-review = Large workflow steps 6–10 (736-1007)
+# ── mangolove-large-review = Large workflow steps 6–10 (736-1021)
 {
   cat <<'FM'
 ---
@@ -109,10 +109,10 @@ description: "MangoLove Large 트랙 구현~완료 단계에서 사용한다. �
 트랙 판정 · 승인 원칙 · 안전 절차는 **코어(core.md)** 가 단일 기준이다.
 
 FM
-  sed -n '736,1007p' "$SRC"
+  sed -n '736,1021p' "$SRC"
 } > "$OUT/cc-plugin/skills/mangolove-large-review/SKILL.md"
 
-# ── mangolove-subagent-worktree = 서브에이전트 병렬 작업 규칙 (1020-1063)
+# ── mangolove-subagent-worktree = 서브에이전트 병렬 작업 규칙 (1034-1077)
 {
   cat <<'FM'
 ---
@@ -125,10 +125,10 @@ description: "MangoLove에서 메인 세션과 다른 티켓·브랜치를 병�
 이 스킬은 strict 방법론의 **서브에이전트 병렬 작업 규칙** 상세다. 트랙 판정·승인·안전 절차는 코어(core.md)가 단일 기준이다.
 
 FM
-  sed -n '1020,1063p' "$SRC"
+  sed -n '1034,1077p' "$SRC"
 } > "$OUT/cc-plugin/skills/mangolove-subagent-worktree/SKILL.md"
 
-# ── mangolove-cicd = CI/CD 워크플로우 작업 규칙 (1064-1085)
+# ── mangolove-cicd = CI/CD 워크플로우 작업 규칙 (1078-1099)
 {
   cat <<'FM'
 ---
@@ -141,7 +141,7 @@ description: "MangoLove에서 CI/CD 워크플로우·GitHub Actions·빌드 설�
 이 스킬은 strict 방법론의 **CI/CD 워크플로우 작업 규칙** 상세다. 트랙 판정·승인·안전 절차는 코어(core.md)가 단일 기준이다.
 
 FM
-  sed -n '1064,1085p' "$SRC"
+  sed -n '1078,1099p' "$SRC"
 } > "$OUT/cc-plugin/skills/mangolove-cicd/SKILL.md"
 
 echo "gen-methodology: wrote core.md + 4 skills to ${OUT}"

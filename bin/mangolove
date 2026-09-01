@@ -40,7 +40,7 @@ MANGOLOVE_MODE=""
 MANGOLOVE_SESSION_GATES=true
 # Methodology delivery: split (lean core.md + on-demand cc-plugin skills) | monolith (full strict.md).
 # Default split — context 는 가장 비싼 자원이고, 상시 주입이 길수록 개별 지시의 효력이 희석된다.
-# 트랙 판정·승인 게이트·안전 절차는 코어에 상주하고 무거운 절차만 온디맨드로 내려간다.
+# 트랙 판정, 승인 게이트, 안전 절차는 코어에 상주하고 무거운 절차만 온디맨드로 내려간다.
 # core.md / cc-plugin 이 없으면 monolith 로 큰소리 폴백하므로 반쪽 설치가 방법론을 벗기지 않는다.
 MANGOLOVE_METHODOLOGY_MODE="split"
 # DoD gate (on / off): Stop 훅으로 완료 직전 ./.mangolove/dod.sh 를 결정적으로 검증.
@@ -51,7 +51,7 @@ MANGOLOVE_DOD_GATE=on
 # mangolove 세션 동안 사용자 자체 statusLine 을 override 하므로 보존하려면 off.
 MANGOLOVE_STATUSLINE=on
 # Review gate (on / off): 커밋 경계에서 staged 변경의 track_floor 를 코드로 계산해
-# 트랙별 필수 리뷰(/simplify·/code-review·/security-review) 실행 여부를 대조하고 미실행이면
+# 트랙별 필수 리뷰(/simplify, /code-review, /security-review) 실행 여부를 대조하고 미실행이면
 # 커밋을 차단. Trivial/Small 은 아무 것도 요구하지 않아 사소한 작업엔 무비용. 기본 on.
 MANGOLOVE_REVIEW_GATE=on
 

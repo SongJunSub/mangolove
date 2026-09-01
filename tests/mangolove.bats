@@ -255,7 +255,7 @@ teardown() {
 }
 
 @test "defaults: 메서드러지 split + DoD 게이트 + 리뷰 게이트가 기본 on 이다" {
-    # 이 세 기본값은 명시적 결정의 결과다(각각 컨텍스트 예산·완료 검증·리뷰 강제).
+    # 이 세 기본값은 명시적 결정의 결과다(각각 컨텍스트 예산, 완료 검증, 리뷰 강제).
     # 우연히 되돌려지면 MangoLove 가 조용히 예전 동작으로 후퇴하므로 기본값 자체를 고정한다.
     local b="$MANGOLOVE_DIR/bin/mangolove"
     grep -qE '^MANGOLOVE_METHODOLOGY_MODE="?split"?$' "$b"

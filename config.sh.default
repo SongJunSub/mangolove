@@ -47,8 +47,8 @@ MANGOLOVE_DOD_GATE=on
 MANGOLOVE_STATUSLINE=on
 
 # Review gate (on / off) — 커밋 경계에서 트랙별 필수 리뷰를 결정적으로 강제
-#   staged 변경의 track_floor 를 impact-score 로 계산해, Medium 이상인데 /simplify·
-#   /code-review·(Large/DB/인증/외부API 는) /security-review 가 이 세션에서 실행되지
+#   staged 변경의 track_floor 를 impact-score 로 계산해, Medium 이상인데 /simplify,
+#   /code-review, (Large 또는 DB/인증/외부API 는) /security-review 가 이 세션에서 실행되지
 #   않았으면 커밋을 차단한다. Trivial/Small 은 아무 것도 요구하지 않으므로 사소한
 #   작업에는 무비용. 기본 on. 우회(감사됨): MANGOLOVE_SKIP_REVIEW=1
 MANGOLOVE_REVIEW_GATE=on

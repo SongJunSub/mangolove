@@ -147,7 +147,7 @@ mangolove impact            # 워킹트리의 결정적 트랙(track_floor)
 
 ### 트랙별 필수 리뷰 (단일 출처)
 
-트랙별로 **반드시 실행되는 스킬**은 다음이 전부다. 시스템 프롬프트·스킬 문서가 이 표와 다르면 이 표를 따른다. `lib/review-gate.sh` 의 `required_skills` 가 같은 표를 코드로 강제하며, 커밋 시점에 미실행이면 커밋이 차단된다.
+트랙별로 **반드시 실행되는 스킬**은 다음이 전부다. 시스템 프롬프트와 스킬 문서가 이 표와 다르면 이 표를 따른다. `lib/review-gate.sh` 의 `required_skills` 가 같은 표를 코드로 강제하며, 커밋 시점에 미실행이면 커밋이 차단된다.
 
 | 트랙 | 필수 스킬 |
 |------|----------|
@@ -156,7 +156,7 @@ mangolove impact            # 워킹트리의 결정적 트랙(track_floor)
 | Large | `simplify`, `code-review`, `security-review` |
 | DB/인증/외부 API 신호가 있으면 | 트랙과 무관하게 `security-review` 추가 |
 
-- 스킬 이름은 **실존하는 것만** 쓴다: `simplify`, `code-review`, `security-review`. `/plan`·`/review` 라는 스킬은 없다 — 계획은 `EnterPlanMode` 도구, 코드 리뷰는 `code-review` 다.
+- 스킬 이름은 **실존하는 것만** 쓴다: `simplify`, `code-review`, `security-review`. `/plan` 과 `/review` 라는 스킬은 없다 — 계획은 `EnterPlanMode` 도구, 코드 리뷰는 `code-review` 다.
 - "3인 탈상관 리뷰"는 **Large 전용**이며 위 스킬과 별개다(상세는 `mangolove-large-review`). Medium 에 3인 리뷰를 요구하지 않는다.
 - `code-review` 와 `security-review` 는 병렬로 실행한다.
 
@@ -199,7 +199,7 @@ Change-Track: <Trivial|Small|Medium|Large>
 
 트랙이 과해 보이면 그건 생략의 근거가 아니라 **판정을 다시 하라는 신호**다. `mangolove impact` 로 floor 를 확인한다. 대개 손으로 센 트랙이 실제보다 높다.
 
-**예외는 사후 보고가 아니라 사전 고지다.** 도구·권한 제약으로 필수 단계를 물리적으로 실행할 수 없으면(서브에이전트 금지, 스킬 미로드 등) 그 사실을 **작업을 시작하기 전에** 밝히고 진행한다. 끝난 뒤에 밝히는 것은 위 금지 대상이다.
+**예외는 사후 보고가 아니라 사전 고지다.** 도구나 권한 제약으로 필수 단계를 물리적으로 실행할 수 없으면(서브에이전트 금지, 스킬 미로드 등) 그 사실을 **작업을 시작하기 전에** 밝히고 진행한다. 끝난 뒤에 밝히는 것은 위 금지 대상이다.
 
 ## 사용자 승인 원칙 (단일 최종 승인)
 

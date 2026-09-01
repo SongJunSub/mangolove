@@ -29,6 +29,34 @@ jobs:
       - name: Run tests
         run: bats tests/
 
+  plugin-validate:
+    name: Plugin manifest
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # tests/methodology-split.bats 의 validate 케이스는 claude 가 없으면 skip 된다.
+      # CI 에서 실제로 돌게 하려면 CLI 를 설치해야 한다. 설치 실패는 경고로 두고
+      # (레지스트리 장애로 전체 CI 를 막지 않는다), 설치됐는데 검증이 실패하면 잡는다.
+      - name: Install Claude Code
+        continue-on-error: true
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Validate cc-plugin manifest, skills and agents
+        run: |
+          if ! command -v claude > /dev/null 2>&1; then
+            echo "::warning::claude CLI unavailable - skipping plugin validation"
+            exit 0
+          fi
+          claude plugin validate --strict cc-plugin
+
   shellcheck:
     name: ShellCheck
     runs-on: ubuntu-latest

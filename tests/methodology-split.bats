@@ -79,3 +79,27 @@ setup() {
     run bash -c "find '$REPO/cc-plugin' -name '*.sh' | head -1"
     [ -z "$output" ]
 }
+
+@test "agents: 3인 탈상관 리뷰어 + 검증자가 정의돼 있고 전부 읽기 전용이다" {
+    # 리뷰 구성을 매 세션 프롬프트로 지어내면 리뷰 강도가 세션마다 달라진다.
+    # 그리고 리뷰어가 Edit/Write 를 가지면 그건 리뷰가 아니라 두 번째 구현이다.
+    local a
+    for a in mangolove-reviewer-close-read mangolove-reviewer-refute \
+             mangolove-reviewer-counterexample mangolove-verifier; do
+        local f="$REPO/cc-plugin/agents/$a.md"
+        [ -f "$f" ] || { echo "missing agent: $a"; false; }
+        grep -qE "^name: $a\$" "$f"
+        grep -qE '^description: .+' "$f"
+        grep -qE '^tools: Read, Grep, Glob, Bash$' "$f"
+        grep -qE '^model: (opus|fable|sonnet|haiku|inherit)$' "$f"
+    done
+}
+
+@test "methodology: 실존하지 않는 스킬 이름(/review)을 지시로 쓰지 않는다" {
+    # F1 회귀의 나머지 절반 — 생성되는 스킬 본문에도 /review 지시가 있었다.
+    # "그런 스킬은 없다"고 밝히는 부정 언급(없다 포함 줄)은 의도된 것이라 예외로 둔다.
+    local hits
+    hits="$(grep -rnE '(^|[^a-z-])/review([^a-z-]|$)' \
+              "$REPO/methodology/" "$REPO/cc-plugin/skills/" | grep -v '없다' || true)"
+    [ -z "$hits" ] || { echo "지시로 쓰인 /review 발견:"; echo "$hits"; false; }
+}

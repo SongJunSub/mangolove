@@ -9,6 +9,10 @@ efficacy/
 # Work-in-progress state (externalized per methodology, not shared)
 .progress.md
 
+# Runtime gate state (DoD script + review ledger + attempt counters) — 일시 상태이지
+# 레포 내용이 아니다. 방법론이 요구하는 항목을 이 레포부터 지킨다.
+.mangolove/
+
 # OS
 .DS_Store
 Thumbs.db

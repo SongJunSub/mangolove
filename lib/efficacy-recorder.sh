@@ -44,15 +44,17 @@ report() {
     echo "게이트가 막은 것 (결정적, 세션 중 실시간 기록):"
     if [ -f "$lg" ]; then
         # (phase,kind) 결합으로 상호배타 분류 — 버킷합 == 총합 보장
-        local sec dng lt tot other
+        local sec dng lt rev tot other
         sec="$(grep -cE '"phase":"gate","kind":"secret"' "$lg" 2>/dev/null)"; sec="${sec:-0}"
         dng="$(grep -cE '"phase":"guard"' "$lg" 2>/dev/null)"; dng="${dng:-0}"
         lt="$(grep -cE '"phase":"gate","kind":"(lint|test)"' "$lg" 2>/dev/null)"; lt="${lt:-0}"
+        rev="$(grep -cE '"phase":"review"' "$lg" 2>/dev/null)"; rev="${rev:-0}"
         tot="$(grep -c '"type":"block"' "$lg" 2>/dev/null)"; tot="${tot:-0}"
-        other=$((tot - sec - dng - lt)); [ "$other" -lt 0 ] && other=0
+        other=$((tot - sec - dng - lt - rev)); [ "$other" -lt 0 ] && other=0
         printf '  시크릿 커밋 차단:        %s\n' "$sec"
         printf '  위험/비가역 명령 차단:   %s\n' "$dng"
         printf '  커밋 게이트(lint/test):  %s\n' "$lt"
+        printf '  리뷰 미실행 커밋 차단:   %s\n' "$rev"
         [ "$other" -gt 0 ] && printf '  기타 차단:               %s\n' "$other"
         printf '  (총 %s회 게이트/가드 차단 — 재시도 포함, 고유 사고 수 아님)\n' "$tot"
     else

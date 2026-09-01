@@ -178,6 +178,29 @@ teardown() {
     grep -q "quality-gate.sh" "$out"
 }
 
+@test "session-settings: review gate injects PreToolUse+PostToolUse pair when on, nothing when off" {
+    command -v python3 >/dev/null 2>&1 || skip "needs python3"
+    local on="$TEST_DIR/on.json" off="$TEST_DIR/off.json"
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'
+      MANGOLOVE_REVIEW_GATE=on  generate_session_settings '$on'
+      MANGOLOVE_REVIEW_GATE=off generate_session_settings '$off'"
+    [ "$status" -eq 0 ]
+    # 두 훅은 짝이어야 한다 — record 없이 pretooluse 만 있으면 원장이 비어 항상 차단된다.
+    python3 -c "import json; json.load(open('$on'))"
+    grep -qF 'review-gate.sh\" pretooluse' "$on"
+    grep -qF 'review-gate.sh\" record' "$on"
+    grep -q '"matcher": "Skill"' "$on"
+    python3 -c "import json; json.load(open('$off'))"
+    ! grep -q "review-gate.sh" "$off"
+    ! grep -q "PostToolUse" "$off"
+}
+
+@test "doctor: reports review gate state" {
+    cd "$TEST_DIR"
+    run bash "$MANGOLOVE_DIR/bin/mangolove" doctor
+    [[ "$output" == *"Review gate"* ]]
+}
+
 # ─────────────────────────────────────────────
 # mode validation
 # ─────────────────────────────────────────────

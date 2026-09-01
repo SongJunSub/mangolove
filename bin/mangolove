@@ -48,6 +48,10 @@ MANGOLOVE_DOD_GATE=off
 # Status line (on / off): context 사용률·비용·메서드러지 모드를 상태줄에 노출. 기본 on.
 # mangolove 세션 동안 사용자 자체 statusLine 을 override 하므로 보존하려면 off.
 MANGOLOVE_STATUSLINE=on
+# Review gate (on / off): 커밋 경계에서 staged 변경의 track_floor 를 코드로 계산해
+# 트랙별 필수 리뷰(/simplify·/code-review·/security-review) 실행 여부를 대조하고 미실행이면
+# 커밋을 차단. Trivial/Small 은 아무 것도 요구하지 않아 사소한 작업엔 무비용. 기본 on.
+MANGOLOVE_REVIEW_GATE=on
 
 if [ -f "$MANGOLOVE_DIR/config.sh" ]; then
     if bash -n "$MANGOLOVE_DIR/config.sh" 2>/dev/null; then
@@ -446,6 +450,13 @@ do_doctor() {
         echo -e "  \033[38;5;113m✓\033[0m DoD gate: on (Stop 훅 — 완료 직전 DoD 검증)"
     else
         echo -e "  \033[38;5;220m△\033[0m DoD gate: off (MANGOLOVE_DOD_GATE=on 으로 활성)"
+    fi
+
+    # Review gate — 커밋 경계에서 트랙별 필수 리뷰 실행 여부를 결정적으로 대조
+    if [ "${MANGOLOVE_REVIEW_GATE:-on}" != "off" ] && [ -f "$MANGOLOVE_DIR/lib/review-gate.sh" ]; then
+        echo -e "  \033[38;5;113m✓\033[0m Review gate: on (Medium 이상 커밋에 필수 리뷰 강제)"
+    else
+        echo -e "  \033[38;5;220m△\033[0m Review gate: off (MANGOLOVE_REVIEW_GATE)"
     fi
 
     # Status line
@@ -937,6 +948,31 @@ generate_session_settings() {
     local gate="${MANGOLOVE_DIR}/lib/quality-gate.sh"
     local dod="${MANGOLOVE_DIR}/lib/dod-gate.sh"
     local statusline="${MANGOLOVE_DIR}/lib/statusline.sh"
+    local review="${MANGOLOVE_DIR}/lib/review-gate.sh"
+
+    # 리뷰 게이트는 훅 두 개가 짝을 이룬다: PostToolUse(Skill) 로 "실제 실행된 스킬"을 원장에
+    # 남기고, PreToolUse(Bash) 로 git commit 시점에 코드가 계산한 트랙과 대조한다.
+    # 자기보고가 아니라 도구 호출 사실이 근거다.
+    local review_pre="" review_post=""
+    if [ "${MANGOLOVE_REVIEW_GATE:-on}" != "off" ] && [ -f "$review" ]; then
+        review_pre=$(cat << REVPREEOF
+,
+          { "type": "command", "command": "bash \\"${review}\\" pretooluse" }
+REVPREEOF
+)
+        review_post=$(cat << REVPOSTEOF
+,
+    "PostToolUse": [
+      {
+        "matcher": "Skill",
+        "hooks": [
+          { "type": "command", "command": "bash \\"${review}\\" record" }
+        ]
+      }
+    ]
+REVPOSTEOF
+)
+    fi
 
     # Stop 훅(DoD 게이트)은 MANGOLOVE_DOD_GATE=on 일 때만 병합. Stop 은 매 턴 발화하나
     # dod.sh 미외부화 시 무비용 통과하므로 idle 오버헤드가 없다.
@@ -975,10 +1011,10 @@ ${statusline_block}
         "matcher": "Bash",
         "hooks": [
           { "type": "command", "command": "bash \\"${guard}\\"" },
-          { "type": "command", "command": "GATE_SECRET=block bash \\"${gate}\\" pretooluse" }
+          { "type": "command", "command": "GATE_SECRET=block bash \\"${gate}\\" pretooluse" }${review_pre}
         ]
       }
-    ]${stop_block}
+    ]${review_post}${stop_block}
   }
 }
 SESSIONEOF

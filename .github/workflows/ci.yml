@@ -12,6 +12,15 @@ on:
 permissions:
   contents: read
 
+# Action 버전은 메이저 태그로 고정한다(패치/보안 수정은 따라오고, breaking 은 안 따라온다).
+# v4 는 Node 20 으로 동작해 러너가 deprecation 경고를 냈다. v5 부터 Node 24 다.
+# v7 로 올리며 breaking change 를 감사했고 이 워크플로에는 해당 사항이 없다.
+#   checkout v7: pull_request_target/workflow_run 의 fork PR 체크아웃 차단
+#                → 이 워크플로는 push/pull_request 만 쓴다
+#   setup-node v6: 자동 캐싱을 npm 으로 제한
+#                → 이 워크플로는 cache: 를 쓰지 않는다
+#   최소 러너 v2.327.1 요구 → GitHub 호스티드 러너는 2.337.0
+
 jobs:
   test:
     name: Run Tests
@@ -22,7 +31,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # macOS 가 기본 탑재한 bash 는 3.2 라 `printf '%x' "'<비ASCII>"` 가 부호 확장된
       # 쓰레기 값을 내놓는다. bats 는 그 값으로 테스트 함수명을 만들기 때문에 한국어
@@ -50,10 +59,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '22'
 
@@ -78,7 +87,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install ShellCheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck

@@ -212,6 +212,7 @@ show_help() {
     echo "  mangolove sessions            List all saved sessions"
     echo "  mangolove stats [period]      Productivity stats (today/week/month)"
     echo "  mangolove cost [period]       Token usage and cost (today/week/month/all)"
+    echo "  mangolove cost sessions       Per-session cost concentration (which sessions burned it)"
     echo "  mangolove impact [sha]        Deterministic track/impact of a change (working tree or commit)"
     echo "  mangolove efficacy            Methodology efficacy: what the gates caught, and what they let through"
     echo "  mangolove audit-methodology   Audit the methodology file: volume, dead rules, delete candidates"
@@ -726,7 +727,13 @@ Continue from where you left off. Summarize the previous session state and ask w
             ;;
         cost)
             shift
-            bash "$COST_TRACKER" "${1:-week}"
+            # 'sessions' 는 기간이 아니라 뷰다: 두 번째 인자를 기간으로 넘긴다
+            # (기본 all: 세션 집중도는 이번 주가 아니라 전체 이력에 대한 질문이다).
+            if [ "${1:-}" = "sessions" ]; then
+                bash "$COST_TRACKER" sessions "${2:-all}"
+            else
+                bash "$COST_TRACKER" "${1:-week}"
+            fi
             exit 0
             ;;
         impact)

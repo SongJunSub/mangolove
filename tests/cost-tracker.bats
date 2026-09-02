@@ -147,3 +147,102 @@ _run_cost() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"5.00"* ]]
 }
+
+# ─────────────────────────────────────────────
+# cost sessions: 세션별 집중도 뷰
+#
+# 왜 별도 뷰가 필요한가: show_cost 는 프로젝트별로 합산해서 "세션 하나가 얼마나
+# 컸는가"가 구조적으로 안 보인다. 실측에서 비용은 세션 크기에 극단적으로 쏠렸다.
+# 아래 테스트는 전부 고정 픽스처로 돈다 (~/.claude 라이브 데이터에 의존하지 않는다:
+# CI 머신엔 그 데이터가 아예 없고, 있어도 실행 시점마다 값이 달라진다).
+# ─────────────────────────────────────────────
+
+# usage 레코드 한 줄. $1=model $2=input $3=output $4=cache_write $5=cache_read
+_usage_line() {
+    printf '{"message":{"model":"%s","usage":{"input_tokens":%s,"output_tokens":%s,"cache_creation_input_tokens":%s,"cache_read_input_tokens":%s}}}\n' \
+        "$1" "$2" "$3" "$4" "$5"
+}
+
+_run_sessions() {
+    run env MANGOLOVE_COST_PROJECTS_DIR="$TEST_DIR/claude-projects" \
+            MANGOLOVE_DIR="$MANGOLOVE_DIR" \
+            ${ML_LONG_TURNS:+ML_LONG_TURNS="$ML_LONG_TURNS"} \
+            ${ML_TOP_N:+ML_TOP_N="$ML_TOP_N"} \
+            bash "$MANGOLOVE_DIR/lib/cost-tracker.sh" sessions all
+}
+
+@test "cost sessions: 세션 단위로 집계한다 (프로젝트 합산이 아니다)" {
+    # 같은 프로젝트에 세션 2개. 프로젝트 뷰라면 한 줄로 합쳐진다.
+    _usage_line "claude-opus-5" 0 1000000 0 0 > "$PROJ_DIR/aaaaaaaa-1.jsonl"
+    _usage_line "claude-opus-5" 0  200000 0 0 > "$PROJ_DIR/bbbbbbbb-2.jsonl"
+    _run_sessions
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"aaaaaaaa"* ]]
+    [[ "$output" == *"bbbbbbbb"* ]]
+    [[ "$output" == *"세션 2개"* ]]
+    # opus output $25/M → 각각 $25.00, $5.00
+    [[ "$output" == *'$25.00'* ]]
+    [[ "$output" == *'$5.00'* ]]
+}
+
+@test "cost sessions: peak ctx 는 러닝 max 다 (턴별 합산이 아니다)" {
+    # 세 턴: context 가 100K → 500K → 200K. peak 는 500K 여야 하고, 합(800K)이면 안 된다.
+    {
+        _usage_line "claude-opus-5" 100000 1 0 0
+        _usage_line "claude-opus-5" 0      1 0 500000
+        _usage_line "claude-opus-5" 0      1 0 200000
+    } > "$PROJ_DIR/cccccccc-3.jsonl"
+    _run_sessions
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"500.0K"* ]]
+    [[ "$output" != *"800.0K"* ]]
+}
+
+@test "cost sessions: peak ctx 는 한 요청의 input+cache write+cache read 합이다" {
+    # 한 턴 안에서 세 버킷이 함께 온다: 40K+10K+50K = 100K 가 그 요청의 컨텍스트다.
+    _usage_line "claude-opus-5" 40000 1 10000 50000 > "$PROJ_DIR/dddddddd-4.jsonl"
+    _run_sessions
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"100.0K"* ]]
+}
+
+@test "cost sessions: 집중도 비율이 산술적으로 맞다" {
+    # 두 세션: $75.00 과 $25.00 → 총 $100.00, 상위 1세션이 75.0%
+    ML_TOP_N=1
+    _usage_line "claude-opus-5" 0 3000000 0 0 > "$PROJ_DIR/eeeeeeee-5.jsonl"
+    _usage_line "claude-opus-5" 0 1000000 0 0 > "$PROJ_DIR/ffffffff-6.jsonl"
+    _run_sessions
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"총비용 \$100.00"* ]]
+    [[ "$output" == *"상위 1세션이 총비용의 75.0%"* ]]
+}
+
+@test "cost sessions: 턴 임계는 재정의 가능하고 그 코호트 비용을 낸다" {
+    ML_LONG_TURNS=3
+    # 턴 3개짜리 비싼 세션 + 턴 1개짜리 싼 세션
+    {
+        _usage_line "claude-opus-5" 0 1000000 0 0
+        _usage_line "claude-opus-5" 0 1000000 0 0
+        _usage_line "claude-opus-5" 0 1000000 0 0
+    } > "$PROJ_DIR/99999999-7.jsonl"
+    _usage_line "claude-opus-5" 0 1000000 0 0 > "$PROJ_DIR/88888888-8.jsonl"
+    _run_sessions
+    [ "$status" -eq 0 ]
+    # 턴 3+ 세션은 1개, $75 / $100 = 75.0%
+    [[ "$output" == *"턴 3+ 세션 1개가 총비용의 75.0%"* ]]
+}
+
+@test "cost sessions: 데이터가 없으면 조용히 안내한다 (오류 아님)" {
+    _run_sessions
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"No session data found"* ]]
+}
+
+@test "cost sessions: usage 레코드가 없는 세션 파일은 세지 않는다" {
+    printf '{"type":"summary","summary":"x"}\n' > "$PROJ_DIR/77777777-9.jsonl"
+    _usage_line "claude-opus-5" 0 1000000 0 0 > "$PROJ_DIR/66666666-a.jsonl"
+    _run_sessions
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"세션 1개"* ]]
+    [[ "$output" != *"77777777"* ]]
+}

@@ -46,23 +46,30 @@ SKIP_REL=".mangolove/.review-skip"
 
 # .mangolove/ 는 프로젝트가 버전관리할 수도 있는 디렉토리다(.mangolove/hooks/ 는 감사 대상).
 # 그러니 통째로 무시하지 않고, 게이트가 만드는 **일시 파일만** 자기 자신을 무시하게 한다.
-# 이게 없으면 게이트를 켠 모든 레포에서 사용자가 손으로 .gitignore 를 고쳐야 한다.
-# (dod-gate.sh 에 같은 함수가 있다. 훅 스크립트는 서로를 source 하지 않는다: 한 파일이
-#  없거나 깨져도 다른 게이트가 같이 죽지 않게 하는 기존 설계를 따른다.)
+# 없으면 만들고, 있으면 **빠진 줄만 덧붙인다**: "없을 때만 생성"이던 옛 동작은 먼저 심은
+# 게이트가 이겨서, 나중에 추가된 패턴(.review-skip)이 그 레포에서 영영 누락됐다. 누락된
+# 일시 파일은 untracked 로 떠서 "커밋되지 않은 변경 없음" 류의 DoD 를 게이트가 깨뜨린다.
+# (review-gate.sh 에 같은 함수가 있다. 훅 스크립트는 서로를 source 하지 않는다: 한 파일이
+#  없거나 깨져도 다른 게이트가 같이 죽지 않게 하는 기존 설계를 따른다. 두 사본이 같은 목록을
+#  심는지는 tests/dod-gate.bats 의 경계 테스트가 강제한다.)
 _ml_seed_gitignore() {
-    local d="./.mangolove"
+    local d="./.mangolove" f p
     [ -d "$d" ] || return 0
-    [ -f "$d/.gitignore" ] && return 0
-    {
-        echo "# MangoLove 게이트의 일시 상태 (자동 생성). 레포 내용이 아니다."
-        echo "# 이 파일 자신도 무시한다. 게이트가 어느 머신에서든 다시 만든다."
-        echo ".gitignore"
-        echo "dod.sh"
-        echo ".dod-gate-attempts"
-        echo ".review-ledger"
-        echo ".review-ledger.base"
-        echo ".review-skip"
-    } > "$d/.gitignore" 2>/dev/null || true
+    f="$d/.gitignore"
+    if [ ! -f "$f" ]; then
+        {
+            echo "# MangoLove 게이트의 일시 상태 (자동 생성). 레포 내용이 아니다."
+            echo "# 이 파일 자신도 무시한다. 게이트가 어느 머신에서든 다시 만든다."
+        } > "$f" 2>/dev/null || return 0
+    fi
+    # 마지막 줄에 개행이 없으면 append 가 그 줄에 붙어 패턴 두 개를 한꺼번에 무효화한다
+    # (`dod.sh` + `.dod-gate-attempts` → `dod.sh.dod-gate-attempts`). 손으로 쓴 파일에서 실제로 난다.
+    if [ -s "$f" ] && [ -n "$(tail -c1 "$f" 2>/dev/null)" ]; then
+        printf '\n' >> "$f" 2>/dev/null || return 0
+    fi
+    for p in .gitignore dod.sh .dod-gate-attempts .review-ledger .review-ledger.base .review-skip; do
+        grep -qxF "$p" "$f" 2>/dev/null || printf '%s\n' "$p" >> "$f" 2>/dev/null || true
+    done
 }
 
 

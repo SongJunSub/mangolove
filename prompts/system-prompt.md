@@ -133,8 +133,9 @@ Stop 훅이 매 턴 종료 시 `./.mangolove/dod.sh` 를 실행해 DoD 통과를
 
 - 작업 완료를 **주장하기 직전**: 선언한 DoD 를 **실행 가능한 체크**로 `./.mangolove/dod.sh` 에 외부화한다. 각 항목은 빌드/테스트/린트/grep 처럼 **종료코드로 판정**되는 명령이어야 한다(주관적 "괜찮아 보임" 금지).
 - 예: `#!/usr/bin/env bash` 아래에 `set -e` 와 `bats tests/ >/dev/null`, `shellcheck -x lib/*.sh` 등을 나열, 하나라도 실패하면 non-zero 로 종료하게 작성한다.
-- 게이트는 통과 시 `dod.sh` 를 소비(삭제)하고, 실패 시 실패 출력과 함께 재작업을 요구한다. `MANGOLOVE_DOD_MAX_ATTEMPTS`(기본 3) 회 후에는 무한루프 방지를 위해 자동 해제된다.
-- `./.mangolove/dod.sh` 와 `./.mangolove/.dod-gate-attempts` 는 일시 상태다. 게이트가 `.mangolove/.gitignore` 를 자동으로 심으므로 손으로 추가할 필요는 없다.
+- 게이트는 통과 시 `dod.sh` 를 소비(삭제)하고, 실패 시 실패 출력과 함께 재작업을 요구한다. 같은 DoD 를 `MANGOLOVE_DOD_MAX_ATTEMPTS`(기본 3) 회, 또는 DoD 를 바꿔 가며 그 3배를 시도해도 미통과면 무한루프 방지를 위해 해제된다. 이때 `dod.sh` 는 미충족 근거로 남고(재실행하지 않는다), 같은 DoD 로는 다시 차단하지 않는다. **새 DoD 를 쓰면 자기 몫의 시도 예산을 받아 재무장**한다.
+- **DoD 는 그것을 처음 평가한 세션의 소유다.** 같은 프로젝트에서 도는 다른 세션은 남의 `dod.sh` 를 실행하지도 지우지도 않고, 안내 한 줄만 내고 통과한다(무관한 세션이 남의 DoD 에 인질로 잡히지 않는다). 내용을 바꿔 쓰면 그 세션이 새 소유자가 되므로 자기 DoD 를 갱신하는 정상 흐름은 막히지 않는다.
+- `./.mangolove/dod.sh` 와 `./.mangolove/.dod-gate-attempts`(소유자 스탬프 포함) 는 일시 상태다. 게이트가 `.mangolove/.gitignore` 를 자동으로 심으므로 손으로 추가할 필요는 없다.
 - 게이트는 기본 on 이며 `MANGOLOVE_DOD_GATE=off` 로 끌 수 있다. 꺼도 **DoD 선언 의무는 그대로**다(코어 방법론), 게이트는 그 검증을 결정적으로 닫는 장치일 뿐이다.
 
 ## Claude Code 내장 스킬 자동 연동

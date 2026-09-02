@@ -52,3 +52,22 @@ MANGOLOVE_STATUSLINE=on
 #   않았으면 커밋을 차단한다. Trivial/Small 은 아무 것도 요구하지 않으므로 사소한
 #   작업에는 무비용. 기본 on. 우회(감사됨): MANGOLOVE_SKIP_REVIEW=1
 MANGOLOVE_REVIEW_GATE=on
+
+# Session context budget (on / off): 컨텍스트가 커지면 끊을 지점을 결정적으로 알린다
+#   실측에서 비용은 세션 크기에 극단적으로 쏠렸다(상위 10세션이 총비용의 64%, 턴 300+ 인
+#   45세션이 95%, 상위 세션의 peak context 는 전부 1M 천장). 캐시 적중률은 이미 97.9% 라
+#   캐시는 레버가 아니다. 그런데 대응은 상태줄의 시각 넛지 하나뿐이었다.
+#   Stop 훅이 transcript 에서 현재 컨텍스트를 읽어 임계 도달 시 1회 안내한다(버킷당 1회).
+#   차단이 아니라 안내지만, 모델에 메시지를 전달하는 경로가 exit 2 뿐이라 그 턴을 한 번 붙잡는다.
+#   off 면 훅 자체가 주입되지 않는다(= 진짜 0 비용).
+#   config.sh 는 bin/mangolove 의 기본값 **뒤에** source 되므로, 단순 대입으로 쓰면
+#   `MANGOLOVE_SESSION_BUDGET=off mangolove` 같은 셸 환경변수를 덮어쓴다.
+#   그래서 :- 형태로 둔다: 환경변수가 있으면 그것이, 없으면 이 값이 이긴다.
+MANGOLOVE_SESSION_BUDGET="${MANGOLOVE_SESSION_BUDGET:-on}"
+
+# 안내를 낼 컨텍스트 임계(토큰). 이후 배증할 때마다 다시 알린다(200K → 400K → 800K).
+#   기본 200000 은 실측 보정값이다(118세션): 200K 는 싼 세션 오탐 0 을 유지하면서
+#   총비용의 98.7% 를 덮는다. 150K 는 커버리지가 99.6% 로 조금 높지만 오탐이 12% 로 뛰고,
+#   500K 는 오탐 0 이지만 커버리지가 91.4% 로 떨어진다.
+#   Claude Code 자신의 /usage 도 ">150k 컨텍스트"를 고비용 신호로 플래그한다.
+MANGOLOVE_SESSION_BUDGET_TOKENS="${MANGOLOVE_SESSION_BUDGET_TOKENS:-200000}"

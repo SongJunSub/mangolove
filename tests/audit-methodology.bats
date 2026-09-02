@@ -91,7 +91,7 @@ teardown() {
     local derived
     derived="$(grep -rhoE 'record-(block|skip) [a-z-]+' "$MANGOLOVE_DIR/lib" \
                | awk '{print $2}' | sort -u | tr '\n' ' ')"
-    [ "$derived" = "dod-gate gate guard review " ]
+    [ "$derived" = "budget dod-gate gate guard review " ]
 }
 
 @test "audit: 원장이 있으면 phase 별 차단 건수를 반영한다" {

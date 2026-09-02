@@ -54,21 +54,28 @@ report() {
     echo "게이트가 막은 것 (결정적, 세션 중 실시간 기록):"
     if [ -f "$lg" ]; then
         # (phase,kind) 결합으로 상호배타 분류: 버킷합 == 총합 보장
-        local sec dng lt rev tot other
+        local sec dng lt rev bud tot other hard
         # 패턴에 "type":"block" 을 함께 건다: 같은 phase/kind 의 skip 줄이 차단으로 세지면
         # 버킷합 == 총합 이 깨지고, 무엇보다 통과가 차단으로 둔갑한다.
         sec="$(grep -cE '"type":"block","phase":"gate","kind":"secret"' "$lg" 2>/dev/null)"; sec="${sec:-0}"
         dng="$(grep -cE '"type":"block","phase":"guard"' "$lg" 2>/dev/null)"; dng="${dng:-0}"
         lt="$(grep -cE '"type":"block","phase":"gate","kind":"(lint|test)"' "$lg" 2>/dev/null)"; lt="${lt:-0}"
         rev="$(grep -cE '"type":"block","phase":"review"' "$lg" 2>/dev/null)"; rev="${rev:-0}"
+        # 세션 예산은 exit 2 를 쓰지만 **차단이 아니라 안내**다(Stop 훅에서 모델에 메시지를
+        # 전달하는 경로가 exit 2 뿐이라 그 턴을 한 번 붙잡을 뿐이다). 별도 버킷으로 빼고
+        # 차단 합계에서 제외한다. 여기 섞으면 장기 세션마다 반복되는 안내가 시크릿/가드
+        # 차단과 한 숫자로 합쳐져 효능이 부푼다(이 파일의 절대원칙).
+        bud="$(grep -cE '"type":"block","phase":"budget"' "$lg" 2>/dev/null)"; bud="${bud:-0}"
         tot="$(grep -c '"type":"block"' "$lg" 2>/dev/null)"; tot="${tot:-0}"
-        other=$((tot - sec - dng - lt - rev)); [ "$other" -lt 0 ] && other=0
+        other=$((tot - sec - dng - lt - rev - bud)); [ "$other" -lt 0 ] && other=0
+        hard=$((tot - bud)); [ "$hard" -lt 0 ] && hard=0
         printf '  시크릿 커밋 차단:        %s\n' "$sec"
         printf '  위험/비가역 명령 차단:   %s\n' "$dng"
         printf '  커밋 게이트(lint/test):  %s\n' "$lt"
         printf '  리뷰 미실행 커밋 차단:   %s\n' "$rev"
         [ "$other" -gt 0 ] && printf '  기타 차단:               %s\n' "$other"
-        printf '  (총 %s회 게이트/가드 차단, 재시도 포함, 고유 사고 수 아님)\n' "$tot"
+        printf '  (총 %s회 게이트/가드 차단, 재시도 포함, 고유 사고 수 아님)\n' "$hard"
+        [ "$bud" -gt 0 ] && printf '  세션 예산 안내:          %s회 (차단 아님, 위 합계에 포함되지 않음)\n' "$bud"
     else
         echo "  (아직 기록 없음, 막을 게 없었거나 세션 게이트 미활성)"
     fi

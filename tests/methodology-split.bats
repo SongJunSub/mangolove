@@ -158,6 +158,26 @@ _mirror() {
     done
 }
 
+@test "agents: 리뷰어별 모델이 의도대로 고정돼 있다" {
+    # "유효한 모델 이름인가"만 보면 실수로 뒤바뀌어도 초록이다. 어느 렌즈가 어느 모델인지를
+    # 여기 고정해서, 바꾸려면 이 줄을 함께 고치게 만든다(= 의도적 결정으로 남는다).
+    #
+    # 배치 근거: 반증/반례는 추론 깊이가 결과를 좌우해 opus. 정독은 방법이 "빠짐없이 읽기"라
+    # sonnet 이고, 그렇게 섞으면 3인 세트가 방법 축에 더해 **모델 축으로도 탈상관**된다.
+    # 검증자는 발견 하나에 대한 이진 판정이고 인스턴스가 가장 많이 떠서 sonnet.
+    # 각 파일에 "## 왜 <모델> 인가" 절로 근거와 알려진 갭(정밀도 미측정)을 남긴다.
+    grep -qx 'model: sonnet' "$REPO/cc-plugin/agents/mangolove-verifier.md"
+    grep -qx 'model: sonnet' "$REPO/cc-plugin/agents/mangolove-reviewer-close-read.md"
+    grep -qx 'model: opus'   "$REPO/cc-plugin/agents/mangolove-reviewer-refute.md"
+    grep -qx 'model: opus'   "$REPO/cc-plugin/agents/mangolove-reviewer-counterexample.md"
+
+    local a
+    for a in mangolove-verifier mangolove-reviewer-close-read \
+             mangolove-reviewer-refute mangolove-reviewer-counterexample; do
+        grep -q '^## 왜 ' "$REPO/cc-plugin/agents/$a.md" || { echo "근거 없음: $a"; false; }
+    done
+}
+
 @test "methodology: 실존하지 않는 스킬 이름(/review)을 지시로 쓰지 않는다" {
     # F1 회귀의 나머지 절반: 생성되는 스킬 본문에도 /review 지시가 있었다.
     # "그런 스킬은 없다"고 밝히는 부정 언급(없다 포함 줄)은 의도된 것이라 예외로 둔다.

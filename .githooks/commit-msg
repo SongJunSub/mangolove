@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# ─────────────────────────────────────────────
+# MangoLove: commit-msg 훅. 커밋 메시지의 금지 문장부호를 잡는다.
+#
+# tests/style.bats 는 추적 파일만 볼 수 있다. 커밋 메시지는 파일이 아니라
+# 구조적으로 못 잡는다. 실제로 이 저장소의 커밋 13b2d0a 제목에 em dash 가
+# 들어갔고, 푸시된 뒤라 되돌리지 못했다. 그 자리를 이 훅이 맡는다.
+#
+# 활성화(레포당 1회):
+#   git config core.hooksPath .githooks
+#
+# 우회(감사됨): git commit --no-verify
+# ─────────────────────────────────────────────
+set -uo pipefail
+
+MSG_FILE="${1:-}"
+[ -n "$MSG_FILE" ] && [ -f "$MSG_FILE" ] || exit 0
+
+# 금지 문자를 이 파일에 리터럴로 적지 않는다. 적으면 이 훅 자신이
+# tests/style.bats 의 검사에 걸린다. UTF-8 바이트로 만든다.
+EM_DASH="$(printf '\xe2\x80\x94')"   # U+2014
+MIDDOT="$(printf '\xc2\xb7')"        # U+00B7
+
+# 주석 줄(#)은 커밋에 포함되지 않으므로 검사 대상이 아니다.
+# (git 이 붙이는 안내문에 금지 문자가 있어도 사용자 잘못이 아니다.)
+body="$(grep -v '^#' "$MSG_FILE" || true)"
+
+fail=0
+if printf '%s' "$body" | grep -qF -- "$EM_DASH"; then
+    echo "MangoLove commit-msg: 커밋 메시지에 em dash 가 있습니다." >&2
+    printf '%s' "$body" | grep -nF -- "$EM_DASH" | sed 's/^/  /' >&2
+    echo "  라벨과 설명 사이는 ':', 산문 삽입구는 '.' 또는 ',' 로 바꾸세요." >&2
+    fail=1
+fi
+if printf '%s' "$body" | grep -qF -- "$MIDDOT"; then
+    echo "MangoLove commit-msg: 커밋 메시지에 가운뎃점이 있습니다." >&2
+    printf '%s' "$body" | grep -nF -- "$MIDDOT" | sed 's/^/  /' >&2
+    echo "  나열은 ',', 한 덩어리 개념은 '과'/'와', 택일은 '/' 로 바꾸세요." >&2
+    fail=1
+fi
+
+if [ "$fail" -ne 0 ]; then
+    echo "" >&2
+    echo "  부득이하면 --no-verify (감사 대상)." >&2
+    exit 1
+fi
+exit 0

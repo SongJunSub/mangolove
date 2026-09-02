@@ -1,18 +1,18 @@
 # MangoLove ShellCheck Configuration
-# SC2155: Declare and assign separately — accepted pattern in this project
+# SC2155: Declare and assign separately. Accepted pattern in this project
 # for concise local variable initialization where return value masking is not a concern
 disable=SC2155
-# SC1090: Can't follow non-constant source — expected for plugin dynamic loading
+# SC1090: Can't follow non-constant source. Expected for plugin dynamic loading
 disable=SC1090
-# SC2001: sed vs variable substitution — sed is more readable for multiline
+# SC2001: sed vs variable substitution. sed is more readable for multiline
 disable=SC2001
 # SC2016: Single quotes in sed patterns are intentional
 disable=SC2016
-# SC2038: find | xargs without -print0 — paths are controlled, no special chars
+# SC2038: find | xargs without -print0. Paths are controlled, no special chars
 disable=SC2038
-# SC2116: useless echo in subshell — used for variable expansion in heredoc
+# SC2116: useless echo in subshell. Used for variable expansion in heredoc
 disable=SC2116
-# SC2129: grouped redirects — individual redirects are clearer for appending
+# SC2129: grouped redirects. Individual redirects are clearer for appending
 disable=SC2129
-# SC1091: Can't follow dynamic source paths — colors.sh is sourced at runtime
+# SC1091: Can't follow dynamic source paths. colors.sh is sourced at runtime
 disable=SC1091

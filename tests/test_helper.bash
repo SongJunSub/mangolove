@@ -1,6 +1,6 @@
 #!/bin/bash
 # ─────────────────────────────────────────────
-# MangoLove — Test Helper
+# MangoLove: Test Helper
 # Shared setup/teardown for all BATS tests
 # ─────────────────────────────────────────────
 

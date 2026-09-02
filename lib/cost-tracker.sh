@@ -64,6 +64,17 @@ def normalize_model(model):
     m = model.split('[', 1)[0]                       # [1m] 등 변형 접미사 제거
     return re.sub(r'-20\d{6}$', '', m)                # -YYYYMMDD 날짜 스냅샷 제거
 
+# 한 usage 레코드의 비용. 단가표만 공유하고 이 식을 복제해 두면, 캐시 승수(1.25/0.1)를
+# 바꾸는 순간 프로젝트 뷰와 세션 뷰의 비용이 다시 갈라진다. 공유의 의도를 여기서 완성한다.
+def cost_of(usage, model):
+    i = usage.get('input_tokens', 0) or 0
+    o = usage.get('output_tokens', 0) or 0
+    cw = usage.get('cache_creation_input_tokens', 0) or 0
+    cr = usage.get('cache_read_input_tokens', 0) or 0
+    p_in, p_out = price_for(model, usage.get('speed'))
+    return (i, o, cw, cr,
+            (i * p_in + o * p_out + cw * (p_in * 1.25) + cr * (p_in * 0.1)) / 1_000_000)
+
 def price_for(model, speed=None):
     model = normalize_model(model)
     if speed == 'fast' and model in FAST_PRICES:
@@ -85,17 +96,15 @@ PRICEPY
 )
 
 batch_parse_sessions() {
-    local input_data
-    input_data=$(cat)
     python3 -c "
-import json, os, re
+import json, os, re, sys
 from collections import defaultdict
 
 ${_ML_PRICE_PY}
 
 # [input, output, cache_write, cache_read, msgs, sessions, cost]
 projects = defaultdict(lambda: [0, 0, 0, 0, 0, 0, 0.0])
-file_list = '''${input_data}'''
+file_list = sys.stdin.read()
 
 for line in file_list.strip().split('\n'):
     line = line.strip()
@@ -117,12 +126,7 @@ for line in file_list.strip().split('\n'):
                 msg = data.get('message', {}) or {}
                 usage = msg.get('usage', {}) or {}
                 if usage:
-                    i = usage.get('input_tokens', 0) or 0
-                    o = usage.get('output_tokens', 0) or 0
-                    cw = usage.get('cache_creation_input_tokens', 0) or 0
-                    cr = usage.get('cache_read_input_tokens', 0) or 0
-                    p_in, p_out = price_for(msg.get('model'), usage.get('speed'))
-                    cost = (i * p_in + o * p_out + cw * (p_in * 1.25) + cr * (p_in * 0.1)) / 1_000_000
+                    i, o, cw, cr, cost = cost_of(usage, msg.get('model'))
                     projects[proj_name][0] += i
                     projects[proj_name][1] += o
                     projects[proj_name][2] += cw
@@ -150,17 +154,15 @@ for name, v in projects.items():
 # 이고, 그 세션 최대값이 peak 다 (러닝 max: 프로젝트 집계의 합산과는 다른 축).
 # ─────────────────────────────────────────────
 batch_parse_by_session() {
-    local input_data
-    input_data=$(cat)
     python3 -c "
-import json, os, re
+import json, os, re, sys
 ${_ML_PRICE_PY}
 
 LONG_TURNS = int(os.environ.get('ML_LONG_TURNS', '300'))
 TOP_N = int(os.environ.get('ML_TOP_N', '10'))
 
 rows = []
-file_list = '''${input_data}'''
+file_list = sys.stdin.read()
 
 for line in file_list.strip().split('\n'):
     line = line.strip()
@@ -185,12 +187,8 @@ for line in file_list.strip().split('\n'):
             usage = msg.get('usage', {}) or {}
             if not usage:
                 continue
-            i = usage.get('input_tokens', 0) or 0
-            o = usage.get('output_tokens', 0) or 0
-            cw = usage.get('cache_creation_input_tokens', 0) or 0
-            cr = usage.get('cache_read_input_tokens', 0) or 0
-            p_in, p_out = price_for(msg.get('model'), usage.get('speed'))
-            cost += (i * p_in + o * p_out + cw * (p_in * 1.25) + cr * (p_in * 0.1)) / 1_000_000
+            i, o, cw, cr, one = cost_of(usage, msg.get('model'))
+            cost += one
             turns += 1
             cr_tot += cr
             if i + cw + cr > peak:
@@ -205,6 +203,12 @@ rows.sort(key=lambda r: r[0], reverse=True)
 total = sum(r[0] for r in rows)
 for r in rows:
     print('S|%.4f|%d|%d|%d|%s|%s' % r)
+
+# 집계할 세션이 없으면 요약행 자체를 내지 않는다. 내면 show_sessions 는
+# 세션 0개 / 총비용 0 을 찍는데 같은 픽스처에서 show_cost 는 데이터 없음을
+# 안내한다. 두 뷰가 같은 상황을 다르게 말하면 안 된다.
+if not rows:
+    raise SystemExit(0)
 
 top_cost = sum(r[0] for r in rows[:TOP_N])
 long_rows = [r for r in rows if r[1] >= LONG_TURNS]
@@ -226,15 +230,9 @@ print('T|%.4f|%d|%d|%.4f|%.1f|%d|%.4f|%.1f|%d' % (
 # ─────────────────────────────────────────────
 show_sessions() {
     local period="${1:-all}"
-    local since_date=""
-
-    case "$period" in
-        today) since_date=$(date -v-0d '+%Y-%m-%d' 2>/dev/null || date -d 'today' '+%Y-%m-%d') ;;
-        week)  since_date=$(date -v-7d '+%Y-%m-%d' 2>/dev/null || date -d '7 days ago' '+%Y-%m-%d') ;;
-        month) since_date=$(date -v-1m '+%Y-%m-%d' 2>/dev/null || date -d '1 month ago' '+%Y-%m-%d') ;;
-        all)   since_date="2020-01-01" ;;
-        *)     since_date="2020-01-01"; period="all" ;;
-    esac
+    case "$period" in today|week|month|all) ;; *) period="all" ;; esac
+    local since_date
+    since_date=$(_since_date "$period")
 
     if ! command -v python3 &>/dev/null; then
         echo -e "  ${Y}python3 required for cost tracking.${R}"
@@ -247,21 +245,8 @@ show_sessions() {
     echo -e "  Period: ${C}${period}${R} (since ${since_date})"
     echo ""
 
-    local file_list=""
-    local project_dir proj_name session_file file_date
-    for project_dir in "$PROJECTS_DIR"/*/; do
-        [ ! -d "$project_dir" ] && continue
-        proj_name=$(dir_to_project_name "$(basename "$project_dir")")
-        for session_file in "$project_dir"/*.jsonl; do
-            [ ! -f "$session_file" ] && continue
-            file_date=$(stat -f "%Sm" -t "%Y-%m-%d" "$session_file" 2>/dev/null) || \
-            file_date=$(stat -c "%y" "$session_file" 2>/dev/null | cut -d" " -f1) || continue
-            if [[ ! "$file_date" < "$since_date" ]]; then
-                file_list="${file_list}${proj_name}:${session_file}
-"
-            fi
-        done
-    done
+    local file_list
+    file_list=$(_collect_session_files "$since_date")
 
     if [ -z "$file_list" ]; then
         echo -e "  ${DIM}No session data found for this period.${R}"
@@ -279,23 +264,32 @@ show_sessions() {
 
     echo -e "  ${G}Top Sessions${R} ${DIM}(추정 비용순)${R}"
     printf "    %9s %6s %11s %9s  %s\n" "cost" "turns" "cacheRead" "peak ctx" "session"
-    local tag c t cr pk sid proj
-    while IFS='|' read -r tag c t cr pk sid proj; do
-        [ "$tag" = "S" ] || continue
-        printf "    %9s %6s %11s %9s  %s ${DIM}%s${R}\n" \
-            "\$$(printf '%.2f' "$c")" "$t" \
-            "$(format_tokens "$cr")" "$(format_tokens "$pk")" \
-            "${sid:0:8}" "$proj"
-    done < <(printf '%s\n' "$parsed" | head -20)
 
-    echo ""
-    echo -e "  ${G}집중도${R}"
+    # 파서 출력은 S 행들 뒤에 T 행 하나다. 한 번만 훑는다.
+    # 두 행은 필드 수가 다르므로(S=7, T=10) 줄을 통째로 읽고 태그별로 나눠 담는다.
+    local shown=0 line
+    local c t cr pk sid proj
     local total n topn topc toppct longn longc longpct thr
-    while IFS='|' read -r tag total n topn topc toppct longn longc longpct thr; do
-        [ "$tag" = "T" ] || continue
-        printf "    세션 %s개, 추정 총비용 \$%s\n" "$n" "$(printf '%.2f' "$total")"
-        printf "    상위 %s세션이 총비용의 %s%% (\$%s)\n" "$topn" "$toppct" "$(printf '%.2f' "$topc")"
-        printf "    턴 %s+ 세션 %s개가 총비용의 %s%% (\$%s)\n" "$thr" "$longn" "$longpct" "$(printf '%.2f' "$longc")"
+    while IFS= read -r line; do
+        case "$line" in
+            S\|*)
+                [ "$shown" -ge 20 ] && continue
+                shown=$((shown + 1))
+                IFS='|' read -r c t cr pk sid proj <<< "${line#S|}"
+                printf "    %9s %6s %11s %9s  %s ${DIM}%s${R}\n" \
+                    "\$$(printf '%.2f' "$c")" "$t" \
+                    "$(format_tokens "$cr")" "$(format_tokens "$pk")" \
+                    "${sid:0:8}" "$proj"
+                ;;
+            T\|*)
+                IFS='|' read -r total n topn topc toppct longn longc longpct thr <<< "${line#T|}"
+                echo ""
+                echo -e "  ${G}집중도${R}"
+                printf "    세션 %s개, 추정 총비용 \$%s\n" "$n" "$(printf '%.2f' "$total")"
+                printf "    상위 %s세션이 총비용의 %s%% (\$%s)\n" "$topn" "$toppct" "$(printf '%.2f' "$topc")"
+                printf "    턴 %s+ 세션 %s개가 총비용의 %s%% (\$%s)\n" "$thr" "$longn" "$longpct" "$(printf '%.2f' "$longc")"
+                ;;
+        esac
     done < <(printf '%s\n' "$parsed")
 
     echo ""
@@ -303,6 +297,39 @@ show_sessions() {
     echo -e "  ${DIM}peak ctx = 한 요청이 보낸 최대 컨텍스트(input+cache write+cache read). 저장된 필드가 아니라 유도값.${R}"
     echo -e "  ${DIM}구독 과금이면 비용은 청구액이 아니라 플랜 사용량 소모의 대리 지표다.${R}"
     echo ""
+}
+
+# ─────────────────────────────────────────────
+# 기간 문자열 → since_date. 두 뷰(show_cost / show_sessions)가 공유한다.
+# 복제해 두었더니 한쪽에만 GNU date 폴백이 들어가 같은 파일 안에서 기간 정의가 갈라졌다.
+# ─────────────────────────────────────────────
+_since_date() {
+    case "${1:-week}" in
+        today) date -v-0d '+%Y-%m-%d' 2>/dev/null || date -d 'today' '+%Y-%m-%d' ;;
+        week)  date -v-7d '+%Y-%m-%d' 2>/dev/null || date -d '7 days ago' '+%Y-%m-%d' ;;
+        month) date -v-1m '+%Y-%m-%d' 2>/dev/null || date -d '1 month ago' '+%Y-%m-%d' ;;
+        *)     echo "2020-01-01" ;;
+    esac
+}
+
+# ─────────────────────────────────────────────
+# since_date 이후에 갱신된 세션 파일을 "project_name:path" 줄로 낸다. 두 뷰가 공유한다.
+# ─────────────────────────────────────────────
+_collect_session_files() {
+    local since_date="$1"
+    local project_dir proj_name session_file file_date
+    for project_dir in "$PROJECTS_DIR"/*/; do
+        [ ! -d "$project_dir" ] && continue
+        proj_name=$(dir_to_project_name "$(basename "$project_dir")")
+        for session_file in "$project_dir"/*.jsonl; do
+            [ ! -f "$session_file" ] && continue
+            file_date=$(stat -f "%Sm" -t "%Y-%m-%d" "$session_file" 2>/dev/null) || \
+            file_date=$(stat -c "%y" "$session_file" 2>/dev/null | cut -d' ' -f1) || continue
+            if [[ ! "$file_date" < "$since_date" ]]; then
+                printf '%s:%s\n' "$proj_name" "$session_file"
+            fi
+        done
+    done
 }
 
 # ─────────────────────────────────────────────
@@ -333,15 +360,9 @@ format_tokens() {
 # ─────────────────────────────────────────────
 show_cost() {
     local period="${1:-week}"
-    local since_date=""
-
-    case "$period" in
-        today) since_date=$(date -v-0d '+%Y-%m-%d') ;;
-        week)  since_date=$(date -v-7d '+%Y-%m-%d') ;;
-        month) since_date=$(date -v-1m '+%Y-%m-%d') ;;
-        all)   since_date="2020-01-01" ;;
-        *)     since_date=$(date -v-7d '+%Y-%m-%d') ;;
-    esac
+    case "$period" in today|week|month|all) ;; *) period="week" ;; esac
+    local since_date
+    since_date=$(_since_date "$period")
 
     if ! command -v python3 &>/dev/null; then
         echo -e "  ${Y}python3 required for cost tracking.${R}"
@@ -354,24 +375,9 @@ show_cost() {
     echo -e "  Period: ${C}${period}${R} (since ${since_date})"
     echo ""
 
-    # Collect all session files matching the date range
-    local file_list=""
-    for project_dir in "$PROJECTS_DIR"/*/; do
-        [ ! -d "$project_dir" ] && continue
-        local proj_name
-        proj_name=$(dir_to_project_name "$(basename "$project_dir")")
-
-        for session_file in "$project_dir"/*.jsonl; do
-            [ ! -f "$session_file" ] && continue
-            local file_date
-            file_date=$(stat -f "%Sm" -t "%Y-%m-%d" "$session_file" 2>/dev/null) || \
-            file_date=$(stat -c "%y" "$session_file" 2>/dev/null | cut -d' ' -f1) || continue
-            if [[ ! "$file_date" < "$since_date" ]]; then
-                file_list="${file_list}${proj_name}:${session_file}
-"
-            fi
-        done
-    done
+    # Collect all session files matching the date range (show_sessions 와 같은 헬퍼를 쓴다)
+    local file_list
+    file_list=$(_collect_session_files "$since_date")
 
     # Single python3 call for all session files
     local batch_result=""

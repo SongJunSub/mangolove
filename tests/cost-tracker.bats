@@ -20,20 +20,18 @@ teardown() {
     teardown_test_env
 }
 
-# 단일 usage 레코드 세션 파일 생성 (output_tokens 만, 다른 버킷은 0)
+# 단일 usage 레코드 세션 파일 생성 (output_tokens 만, 다른 버킷은 0).
+# 레코드 모양은 _usage_line 한 곳에만 둔다: 네 벌로 흩어져 있으면 usage 필드가 하나
+# 늘 때마다 printf 포맷을 각각 찾아 고쳐야 한다.
 _write_output_only_session() {
     local model="$1" out_tokens="$2" file="$3"
-    printf '%s\n' \
-      "{\"message\":{\"model\":\"$model\",\"usage\":{\"input_tokens\":0,\"output_tokens\":$out_tokens,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}" \
-      > "$file"
+    _usage_line "$model" 0 "$out_tokens" 0 0 > "$file"
 }
 
 # 위와 같되 usage.speed 를 실어 fast mode 프리미엄 단가 적용을 검증한다.
 _write_output_only_session_speed() {
     local model="$1" out_tokens="$2" speed="$3" file="$4"
-    printf '%s\n' \
-      "{\"message\":{\"model\":\"$model\",\"usage\":{\"input_tokens\":0,\"output_tokens\":$out_tokens,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"speed\":\"$speed\"}}}" \
-      > "$file"
+    _usage_line "$model" 0 "$out_tokens" 0 0 "$speed" > "$file"
 }
 
 _run_cost() {
@@ -157,10 +155,15 @@ _run_cost() {
 # CI 머신엔 그 데이터가 아예 없고, 있어도 실행 시점마다 값이 달라진다).
 # ─────────────────────────────────────────────
 
-# usage 레코드 한 줄. $1=model $2=input $3=output $4=cache_write $5=cache_read
+# usage 레코드 한 줄. $1=model $2=input $3=output $4=cache_write $5=cache_read [$6=speed]
 _usage_line() {
-    printf '{"message":{"model":"%s","usage":{"input_tokens":%s,"output_tokens":%s,"cache_creation_input_tokens":%s,"cache_read_input_tokens":%s}}}\n' \
-        "$1" "$2" "$3" "$4" "$5"
+    if [ -n "${6:-}" ]; then
+        printf '{"message":{"model":"%s","usage":{"input_tokens":%s,"output_tokens":%s,"cache_creation_input_tokens":%s,"cache_read_input_tokens":%s,"speed":"%s"}}}\n' \
+            "$1" "$2" "$3" "$4" "$5" "$6"
+    else
+        printf '{"message":{"model":"%s","usage":{"input_tokens":%s,"output_tokens":%s,"cache_creation_input_tokens":%s,"cache_read_input_tokens":%s}}}\n' \
+            "$1" "$2" "$3" "$4" "$5"
+    fi
 }
 
 _run_sessions() {
@@ -245,4 +248,30 @@ _run_sessions() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"세션 1개"* ]]
     [[ "$output" != *"77777777"* ]]
+}
+
+@test "파일 목록은 python 소스가 아니라 stdin 으로 넘어간다 (조용한 누락 회귀)" {
+    # 회귀: 파일 목록을 python 소스에 '''...''' 로 보간하면, 이름에 삼중따옴표가 있는
+    # 파일 하나가 소스를 깨뜨린다. SyntaxError 는 2>/dev/null 에 삼켜져 세션 전체가
+    # "No session data" 로 조용히 사라졌다(오류도 안 뜬다). stdin 으로 넘기면 무해하다.
+    _usage_line "claude-opus-5" 0 1000000 0 0 > "$PROJ_DIR/a'''b.jsonl"
+    _run_cost
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'$25.00'* ]]
+    [[ "$output" != *"No session data"* ]]
+
+    _run_sessions
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"세션 1개"* ]]
+}
+
+@test "cost sessions: usage 레코드가 하나도 없으면 cost 와 같은 안내를 낸다" {
+    # 회귀: 파서가 rows 가 비어도 T 요약행을 내보내서, show_sessions 가
+    # "세션 0개, 총비용 $0.00" 을 찍었다. 같은 픽스처에서 show_cost 는
+    # "No session data found" 를 낸다. 두 뷰가 같은 상황을 다르게 말하면 안 된다.
+    printf '{"type":"summary","summary":"x"}\n' > "$PROJ_DIR/nousage.jsonl"
+    _run_sessions
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"No session data found"* ]]
+    [[ "$output" != *"세션 0개"* ]]
 }

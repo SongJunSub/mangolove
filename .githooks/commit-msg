@@ -39,6 +39,19 @@ if printf '%s' "$body" | grep -qF -- "$MIDDOT"; then
     fail=1
 fi
 
+# AI 저작 표기 금지. 사용자 지침이며 하네스 기본 지침보다 우선한다.
+# 사람 공저자(Co-Authored-By: 홍길동)는 정상이므로, AI 이름이 붙은 것만 잡는다.
+if printf '%s' "$body" | grep -qiE '^Co-Authored-By:.*(claude|copilot|gpt|gemini|cursor|codeium|devin)'; then
+    echo "MangoLove commit-msg: AI 를 공저자로 넣지 않습니다." >&2
+    printf '%s' "$body" | grep -niE '^Co-Authored-By:.*(claude|copilot|gpt|gemini|cursor|codeium|devin)' | sed 's/^/  /' >&2
+    fail=1
+fi
+if printf '%s' "$body" | grep -qiE '^(Claude-Session|Generated-by|AI-Generated):|Generated with .*Claude Code|noreply@anthropic\.com'; then
+    echo "MangoLove commit-msg: AI 생성 표기를 남기지 않습니다." >&2
+    printf '%s' "$body" | grep -niE '^(Claude-Session|Generated-by|AI-Generated):|Generated with .*Claude Code|noreply@anthropic\.com' | sed 's/^/  /' >&2
+    fail=1
+fi
+
 if [ "$fail" -ne 0 ]; then
     echo "" >&2
     echo "  부득이하면 --no-verify (감사 대상)." >&2

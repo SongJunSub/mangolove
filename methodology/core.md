@@ -171,8 +171,9 @@ Change-Track: <Trivial|Small|Medium|Large>
 - `mangolove efficacy` 가 이 선언값을 코드가 계산한 `track_floor`(impact-score, 결정적)와 대조해
   **under-triage**(선언 트랙이 실제 영향도보다 낮음, 무거운 리뷰/Spec 단계가 누락됐을 신호)를 집계한다.
 - 미기재 시 측정에서 제외될 뿐(거짓 통과로 세지 않음), 동작, 게이트에는 영향 없다.
-- Conventional Commits footer 규칙과 동일 위치(`Co-Authored-By:` 등과 같은 묶음). 값은 한 단어.
-- **`Co-Authored-By:` 와 같은 문단에 둔다. 사이에 빈 줄을 넣지 않는다.** `git interpret-trailers` 는 메시지의 **마지막 문단만** 트레일러로 보므로, 빈 줄로 떨어져 있으면 `Change-Track:` 이 조용히 측정에서 빠진다. 에러도 경고도 없고 커밋은 정상 생성되므로 알아채기 어렵다. 확인: `mangolove impact triage-commit <sha>` 가 `undeclared` 로 나오면 이 경우다.
+- Conventional Commits footer 규칙과 동일 위치. 값은 한 단어.
+- **메시지의 마지막 문단에 둔다. 앞에 빈 줄로 끊긴 트레일러는 인식되지 않는다.** `git interpret-trailers` 는 **마지막 문단만** 트레일러로 보므로, 본문과 빈 줄로 떨어져 있어도 그 문단이 마지막이면 인식되지만, 트레일러 뒤에 또 다른 문단이 오면 `Change-Track:` 이 조용히 측정에서 빠진다. 에러도 경고도 없고 커밋은 정상 생성되므로 알아채기 어렵다. 확인: `mangolove impact triage-commit <sha>` 가 `undeclared` 로 나오면 이 경우다.
+- **AI 저작 표기를 트레일러로 붙이지 않는다.** `Co-Authored-By:` 로 에이전트를 공저자로 넣거나 세션 링크를 남기지 않는다. 사용자 지침이며 `.githooks/commit-msg` 가 강제한다.
 
 ## 트랙 내 단계 스킵 금지
 

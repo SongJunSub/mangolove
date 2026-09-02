@@ -96,3 +96,42 @@ setup() {
 
     rm -rf "$tmp"
 }
+
+@test "style: commit-msg 훅이 AI 저작 표기를 잡는다" {
+    # 사용자 지침: 어떤 산출물에도 AI 가 작업했다는 표시를 남기지 않는다.
+    # 하네스 기본 지침이 커밋 footer 에 공저자/세션 링크를 붙이라고 해도 따르지 않는다.
+    local hook="$REPO/.githooks/commit-msg"
+    local tmp; tmp="$(mktemp -d)"
+
+    printf 'fix: 제목\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\n' > "$tmp/a.txt"
+    run bash "$hook" "$tmp/a.txt"
+    [ "$status" -ne 0 ]
+
+    printf 'fix: 제목\n\nClaude-Session: https://example.invalid/s\n' > "$tmp/b.txt"
+    run bash "$hook" "$tmp/b.txt"
+    [ "$status" -ne 0 ]
+
+    printf 'fix: 제목\n\n本문\n\nGenerated with Claude Code\n' > "$tmp/c.txt"
+    run bash "$hook" "$tmp/c.txt"
+    [ "$status" -ne 0 ]
+
+    # 사람 공저자는 정상이다. 이걸 막으면 훅이 쓸모없어진다.
+    printf 'fix: 제목\n\nCo-Authored-By: 홍길동 <hong@example.com>\n' > "$tmp/ok.txt"
+    run bash "$hook" "$tmp/ok.txt"
+    [ "$status" -eq 0 ]
+
+    rm -rf "$tmp"
+}
+
+@test "style: 추적 파일에 AI 저작 표기가 없다" {
+    # 트레일러 형태(줄 시작)와 생성 표기만 잡는다. 방법론 문서가 금지 규칙을
+    # 설명하며 그 이름을 문장 중간에 인용하는 것은 저작 표기가 아니다.
+    local hits
+    hits="$(git -C "$REPO" grep -nE '^Co-Authored-By:|^Claude-Session:|Generated with .*Claude Code' \
+            -- . ':(exclude)tests/style.bats' ':(exclude).githooks/commit-msg' || true)"
+    [ -z "$hits" ] || {
+        echo "AI 저작 표기가 남아 있다:"
+        echo "$hits"
+        false
+    }
+}

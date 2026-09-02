@@ -66,18 +66,21 @@ DOD="./.mangolove/dod.sh"
 # 옛 포맷(정수만)은 나머지 필드가 빈 값으로 파싱되어 버전 분기 없이 그대로 호환된다.
 STATE="./.mangolove/.dod-gate-attempts"
 
-# ── stdin JSON 에서 문자열 필드 하나를 꺼낸다 (jq 비의존: 다른 게이트와 같은 방식).
+# ── stdin JSON 에서 문자열 필드 하나를 꺼낸다 (jq 비의존).
+# bash 정규식으로 푼다: 이 훅들은 매 턴/매 Bash 호출마다 돌아서, grep 파이프라인의
+# 포크 5개가 그대로 상시 비용이 된다. 실측 8KB payload 기준 7.2ms -> 1.1ms.
+# 두 게이트가 이 함수를 각자 한 벌씩 갖는 것은 의도다(서로 source 하지 않는다).
+# 두 사본이 갈라지지 않는지는 tests/dod-gate.bats 의 경계 테스트가 강제한다.
 _json_str() {
-    local input="$1" key="$2" raw
-    raw="$(printf '%s' "$input" | grep -oE "\"${key}\"[[:space:]]*:[[:space:]]*\"([^\"\\\\]|\\\\.)*\"" | head -1)"
-    [ -z "$raw" ] && return 0
-    raw="${raw#*:}"
-    raw="${raw#*\"}"
-    printf '%s' "${raw%\"}"
+    local re="\"$2\"[[:space:]]*:[[:space:]]*\"(([^\"\\\\]|\\\\.)*)\""
+    [[ "$1" =~ $re ]] && printf '%s' "${BASH_REMATCH[1]}"
+    return 0
 }
 
 # 훅은 다른 cwd 에서 실행될 수 있으므로 stdin 의 cwd 로 이동해 프로젝트를 정확히 식별한다.
-input="$(cat)"
+# read -d '' 는 builtin 이라 cat 의 포크를 없앤다. NUL 이 없으면 1 을 반환하나
+# 그때도 읽은 내용은 input 에 담긴다.
+IFS= read -r -d '' input || true
 cwd_field="$(_json_str "$input" cwd)"
 if [ -n "$cwd_field" ] && [ -d "$cwd_field" ]; then
     cd "$cwd_field" 2>/dev/null || true

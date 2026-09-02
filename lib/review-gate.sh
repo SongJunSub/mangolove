@@ -79,14 +79,15 @@ _ml_seed_gitignore() {
 }
 
 
-# ── stdin JSON 에서 문자열 필드 하나를 꺼낸다 (jq 비의존: 다른 게이트와 같은 방식).
+# ── stdin JSON 에서 문자열 필드 하나를 꺼낸다 (jq 비의존).
+# bash 정규식으로 푼다: 이 훅들은 매 턴/매 Bash 호출마다 돌아서, grep 파이프라인의
+# 포크 5개가 그대로 상시 비용이 된다. 실측 8KB payload 기준 7.2ms -> 1.1ms.
+# 두 게이트가 이 함수를 각자 한 벌씩 갖는 것은 의도다(서로 source 하지 않는다).
+# 두 사본이 갈라지지 않는지는 tests/dod-gate.bats 의 경계 테스트가 강제한다.
 _json_str() {
-    local input="$1" key="$2" raw
-    raw="$(printf '%s' "$input" | grep -oE "\"${key}\"[[:space:]]*:[[:space:]]*\"([^\"\\\\]|\\\\.)*\"" | head -1)"
-    [ -z "$raw" ] && return 0
-    raw="${raw#*:}"
-    raw="${raw#*\"}"
-    printf '%s' "${raw%\"}"
+    local re="\"$2\"[[:space:]]*:[[:space:]]*\"(([^\"\\\\]|\\\\.)*)\""
+    [[ "$1" =~ $re ]] && printf '%s' "${BASH_REMATCH[1]}"
+    return 0
 }
 
 # 훅은 다른 cwd 에서 실행될 수 있으므로 stdin 의 cwd 로 이동해 프로젝트를 정확히 식별한다.
@@ -160,7 +161,9 @@ required_skills() {
 # ── record: 실행된 스킬을 원장에 append (PostToolUse). 절대 실패로 turn 을 막지 않는다.
 do_record() {
     local input skill session
-    input="$(cat)"
+    # read -d '' 는 builtin 이라 cat 의 포크를 없앤다. NUL 이 없으면 1 을 반환하나
+    # 그때도 읽은 내용은 input 에 담긴다.
+    IFS= read -r -d '' input || true
     _cd_to_hook_cwd "$input"
     # 필드 이름은 런타임에서 실측했다: Skill 도구의 tool_input 은 {"skill":"simplify"} 다.
     # 훅 문서는 skill_name 이라고 적고 있어 양쪽을 다 받는다: 한쪽만 읽고 맞췄다가는
@@ -205,7 +208,9 @@ _analyze() {
 # ── pretooluse: git commit 경계에서만 게이트.
 do_pretooluse() {
     local input cmd line after ref s rec
-    input="$(cat)"
+    # read -d '' 는 builtin 이라 cat 의 포크를 없앤다. NUL 이 없으면 1 을 반환하나
+    # 그때도 읽은 내용은 input 에 담긴다.
+    IFS= read -r -d '' input || true
     cmd="$(_unescape_cmd "$(_json_str "$input" command)")"
 
     line="$(_commit_line "$cmd")"

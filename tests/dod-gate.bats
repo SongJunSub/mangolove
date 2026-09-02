@@ -335,3 +335,29 @@ release_gate_as() {
     rm -rf "$home"
 }
 
+@test "boundary: 두 게이트의 _json_str 이 바이트 동일하다" {
+    # 훅은 서로를 source 하지 않으므로 같은 함수가 두 벌 있다. 갈라지면 한쪽만 고쳐진 채
+    # 남는다(.gitignore seed 가 실제로 그렇게 갈라졌다). 사본이 같은지는 테스트가 잡는다.
+    local a b
+    a="$(sed -n '/^_json_str() {/,/^}/p' "$REPO/lib/dod-gate.sh")"
+    b="$(sed -n '/^_json_str() {/,/^}/p' "$REPO/lib/review-gate.sh")"
+    [ -n "$a" ]
+    [ "$a" = "$b" ]
+}
+
+@test "boundary: _json_str 이 까다로운 JSON 에서도 값을 정확히 꺼낸다" {
+    # grep 파이프라인을 bash 정규식으로 바꿨다(포크 5개 제거). 동등성을 고정한다.
+    # shellcheck disable=SC1090
+    _load_json_str() {
+        eval "$(sed -n '/^_json_str() {/,/^}/p' "$REPO/lib/dod-gate.sh")"
+    }
+    _load_json_str
+
+    [ "$(_json_str '{"a":"x\"y","cwd":"/p"}' cwd)" = "/p" ]        # 앞 필드의 이스케이프 따옴표
+    [ "$(_json_str '{"cwd":"","session_id":"s"}' cwd)" = "" ]      # 빈 값
+    [ "$(_json_str '{"a":"cwd","cwd":"/real"}' cwd)" = "/real" ]   # 키 이름이 값으로 먼저 등장
+    [ "$(_json_str '{"cwd"  :   "/sp"}' cwd)" = "/sp" ]            # 콜론 주변 공백
+    [ "$(_json_str '{"cwd":"/a\"b/c"}' cwd)" = '/a\"b/c' ]         # 값 안의 이스케이프 따옴표
+    [ "$(_json_str '{"a":"b"}' cwd)" = "" ]                        # 키 없음
+    [ "$(_json_str '{"cwd":"/first","cwd":"/second"}' cwd)" = "/first" ]   # 첫 번째를 취한다
+}

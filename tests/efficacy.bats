@@ -170,3 +170,33 @@ _commit_track() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"coverage 0"* ]]
 }
+
+@test "efficacy: record-skip 은 별도 type 으로 적히고 차단 집계에 섞이지 않는다" {
+    # 통과를 차단으로 세면 효능 수치가 부풀고, 그 수치로는 게이트가 느슨한지 알 수 없다.
+    local r; r=$(_git_repo "eff-skip")
+    cd "$r"
+    bash "$(REC)" record-block gate secret
+    bash "$(REC)" record-skip gate secret      # 같은 phase/kind 라도 버킷이 갈라져야 한다
+    bash "$(REC)" record-skip dod-gate foreign
+
+    local lg="$MANGOLOVE_DIR/efficacy/eff-skip.jsonl"
+    [ "$(grep -c '"type":"block"' "$lg")" = "1" ]
+    [ "$(grep -c '"type":"skip"' "$lg")" = "2" ]
+
+    run bash "$(REC)" report
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"시크릿 커밋 차단:        1"* ]]     # skip 이 더해지지 않았다
+    [[ "$output" == *"총 1회 게이트/가드 차단"* ]]
+    [[ "$output" == *"넘긴 것"* ]]
+    [[ "$output" == *"dod-gate/foreign"* ]]
+}
+
+@test "efficacy: 넘긴 기록이 없으면 그 섹션은 '기록 없음' 이다" {
+    local r; r=$(_git_repo "eff-noskip")
+    cd "$r"
+    bash "$(REC)" record-block gate secret
+    run bash "$(REC)" report
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"넘긴 것"* ]]
+    [[ "$output" == *"기록 없음"* ]]
+}

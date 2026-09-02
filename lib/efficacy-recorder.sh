@@ -6,10 +6,13 @@
 # 기록, 집계한다. cost/stats(노력, 부피)와 달리 효능(무엇을 막았나)을 측정.
 #
 #   record-block <phase> <kind>  게이트/가드 차단 시 실시간 append (결정적: 게이트 자신의 차단 결정)
-#   report                       차단 원장 + 리스크 분포 + under-triage(선언 vs floor) + revert 신호
+#   record-skip  <phase> <kind>  게이트가 강제하지 않고 넘긴 시점 (우회, 소유권, 해제 등)
+#   report                       차단 원장 + 넘긴 것 + 리스크 분포 + under-triage + revert 신호
 #
 # 저장: ${MANGOLOVE_DIR:-~/.mangolove}/efficacy/<project>.jsonl (로컬 전용)
 # 절대원칙: 분자/분모는 HARD 신호(차단 exit code, git diff, git revert)에만 앵커.
+#   차단(block)과 넘김(skip)은 절대 같은 버킷에 넣지 않는다. 통과를 차단으로 세면 효능이
+#   부풀고, 부푼 수치로는 게이트가 느슨한지 빡빡한지 판단할 수 없다. 넘김은 따로 센다.
 #   under-triage: floor 는 git diff 로 결정적, 분모는 '선언된' 커밋만(미선언은 거짓 통과로
 #   세지 않고 coverage 로 분리): 선언 자체는 모델 주장이나 갭의 기준값은 코드가 강제한다.
 # ─────────────────────────────────────────────
@@ -25,17 +28,24 @@ _project() {
 }
 _ledger() { printf '%s/%s.jsonl' "$EFF_DIR" "$(_project)"; }
 
-# 게이트/가드 차단 1건 기록 (비차단, 실패무시: 게이트 동작을 절대 방해하지 않음)
-record_block() {
+# 원장 1줄 기록 (비차단, 실패무시: 게이트 동작을 절대 방해하지 않음). $1=type $2=phase $3=kind
+_record() {
     mkdir -p "$EFF_DIR" 2>/dev/null || return 0
-    local ts p k
+    local ts t p k
     ts="$(date '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || echo '')"
     # JSON 이스케이프 (역슬래시 먼저, 그다음 따옴표): 향후 명령유래 문자열 호출에도 유효 JSON 보장
-    p="${1:-?}"; p="${p//\\/\\\\}"; p="${p//\"/\\\"}"
-    k="${2:-?}"; k="${k//\\/\\\\}"; k="${k//\"/\\\"}"
-    printf '{"ts":"%s","type":"block","phase":"%s","kind":"%s"}\n' "$ts" "$p" "$k" \
+    t="${1:-?}"
+    p="${2:-?}"; p="${p//\\/\\\\}"; p="${p//\"/\\\"}"
+    k="${3:-?}"; k="${k//\\/\\\\}"; k="${k//\"/\\\"}"
+    printf '{"ts":"%s","type":"%s","phase":"%s","kind":"%s"}\n' "$ts" "$t" "$p" "$k" \
         >> "$(_ledger)" 2>/dev/null || true
 }
+
+record_block() { _record block "${1:-}" "${2:-}"; }
+
+# 게이트가 강제할 수 있었으나 넘긴 시점. 차단이 아니므로 차단 집계에 절대 들어가지 않는다.
+# 이 눈금이 없으면 "게이트가 얼마나 자주 손을 떼는가"를 볼 방법이 없다.
+record_skip() { _record skip "${1:-}" "${2:-}"; }
 
 report() {
     local lg; lg="$(_ledger)"
@@ -45,10 +55,12 @@ report() {
     if [ -f "$lg" ]; then
         # (phase,kind) 결합으로 상호배타 분류: 버킷합 == 총합 보장
         local sec dng lt rev tot other
-        sec="$(grep -cE '"phase":"gate","kind":"secret"' "$lg" 2>/dev/null)"; sec="${sec:-0}"
-        dng="$(grep -cE '"phase":"guard"' "$lg" 2>/dev/null)"; dng="${dng:-0}"
-        lt="$(grep -cE '"phase":"gate","kind":"(lint|test)"' "$lg" 2>/dev/null)"; lt="${lt:-0}"
-        rev="$(grep -cE '"phase":"review"' "$lg" 2>/dev/null)"; rev="${rev:-0}"
+        # 패턴에 "type":"block" 을 함께 건다: 같은 phase/kind 의 skip 줄이 차단으로 세지면
+        # 버킷합 == 총합 이 깨지고, 무엇보다 통과가 차단으로 둔갑한다.
+        sec="$(grep -cE '"type":"block","phase":"gate","kind":"secret"' "$lg" 2>/dev/null)"; sec="${sec:-0}"
+        dng="$(grep -cE '"type":"block","phase":"guard"' "$lg" 2>/dev/null)"; dng="${dng:-0}"
+        lt="$(grep -cE '"type":"block","phase":"gate","kind":"(lint|test)"' "$lg" 2>/dev/null)"; lt="${lt:-0}"
+        rev="$(grep -cE '"type":"block","phase":"review"' "$lg" 2>/dev/null)"; rev="${rev:-0}"
         tot="$(grep -c '"type":"block"' "$lg" 2>/dev/null)"; tot="${tot:-0}"
         other=$((tot - sec - dng - lt - rev)); [ "$other" -lt 0 ] && other=0
         printf '  시크릿 커밋 차단:        %s\n' "$sec"
@@ -60,6 +72,17 @@ report() {
     else
         echo "  (아직 기록 없음, 막을 게 없었거나 세션 게이트 미활성)"
     fi
+    echo ""
+    echo "게이트가 강제하지 않고 넘긴 것 (차단 아님, 게이트가 손을 떼는 빈도):"
+    if [ -f "$lg" ] && grep -q '"type":"skip"' "$lg" 2>/dev/null; then
+        grep '"type":"skip"' "$lg" 2>/dev/null \
+            | sed -E 's/.*"phase":"([^"]*)","kind":"([^"]*)".*/\1\/\2/' \
+            | sort | uniq -c | sort -rn \
+            | while read -r c pk; do printf '  %-26s %s\n' "$pk" "$c"; done
+    else
+        echo "  (기록 없음)"
+    fi
+
     echo ""
     echo "참고, 최근 mainline 히스토리 리스크 분포 (막은 것 아님; impact-score 커버 스택 한정, --first-parent):"
     local imp="$SELF_DIR/impact-score.sh"
@@ -118,8 +141,9 @@ report() {
 main() {
     case "${1:-}" in
         record-block) shift; record_block "${1:-}" "${2:-}" ;;
+        record-skip)  shift; record_skip  "${1:-}" "${2:-}" ;;
         report|"")    report ;;
-        *) echo "usage: efficacy-recorder.sh {record-block <phase> <kind>|report}" >&2; exit 2 ;;
+        *) echo "usage: efficacy-recorder.sh {record-block <phase> <kind>|record-skip <phase> <kind>|report}" >&2; exit 2 ;;
     esac
 }
 

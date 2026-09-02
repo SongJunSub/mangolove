@@ -32,7 +32,13 @@
 # ─────────────────────────────────────────────
 set -uo pipefail
 
-GATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 스크립트 위치는 **cd 전에** 확정한다(훅은 stdin 의 cwd 로 이동한다).
+# 파라미터 확장으로 푼다: 이 훅은 Bash 도구 호출마다 도므로 포크를 늘리지 않는다.
+case "${BASH_SOURCE[0]}" in
+    /*)  GATE_DIR="${BASH_SOURCE[0]%/*}" ;;
+    */*) GATE_DIR="$PWD/${BASH_SOURCE[0]%/*}" ;;
+    *)   GATE_DIR="$PWD" ;;
+esac
 IMPACT="$GATE_DIR/impact-score.sh"
 LEDGER_REL=".mangolove/.review-ledger"
 # 원장이 어느 HEAD 위에서 만들어졌는지 기록한다. 커밋이 성공해 HEAD 가 움직이면 원장은
@@ -218,8 +224,10 @@ do_pretooluse() {
     if [ -f "$SKIP_REL" ]; then
         rm -f "$SKIP_REL" 2>/dev/null || true
         echo "MangoLove review gate: .mangolove/.review-skip 으로 1회 우회 (감사 대상)" >&2
+        # 우회는 차단이 아니다. block 으로 적으면 "리뷰 미실행 커밋 차단" 수치가 부풀어,
+        # 그 수치로 게이트가 실제로 무엇을 막았는지 판단할 수 없게 된다.
         rec="$GATE_DIR/efficacy-recorder.sh"
-        if [ -f "$rec" ]; then bash "$rec" record-block review "bypassed" 2>/dev/null || true; fi
+        if [ -f "$rec" ]; then bash "$rec" record-skip review "bypassed" 2>/dev/null || true; fi
         exit 0
     fi
 

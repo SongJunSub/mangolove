@@ -320,3 +320,18 @@ release_gate_as() {
     grep -qx '.dod-gate-attempts' "$PROJ/.mangolove/.gitignore"
     ! grep -q 'dod.sh.dod-gate-attempts' "$PROJ/.mangolove/.gitignore"
 }
+
+@test "dod-gate: 차단과 건너뜀이 효능 원장에 서로 다른 type 으로 남는다" {
+    # 회귀: 스크립트 경로를 cd 뒤에 계산하면 상대 경로 호출에서 기록이 조용히 죽는다.
+    local home; home="$(mktemp -d)"
+    write_failing_dod
+    MANGOLOVE_DIR="$home" run_gate_as SESSION-A >/dev/null 2>&1 || true   # 차단
+    MANGOLOVE_DIR="$home" run_gate_as SESSION-B >/dev/null 2>&1 || true   # 소유권 건너뜀
+
+    local lg="$home/efficacy/_no-git.jsonl"
+    [ -f "$lg" ]
+    grep -q '"type":"block","phase":"dod-gate","kind":"fail"' "$lg"
+    grep -q '"type":"skip","phase":"dod-gate","kind":"foreign"' "$lg"
+    rm -rf "$home"
+}
+

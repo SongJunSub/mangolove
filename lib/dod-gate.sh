@@ -40,6 +40,15 @@
 # ─────────────────────────────────────────────
 set -uo pipefail
 
+# 스크립트 위치는 **cd 전에** 확정한다. 훅은 stdin 의 cwd 로 이동하므로, 이동한 뒤에
+# 상대 경로(bash lib/dod-gate.sh)로 계산하면 빈 값이 되고 효능 기록이 조용히 죽는다.
+# $(cd .. && pwd) 대신 파라미터 확장으로 푼다: 매 턴 도는 훅이라 포크를 하나도 안 늘린다.
+case "${BASH_SOURCE[0]}" in
+    /*)  GATE_DIR="${BASH_SOURCE[0]%/*}" ;;
+    */*) GATE_DIR="$PWD/${BASH_SOURCE[0]%/*}" ;;
+    *)   GATE_DIR="$PWD" ;;
+esac
+
 MAX_ATTEMPTS="${MANGOLOVE_DOD_MAX_ATTEMPTS:-3}"
 # 10# 로 강제 십진 해석: "08" 은 숫자 검사를 통과하고도 8진수로 읽혀 산술을 깨뜨린다
 # (그러면 MAX_TOTAL 이 대입되지 않고 set -u 가 훅을 죽인다: 게이트가 조용히 꺼진다).
@@ -127,6 +136,14 @@ _dod_hash() {
     fi
 }
 
+# 효능 원장 기록(비차단, 실패무시). 차단은 block, 게이트가 손을 뗀 시점은 skip 이다.
+# 둘을 섞으면 통과가 차단으로 세져 효능 수치가 부푼다(efficacy-recorder.sh 의 절대원칙).
+_record_efficacy() {
+    local rec="$GATE_DIR/efficacy-recorder.sh"
+    [ -f "$rec" ] || return 0
+    bash "$rec" "$1" dod-gate "$2" 2>/dev/null || true
+}
+
 STATUS=""; TOTAL=0; OWNER=""; OWNED_HASH=""
 _read_state() {
     [ -f "$STATE" ] || return 0
@@ -157,6 +174,7 @@ same_dod=0
 #    (소유자가 돌아와 통과시킬 여지를 남긴다. 지우면 원 세션이 근거를 잃는다.)
 if [ "$same_dod" = 1 ] && [ -n "$OWNER" ] && [ -n "$SESSION" ] && [ "$OWNER" != "$SESSION" ]; then
     echo "MangoLove DoD gate: 다른 세션(${OWNER})이 남긴 ./.mangolove/dod.sh 입니다. 이 세션은 건너뜁니다." >&2
+    _record_efficacy record-skip foreign
     exit 0
 fi
 
@@ -195,6 +213,7 @@ if [ "$ATTEMPTS" -ge "$MAX_ATTEMPTS" ] || [ "$TOTAL" -ge "$MAX_TOTAL" ]; then
         echo "    dod.sh 는 근거로 남깁니다: bash .mangolove/dod.sh 로 무엇이 걸리는지 볼 수 있습니다."
         echo "    새 DoD 를 쓰면 재무장합니다. 상태까지 지우려면: rm .mangolove/.dod-gate-attempts"
     } >&2
+    _record_efficacy record-skip released
     exit 0
 fi
 
@@ -218,8 +237,6 @@ _write_state "$ATTEMPTS" "$TOTAL"
     printf '%s\n' "$out" | tail -30
 } >&2
 
-# 효능 원장에 차단 기록(비차단, 실패무시). 여기서만 필요하므로 경로도 여기서 구한다.
-rec="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/efficacy-recorder.sh"
-if [ -f "$rec" ]; then bash "$rec" record-block dod-gate "fail" 2>/dev/null || true; fi
+_record_efficacy record-block fail
 
 exit 2

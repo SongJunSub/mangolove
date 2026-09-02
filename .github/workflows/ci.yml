@@ -24,16 +24,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # macOS 가 기본 탑재한 bash 는 3.2 라 `printf '%x' "'<비ASCII>"` 가 부호 확장된
+      # 쓰레기 값을 내놓는다. bats 는 그 값으로 테스트 함수명을 만들기 때문에 한국어
+      # 테스트명이 전부 'unknown test name' 이 되어 조용히 실행에서 빠졌다(340 중 271만 실행).
+      # 최신 bash 를 깔고 PATH 앞에 둔다.
       - name: Install BATS
         run: |
           if [[ "$RUNNER_OS" == "Linux" ]]; then
             sudo apt-get update && sudo apt-get install -y bats
           elif [[ "$RUNNER_OS" == "macOS" ]]; then
-            brew install bats-core
+            brew install bats-core bash
           fi
 
       - name: Run tests
-        run: bats tests/
+        run: |
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            export PATH="$(brew --prefix)/bin:$PATH"
+          fi
+          echo "bash: $(bash --version | head -1)"
+          bats tests/
 
   plugin-validate:
     name: Plugin manifest

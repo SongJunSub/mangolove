@@ -95,6 +95,6 @@ printf '%s' "$attempts" > "$STATE" 2>/dev/null || true
 
 # 효능 원장에 차단 기록(비차단, 실패무시).
 rec="$GATE_DIR/efficacy-recorder.sh"
-[ -f "$rec" ] && bash "$rec" record-block dod-gate "fail" 2>/dev/null || true
+if [ -f "$rec" ]; then bash "$rec" record-block dod-gate "fail" 2>/dev/null || true; fi
 
 exit 2

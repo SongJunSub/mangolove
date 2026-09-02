@@ -98,8 +98,9 @@ gate_activity() {
     command -v _ledger >/dev/null 2>&1 && lg="$(_ledger 2>/dev/null)"
     # 게이트 phase 우주는 호출부에서 파생한다: 여기에 목록을 적어두면 두 번째 진실 출처가 된다.
     local phases p n silent=""
-    phases="$(grep -rhoE 'record-block [a-z-]+' "$ROOT/lib" 2>/dev/null | awk '{print $2}' | sort -u)"
-    if [ -z "$phases" ]; then echo "  (record-block 호출부 없음, 게이트 미배선)"; return 0; fi
+    # skip 도 함께 본다: 차단 없이 넘김만 기록하는 게이트가 생기면 표에서 통째로 사라진다.
+    phases="$(grep -rhoE 'record-(block|skip) [a-z-]+' "$ROOT/lib" 2>/dev/null | awk '{print $2}' | sort -u)"
+    if [ -z "$phases" ]; then echo "  (record-block/record-skip 호출부 없음, 게이트 미배선)"; return 0; fi
     # 원장은 현재 프로젝트 기준(mangolove efficacy 와 동일 범위). '발동 0건'을 '규칙이 무용'으로
     # 읽으려면 기록 기간이 충분한지부터 봐야 하므로 기간을 함께 낸다: 감사 프롬프트가 요구하는 정보.
     if [ -n "$lg" ] && [ -f "$lg" ]; then

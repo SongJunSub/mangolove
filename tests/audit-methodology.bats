@@ -79,9 +79,19 @@ teardown() {
     [ "$status" -eq 0 ]
     # lib/*.sh 의 record-block 호출부에 존재하는 phase 가 전부 표에 나와야 한다
     local p
-    for p in $(grep -rhoE 'record-block [a-z-]+' "$MANGOLOVE_DIR/lib" | awk '{print $2}' | sort -u); do
+    for p in $(grep -rhoE 'record-(block|skip) [a-z-]+' "$MANGOLOVE_DIR/lib" | awk '{print $2}' | sort -u); do
         [[ "$output" == *"$p"* ]] || { echo "missing phase: $p"; false; }
     done
+}
+
+@test "audit: 파생된 phase 가 실제 게이트 이름과 일치한다" {
+    # 위 테스트는 기대값을 같은 grep 으로 만들기 때문에 파생이 어긋나도 초록이다.
+    # 실제로 효능 호출을 헬퍼로 감싸자 phase 가 'dod-gate' 에서 'fail' 로 바뀌었는데도
+    # 통과했다. 그래서 이름을 여기 한 번 고정한다. 게이트를 늘리면 이 줄도 같이 고친다.
+    local derived
+    derived="$(grep -rhoE 'record-(block|skip) [a-z-]+' "$MANGOLOVE_DIR/lib" \
+               | awk '{print $2}' | sort -u | tr '\n' ' ')"
+    [ "$derived" = "dod-gate gate guard review " ]
 }
 
 @test "audit: 원장이 있으면 phase 별 차단 건수를 반영한다" {

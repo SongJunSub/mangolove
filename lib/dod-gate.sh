@@ -141,10 +141,12 @@ _dod_hash() {
 
 # 효능 원장 기록(비차단, 실패무시). 차단은 block, 게이트가 손을 뗀 시점은 skip 이다.
 # 둘을 섞으면 통과가 차단으로 세져 효능 수치가 부푼다(efficacy-recorder.sh 의 절대원칙).
+# phase 를 호출부에서 넘긴다: audit-methodology.sh 가 lib 의 호출부 문자열에서 게이트
+# phase 우주를 파생하므로, 여기서 감추면 감사 표에서 dod-gate 가 사라진다.
 _record_efficacy() {
     local rec="$GATE_DIR/efficacy-recorder.sh"
     [ -f "$rec" ] || return 0
-    bash "$rec" "$1" dod-gate "$2" 2>/dev/null || true
+    bash "$rec" "$@" 2>/dev/null || true
 }
 
 STATUS=""; TOTAL=0; OWNER=""; OWNED_HASH=""
@@ -177,7 +179,7 @@ same_dod=0
 #    (소유자가 돌아와 통과시킬 여지를 남긴다. 지우면 원 세션이 근거를 잃는다.)
 if [ "$same_dod" = 1 ] && [ -n "$OWNER" ] && [ -n "$SESSION" ] && [ "$OWNER" != "$SESSION" ]; then
     echo "MangoLove DoD gate: 다른 세션(${OWNER})이 남긴 ./.mangolove/dod.sh 입니다. 이 세션은 건너뜁니다." >&2
-    _record_efficacy record-skip foreign
+    _record_efficacy record-skip dod-gate "foreign"
     exit 0
 fi
 
@@ -216,7 +218,7 @@ if [ "$ATTEMPTS" -ge "$MAX_ATTEMPTS" ] || [ "$TOTAL" -ge "$MAX_TOTAL" ]; then
         echo "    dod.sh 는 근거로 남깁니다: bash .mangolove/dod.sh 로 무엇이 걸리는지 볼 수 있습니다."
         echo "    새 DoD 를 쓰면 재무장합니다. 상태까지 지우려면: rm .mangolove/.dod-gate-attempts"
     } >&2
-    _record_efficacy record-skip released
+    _record_efficacy record-skip dod-gate "released"
     exit 0
 fi
 
@@ -240,6 +242,6 @@ _write_state "$ATTEMPTS" "$TOTAL"
     printf '%s\n' "$out" | tail -30
 } >&2
 
-_record_efficacy record-block fail
+_record_efficacy record-block dod-gate "fail"
 
 exit 2

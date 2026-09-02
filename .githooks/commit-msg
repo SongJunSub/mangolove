@@ -21,36 +21,43 @@ MSG_FILE="${1:-}"
 EM_DASH="$(printf '\xe2\x80\x94')"   # U+2014
 MIDDOT="$(printf '\xc2\xb7')"        # U+00B7
 
-# 주석 줄(#)은 커밋에 포함되지 않으므로 검사 대상이 아니다.
-# (git 이 붙이는 안내문에 금지 문자가 있어도 사용자 잘못이 아니다.)
-body="$(grep -v '^#' "$MSG_FILE" || true)"
+# 검사 대상 줄만 골라 "원본 줄번호:내용" 으로 만든다.
+#  - 주석 줄(#)은 커밋에 포함되지 않는다. git 안내문의 금지 문자는 사용자 잘못이 아니다.
+#  - scissors 아래는 `git commit -v` 가 붙인 diff 다. 커밋 메시지가 아닌데 거기 있는
+#    em dash 로 커밋이 막혔다. 코드에서 em dash 를 지우는 커밋이 정확히 그 경우다.
+#  - 줄번호는 **원본 파일 기준**으로 남긴다. 걸러낸 뒤 번호를 매기면 주석 수만큼 밀려
+#    편집기에서 엉뚱한 줄을 가리킨다.
+NUMBERED="$(awk '/^# -+ >8 -+$/ { exit } !/^#/ { printf "%d:%s\n", NR, $0 }' "$MSG_FILE")"
+
+# NUMBERED 는 "줄번호:내용" 이라 줄머리 앵커(^)가 번호에 걸린다. 앵커는 ^[0-9]+: 로 쓴다.
+_hits_fixed() { printf '%s\n' "$NUMBERED" | grep -F -- "$1" || true; }
+_hits_re()    { printf '%s\n' "$NUMBERED" | grep -Ei -- "$1" || true; }
 
 fail=0
-if printf '%s' "$body" | grep -qF -- "$EM_DASH"; then
-    echo "MangoLove commit-msg: 커밋 메시지에 em dash 가 있습니다." >&2
-    printf '%s' "$body" | grep -nF -- "$EM_DASH" | sed 's/^/  /' >&2
-    echo "  라벨과 설명 사이는 ':', 산문 삽입구는 '.' 또는 ',' 로 바꾸세요." >&2
+# $1=제목, $2=적중한 줄들, $3=고치는 방법(선택)
+_report() {
+    echo "MangoLove commit-msg: $1" >&2
+    printf '%s\n' "$2" | sed 's/^/  /' >&2
+    [ -n "${3:-}" ] && echo "  $3" >&2
     fail=1
-fi
-if printf '%s' "$body" | grep -qF -- "$MIDDOT"; then
-    echo "MangoLove commit-msg: 커밋 메시지에 가운뎃점이 있습니다." >&2
-    printf '%s' "$body" | grep -nF -- "$MIDDOT" | sed 's/^/  /' >&2
-    echo "  나열은 ',', 한 덩어리 개념은 '과'/'와', 택일은 '/' 로 바꾸세요." >&2
-    fail=1
-fi
+    return 0
+}
+
+hits="$(_hits_fixed "$EM_DASH")"
+[ -n "$hits" ] && _report "커밋 메시지에 em dash 가 있습니다." "$hits" \
+    "라벨과 설명 사이는 ':', 산문 삽입구는 '.' 또는 ',' 로 바꾸세요."
+
+hits="$(_hits_fixed "$MIDDOT")"
+[ -n "$hits" ] && _report "커밋 메시지에 가운뎃점이 있습니다." "$hits" \
+    "나열은 ',', 한 덩어리 개념은 '과'/'와', 택일은 '/' 로 바꾸세요."
 
 # AI 저작 표기 금지. 사용자 지침이며 하네스 기본 지침보다 우선한다.
 # 사람 공저자(Co-Authored-By: 홍길동)는 정상이므로, AI 이름이 붙은 것만 잡는다.
-if printf '%s' "$body" | grep -qiE '^Co-Authored-By:.*(claude|copilot|gpt|gemini|cursor|codeium|devin)'; then
-    echo "MangoLove commit-msg: AI 를 공저자로 넣지 않습니다." >&2
-    printf '%s' "$body" | grep -niE '^Co-Authored-By:.*(claude|copilot|gpt|gemini|cursor|codeium|devin)' | sed 's/^/  /' >&2
-    fail=1
-fi
-if printf '%s' "$body" | grep -qiE '^(Claude-Session|Generated-by|AI-Generated):|Generated with .*Claude Code|noreply@anthropic\.com'; then
-    echo "MangoLove commit-msg: AI 생성 표기를 남기지 않습니다." >&2
-    printf '%s' "$body" | grep -niE '^(Claude-Session|Generated-by|AI-Generated):|Generated with .*Claude Code|noreply@anthropic\.com' | sed 's/^/  /' >&2
-    fail=1
-fi
+hits="$(_hits_re '^[0-9]+:Co-Authored-By:.*(claude|copilot|gpt|gemini|cursor|codeium|devin)')"
+[ -n "$hits" ] && _report "AI 를 공저자로 넣지 않습니다." "$hits"
+
+hits="$(_hits_re '^[0-9]+:(Claude-Session|Generated-by|AI-Generated):|Generated with .*Claude Code|noreply@anthropic\.com')"
+[ -n "$hits" ] && _report "AI 생성 표기를 남기지 않습니다." "$hits"
 
 if [ "$fail" -ne 0 ]; then
     echo "" >&2

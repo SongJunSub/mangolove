@@ -97,6 +97,39 @@ setup() {
     rm -rf "$tmp"
 }
 
+@test "style: commit-msg 훅이 원본 파일 기준 줄번호를 보고한다" {
+    # 주석을 걷어낸 본문에 번호를 매기면 주석 수만큼 밀려, 편집기에서 엉뚱한 줄을 가리킨다.
+    local hook="$REPO/.githooks/commit-msg"
+    local tmp; tmp="$(mktemp -d)"
+
+    printf '# 안내 1\n# 안내 2\nfix: 정상 제목\n\n본문에 %s 가 있다\n' "$EM_DASH" > "$tmp/m.txt"
+    run bash "$hook" "$tmp/m.txt"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"5:"* ]]      # 실제 5번째 줄
+    [[ "$output" != *"3:"* ]]      # 주석을 뺀 뒤 번호가 아니다
+
+    rm -rf "$tmp"
+}
+
+@test "style: commit-msg 훅이 git commit -v 의 diff 를 검사하지 않는다" {
+    # scissors 아래는 커밋 메시지가 아니라 git 이 붙인 diff 다. 거기 있는 금지 문자로
+    # 커밋이 막히면, 코드에서 em dash 를 지우는 커밋이 바로 그 이유로 막힌다.
+    local hook="$REPO/.githooks/commit-msg"
+    local tmp; tmp="$(mktemp -d)"
+
+    {
+        printf 'fix: 메시지에는 금지 문자 없음\n\n'
+        printf '# ------------------------ >8 ------------------------\n'
+        printf '# Do not modify or remove the line above.\n'
+        printf 'diff --git a/f.txt b/f.txt\n'
+        printf '+삭제되는 %s 와 %s\n' "$EM_DASH" "$MIDDOT"
+    } > "$tmp/v.txt"
+    run bash "$hook" "$tmp/v.txt"
+    [ "$status" -eq 0 ]
+
+    rm -rf "$tmp"
+}
+
 @test "style: commit-msg 훅이 AI 저작 표기를 잡는다" {
     # 사용자 지침: 어떤 산출물에도 AI 가 작업했다는 표시를 남기지 않는다.
     # 하네스 기본 지침이 커밋 footer 에 공저자/세션 링크를 붙이라고 해도 따르지 않는다.

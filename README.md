@@ -20,7 +20,7 @@ MangoLove는 Claude Code를 감쌉니다. 4-track 방법론을 시스템 프롬�
 | **작업 분류** | 없음 | **Trivial / Small / Medium / Large** 자동 분류, 비례 워크플로우 |
 | **코드 리뷰** | 요청해야 수행 | Large 트랙에서 **find → verify** 탈상관 멀티에이전트 리뷰 |
 | **리뷰 누락** | 알 수 없음 | Medium 이상 변경에서 필수 리뷰 미실행이면 **커밋 차단**(Stop/PreToolUse 훅) |
-| **품질 측정** | 측정 안 됨 | `mangolove efficacy`(게이트가 막은 것 + under-triage), `mangolove eval`(결정적 부품 점수) |
+| **품질 측정** | 측정 안 됨 | `mangolove efficacy`(게이트가 막은 것 + 넘긴 것 + under-triage), `mangolove eval`(결정적 부품 점수) |
 | **오버헤드** | 0 | 훅 몇 개 + 크고 위험한 변경에 더 무거운 절차(사소한 작업은 가볍게 유지) |
 
 **`claude`**는 의견도 오버헤드도 0인 즉석 탐색에, **`mangolove`**는 안전망, 일관된 절차, 측정 가능한 품질이 중요한 실제 프로젝트 작업에 쓰세요.
@@ -98,7 +98,7 @@ mangolove sessions            # 저장된 세션 목록
 ### 측정, 자가평가
 ```bash
 mangolove impact [sha]        # 변경의 결정적 트랙/영향도 (워킹트리 또는 커밋)
-mangolove efficacy            # 게이트/가드가 실제로 막은 것 + 트랙 under-triage
+mangolove efficacy            # 게이트/가드가 막은 것 + 강제하지 않고 넘긴 것 + 트랙 under-triage
 mangolove eval                # 자가평가: impact-score 보정도 + 가드 정밀도/재현율 (정직한 known-gap 포함)
 mangolove ab                  # A/B 하니스 (방법론 vs 맨 claude): 게이트 보호 + 채점 엔진
 mangolove audit-methodology   # 방법론 파일 감사: 섹션별 부피, 강제표현 밀도, 발동 0건 (삭제 후보)
@@ -114,7 +114,7 @@ mangolove audit-methodology   # 방법론 파일 감사: 섹션별 부피, 강�
 - **DoD 게이트**(기본 on): Stop 훅이 완료 직전 `./.mangolove/dod.sh`(모델이 외부화한 실행형 DoD)를 검증해, **통과 전에는 턴을 끝내지 못하게** 차단. 자기채점이 아니라 코드로 닫는 검증 루프. DoD 를 외부화하지 않은 턴은 즉시 통과하므로 idle 비용이 없습니다. DoD 는 **처음 평가한 세션의 소유**라, 같은 프로젝트의 다른 세션은 남의 `dod.sh` 로 차단되지 않습니다(안내 한 줄 내고 통과). 같은 DoD 를 `MANGOLOVE_DOD_MAX_ATTEMPTS`(기본 3) 회, DoD 를 바꿔 가며 그 3배를 시도해도 미통과면 무한루프 방지로 해제되고, 해제 뒤에도 `dod.sh` 는 근거로 남습니다(재실행 없음). 새 DoD 를 쓰면 재무장합니다. 끄기: `MANGOLOVE_DOD_GATE=off`.
 - **리뷰 게이트**(기본 on): `git commit` 시점에 staged 변경의 `track_floor`를 코드로 계산해, **Medium 이상인데 트랙별 필수 리뷰가 실행되지 않았으면 커밋을 차단**. 실행 여부의 근거는 모델의 자기보고가 아니라 PostToolUse(Skill) 훅이 남긴 원장, 즉 도구 호출 사실입니다. Trivial/Small 은 아무 것도 요구하지 않아 사소한 작업에는 무비용. 끄기: `MANGOLOVE_REVIEW_GATE=off`, 우회(감사됨): `MANGOLOVE_SKIP_REVIEW=1`.
 
-차단된 건은 로컬 효능 원장에 기록돼 `mangolove efficacy`가 무엇을 잡았는지 보고합니다.
+차단된 건은 로컬 효능 원장에 기록돼 `mangolove efficacy`가 무엇을 잡았는지 보고합니다. 게이트가 강제하지 않고 넘긴 건(1회 우회, 다른 세션 소유의 DoD, 시도 상한 해제)도 따로 집계돼 게이트가 얼마나 자주 손을 떼는지 함께 보여줍니다. 두 수치는 합산하지 않습니다: 통과를 차단으로 세면 효능이 부풀어 판단 근거가 사라집니다.
 
 ### 상태줄 (기본 on)
 모든 `mangolove` 세션의 상태줄에 **context 사용률, 세션 비용, 메서드러지 모드**를 노출합니다(`🥭 · Opus · proj · ctx 42% · $0.12 · split`). context window 가 가장 중요한 자원이라, 사용률을 상시 눈으로 확인해 `/clear` 나 `/compact` 시점을 잡을 수 있습니다. 자체 statusLine 을 쓰면 `MANGOLOVE_STATUSLINE=off`.

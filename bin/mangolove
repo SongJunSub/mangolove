@@ -213,7 +213,7 @@ show_help() {
     echo "  mangolove stats [period]      Productivity stats (today/week/month)"
     echo "  mangolove cost [period]       Token usage and cost (today/week/month/all)"
     echo "  mangolove impact [sha]        Deterministic track/impact of a change (working tree or commit)"
-    echo "  mangolove efficacy            Methodology efficacy: what the gates/tracks actually caught"
+    echo "  mangolove efficacy            Methodology efficacy: what the gates caught, and what they let through"
     echo "  mangolove audit-methodology   Audit the methodology file: volume, dead rules, delete candidates"
     echo "  mangolove eval                Self-eval: deterministic component scores (impact calibration, guard P/R)"
     echo "  mangolove ab                  A/B harness (Phase 4 v2): methodology vs bare claude (gate protection + scorer)"

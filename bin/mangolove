@@ -473,7 +473,7 @@ do_doctor() {
 
     # Session context budget
     if ! _ml_is_off "${MANGOLOVE_SESSION_BUDGET:-on}" && [ -f "$MANGOLOVE_DIR/lib/session-budget.sh" ]; then
-        echo -e "  \033[38;5;113m✓\033[0m Session budget: on (컨텍스트 ${MANGOLOVE_SESSION_BUDGET_TOKENS:-200000} 토큰에서 안내)"
+        echo -e "  \033[38;5;113m✓\033[0m Session budget: on (컨텍스트 ${MANGOLOVE_SESSION_BUDGET_TOKENS:-400000} 토큰에서 안내)"
     else
         echo -e "  \033[38;5;220m△\033[0m Session budget: off (MANGOLOVE_SESSION_BUDGET)"
     fi
@@ -1011,7 +1011,7 @@ REVPOSTEOF
     # 임계는 **명령 문자열에 baked** 한다. 훅은 claude 가 띄우므로 mangolove 를 실행한
     # 셸의 인라인 env 가 그대로 닿지 않는다(statusline 이 같은 이유로 같은 방식을 쓴다).
     if ! _ml_is_off "${MANGOLOVE_SESSION_BUDGET:-on}" && [ -f "$budget" ]; then
-        stop_entries+=("          { \"type\": \"command\", \"command\": \"MANGOLOVE_SESSION_BUDGET_TOKENS=${MANGOLOVE_SESSION_BUDGET_TOKENS:-200000} bash \\\"${budget}\\\"\" }")
+        stop_entries+=("          { \"type\": \"command\", \"command\": \"MANGOLOVE_SESSION_BUDGET_TOKENS=${MANGOLOVE_SESSION_BUDGET_TOKENS:-400000} bash \\\"${budget}\\\"\" }")
     fi
     local stop_block="" stop_hooks="" e
     for e in ${stop_entries+"${stop_entries[@]}"}; do

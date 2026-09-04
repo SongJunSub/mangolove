@@ -6,6 +6,7 @@
 #   임계 미만 → allow / 최초 도달 → block(exit 2) + 원장 / 같은 버킷 재발화 → allow
 #   다음 버킷 → 다시 block / stop_hook_active → allow / off → allow / 쓰기 실패 → allow
 # 회귀: 따옴표 없는 boolean 파싱, 8진수 임계값, 동시 세션이 서로를 리셋하지 않음
+# 기본 임계(400K)는 픽스처와 무관하게 별도 테스트가 고정한다(드리프트 방지)
 # ─────────────────────────────────────────────
 
 setup() {
@@ -18,8 +19,9 @@ setup() {
     cp "$REPO/lib/efficacy-recorder.sh" "$MANGOLOVE_DIR/lib/"
     PROJ="$TMP/proj"; mkdir -p "$PROJ"
     TRANSCRIPT="$TMP/session.jsonl"
-    # 실제 기본값(200000)을 여기서 한 번 준다. 매 호출에 붙이면 임계값 자체를 검증하는
-    # 특이 케이스(=abc, =0500000)가 똑같이 생긴 줄들 사이에 묻힌다.
+    # 버킷 경계 계산이 읽기 쉬운 고정값 하나를 여기서 준다(기본값이 아니라 픽스처다).
+    # 매 호출에 붙이면 임계값 자체를 검증하는 특이 케이스(=abc, =0500000)가 똑같이
+    # 생긴 줄들 사이에 묻힌다. 실제 기본값은 아래 "기본 임계" 테스트가 따로 고정한다.
     export GATE TMP PROJ TRANSCRIPT
     export MANGOLOVE_SESSION_BUDGET_TOKENS=200000
 }
@@ -279,4 +281,29 @@ ledger() { cat "$MANGOLOVE_DIR"/efficacy/*.jsonl 2>/dev/null; }
         MANGOLOVE_SESSION_BUDGET_TAIL=$((rec_len + off)) run run_budget "S-mb-$off"
         [ "$status" -eq 2 ] || { echo "tail=$((rec_len + off)) 에서 게이트가 무음이 됐다"; false; }
     done
+}
+
+@test "session-budget: 기본 임계는 400K 다 (env 없이)" {
+    # 기본값을 코드가 고정한다. 200K 였을 때는 너무 일찍 발화했다: 실측 135세션에서
+    # 알림을 받고도 컨텍스트가 중앙값 2.75배 더 늘었다(= 갈 길이 한참 남아 무시되는 안내).
+    # 400K 는 1.66배이고 1M 윈도우의 40% 지점이다. 이 값이 조용히 되돌아가면 여기서 잡힌다.
+    unset MANGOLOVE_SESSION_BUDGET_TOKENS
+    : > "$TRANSCRIPT"; write_ctx 350000
+    run run_budget S-DEF
+    [ "$status" -eq 0 ]
+    : > "$TRANSCRIPT"; write_ctx 450000
+    run run_budget S-DEF
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"400K"* ]]
+    [[ "$output" == *"800K"* ]]      # 다음 알림 지점을 함께 알려 반복 잔소리가 아님을 드러낸다
+}
+
+@test "session-budget: 마지막 버킷에서 오지 않을 다음 안내를 예고하지 않는다" {
+    # 회귀: 800K 버킷에서 "다음 1600K" 를 찍었다. 1M 창에서는 영영 오지 않는 안내다.
+    unset MANGOLOVE_SESSION_BUDGET_TOKENS
+    : > "$TRANSCRIPT"; write_ctx 812000
+    run run_budget S-CEIL
+    [ "$status" -eq 2 ]
+    [[ "$output" != *"1600K"* ]]
+    [[ "$output" == *"마지막"* ]]
 }

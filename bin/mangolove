@@ -19,6 +19,7 @@ STATS_SCRIPT="$MANGOLOVE_DIR/lib/stats.sh"
 COST_TRACKER="$MANGOLOVE_DIR/lib/cost-tracker.sh"
 IMPACT_SCRIPT="$MANGOLOVE_DIR/lib/impact-score.sh"
 EFFICACY_SCRIPT="$MANGOLOVE_DIR/lib/efficacy-recorder.sh"
+REVIEW_SCRIPT="$MANGOLOVE_DIR/lib/review-gate.sh"
 AUDIT_SCRIPT="$MANGOLOVE_DIR/lib/audit-methodology.sh"
 EVAL_SCRIPT="$MANGOLOVE_DIR/lib/eval-harness.sh"
 AB_SCRIPT="$MANGOLOVE_DIR/lib/ab-harness.sh"
@@ -215,6 +216,7 @@ show_help() {
     echo "  mangolove cost sessions       Per-session cost concentration (which sessions burned it)"
     echo "  mangolove impact [sha]        Deterministic track/impact of a change (working tree or commit)"
     echo "  mangolove efficacy            Methodology efficacy: what the gates caught, and what they let through"
+    echo "  mangolove review              Review gate status for the current push range (what would block)"
     echo "  mangolove audit-methodology   Audit the methodology file: volume, dead rules, delete candidates"
     echo "  mangolove eval                Self-eval: deterministic component scores (impact calibration, guard P/R)"
     echo "  mangolove ab                  A/B harness (Phase 4 v2): methodology vs bare claude (gate protection + scorer)"
@@ -464,9 +466,9 @@ do_doctor() {
         echo -e "  \033[38;5;220m△\033[0m DoD gate: off (MANGOLOVE_DOD_GATE)"
     fi
 
-    # Review gate: 커밋 경계에서 트랙별 필수 리뷰 실행 여부를 결정적으로 대조
+    # Review gate: push 경계에서 트랙별 필수 리뷰 실행 여부를 결정적으로 대조
     if ! _ml_is_off "${MANGOLOVE_REVIEW_GATE:-on}" && [ -f "$MANGOLOVE_DIR/lib/review-gate.sh" ]; then
-        echo -e "  \033[38;5;113m✓\033[0m Review gate: on (Medium 이상 커밋에 필수 리뷰 강제)"
+        echo -e "  \033[38;5;113m✓\033[0m Review gate: on (Medium 이상 push 에 필수 리뷰 강제)"
     else
         echo -e "  \033[38;5;220m△\033[0m Review gate: off (MANGOLOVE_REVIEW_GATE)"
     fi
@@ -749,6 +751,17 @@ Continue from where you left off. Summarize the previous session state and ask w
             bash "$EFFICACY_SCRIPT" report
             exit 0
             ;;
+        review)
+            shift
+            # 게이트가 push 시점에 무엇을 볼지 지금 보여준다. 차단 메시지가 안내하는 진단 경로.
+            # status 로 고정한다: record/pretooluse 는 stdin 으로 훅 페이로드를 기다리는
+            # 내부 모드라, 사람이 터미널에서 부르면 그대로 멈춰 선다.
+            [ "${1:-status}" = "status" ] || {
+                echo "usage: mangolove review [status] [<A...B>]" >&2; exit 2; }
+            [ "$#" -gt 0 ] && shift
+            bash "$REVIEW_SCRIPT" status "$@"
+            exit 0
+            ;;
         audit-methodology)
             shift
             bash "$AUDIT_SCRIPT" "${1:-report}"
@@ -973,7 +986,7 @@ generate_session_settings() {
     local review="${MANGOLOVE_DIR}/lib/review-gate.sh"
 
     # 리뷰 게이트는 훅 두 개가 짝을 이룬다: PostToolUse(Skill) 로 "실제 실행된 스킬"을 원장에
-    # 남기고, PreToolUse(Bash) 로 git commit 시점에 코드가 계산한 트랙과 대조한다.
+    # 남기고, PreToolUse(Bash) 로 git push 시점에 코드가 계산한 트랙과 대조한다.
     # 자기보고가 아니라 도구 호출 사실이 근거다.
     local review_pre="" review_post=""
     if ! _ml_is_off "${MANGOLOVE_REVIEW_GATE:-on}" && [ -f "$review" ]; then

@@ -794,8 +794,10 @@ _bypassed() {
         echo "  우회 파일은 추적될 수 없습니다. 브랜치가 실어 온 위조본으로 보고 무시합니다." >&2
         echo "  의도한 우회라면 git rm --cached 후 다시 touch 하세요." >&2
     elif [ -f "$SKIP_REL" ]; then
+        local why; why="$(head -c 400 "$SKIP_REL" 2>/dev/null | tr '\n' ' ')"
         rm -f "$SKIP_REL" 2>/dev/null || true
         echo "MangoLove review gate: .mangolove/.review-skip 으로 1회 우회 (감사 대상)" >&2
+        [ -n "${why// /}" ] && echo "  근거: $why" >&2
         # 우회는 차단이 아니다. block 으로 적으면 "리뷰 미실행 push 차단" 수치가 부풀어,
         # 그 수치로 게이트가 실제로 무엇을 막았는지 판단할 수 없게 된다.
         rec="$GATE_DIR/efficacy-recorder.sh"
@@ -828,8 +830,10 @@ _emit_block() {
                 ;;
             *)
                 echo "스킬은 이 내용을 봤지만 그 뒤에 코드가 더 들어왔습니다."
-                echo "델타가 사소하면 근거를 남기고 스스로 우회하세요. 이것도 묻지 마세요:"
-                echo "  mangolove review skip \"<무엇을 리뷰했고 델타가 무엇인지>\""
+                echo "델타가 사소하면 근거를 남기고 스스로 우회하세요. 이것도 묻지 마세요."
+                echo "  방법 1: Write 도구로 ${SKIP_REL} 파일에 근거를 적는다"
+                echo "          (권한이 필요 없어 실행 중인 세션에서도 바로 됩니다)"
+                echo "  방법 2: mangolove review skip \"<무엇을 리뷰했고 델타가 무엇인지>\""
                 echo "델타가 사소하지 않으면 다시 돌리는 편이 낫습니다."
                 ;;
         esac

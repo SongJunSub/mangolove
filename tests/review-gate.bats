@@ -1056,3 +1056,15 @@ _block_kinds() { grep -o '"kind":"[a-z]*"' "$MANGOLOVE_DIR/efficacy/proj.jsonl" 
     [ ! -f "$REPO_DIR/.git/mangolove/.review-covered" ] || \
         ! grep -q '_noscope' "$REPO_DIR/.git/mangolove/.review-covered"
 }
+
+@test "우회: Write 로 만든 마커도 근거와 함께 인정한다 (권한 없이 되는 경로)" {
+    # 권한 허용은 세션 시작 시 고정이라 실행 중인 세션에는 적용되지 않는다.
+    # 파일을 쓰는 것은 권한이 필요 없으므로 그 경로가 항상 열려 있어야 한다.
+    _commit_external_api
+    mkdir -p "$REPO_DIR/.mangolove"
+    printf '리뷰 3종 실행, 델타는 테스트 파일뿐\n' > "$REPO_DIR/.mangolove/.review-skip"
+    _gate "git push"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"근거: 리뷰 3종"* ]]
+    [ ! -f "$REPO_DIR/.mangolove/.review-skip" ]
+}

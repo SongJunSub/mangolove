@@ -101,6 +101,7 @@ LEDGER_REL=".mangolove/.review-ledger"
 LEDGER_BASE_REL=".mangolove/.review-ledger.base"
 # 리뷰가 본 내용: "<스킬>\t<blob 해시>\t<경로>" 줄들. 세션 스코프.
 COVERED_REL=".mangolove/.review-covered"
+NOSCOPE_REL=".mangolove/.review-noscope"
 # 세션 도중 쓸 수 있는 1회용 우회 파일. 환경변수 우회는 훅에 닿지 않기 때문에 필요하다.
 # 이것만은 워킹트리에 남긴다: 사람이 직접 touch 하는 경로라 안내문에 적히기 때문이다.
 # 대신 추적된 사본은 신뢰하지 않는다(_ml_tracked).
@@ -195,8 +196,10 @@ GH_PR_RE='(^|[^[:alnum:]_])gh[[:space:]]+pr[[:space:]]+create([[:space:]]|$)'
 # 다만 **셸이 소비하는 heredoc 은 벗기지 않는다**: `bash <<EOF ... EOF` 의 본문은 데이터가
 # 아니라 실행되는 코드라, 벗기면 진짜 push 가 통째로 새어 나간다. 소비하는 명령이 셸인지로
 # 가른다. 판별이 애매하면 벗기지 않는다(막는 쪽 = 안전한 쪽).
+# 본문이 데이터인 소비자. 모르는 소비자는 벗기지 않는다(막는 쪽이 안전하다).
+HEREDOC_DATA_SINKS='(^|[^[:alnum:]_/])(cat|tee|python|python3|node|jq|sed|awk|perl|ruby|php|tr|sort|head|tail|grep|diff|patch)([ \t]|$)'
 _strip_heredocs() {
-    printf '%s\n' "$1" | awk '
+    printf '%s\n' "$1" | awk -v sink="$2" '
         {
             if (in_hd) {
                 line = $0
@@ -205,15 +208,34 @@ _strip_heredocs() {
                 if (strip) next
                 print; next
             }
-            if (match($0, /<<-?[ \t]*("[^"]+"|\047[^\047]+\047|[A-Za-z_][A-Za-z0-9_]*)/)) {
-                tok = substr($0, RSTART, RLENGTH)
-                dash = (tok ~ /^<<-/)
+            # << 를 **따옴표 밖에서만** 찾는다. 텍스트만 보면 echo "see <<EOF" 의 <<EOF 를
+            # 진짜 리다이렉션으로 오인하고, 닫는 마커가 영영 안 나오므로 그 뒤 명령이 통째로
+            # 사라진다(실증됨: 무해한 한 줄을 앞에 붙이면 두 훅이 모두 침묵했다).
+            n = length($0); inq = ""; tok = ""
+            for (i = 1; i <= n; i++) {
+                c = substr($0, i, 1)
+                if (inq != "") { if (c == inq) inq = ""; continue }
+                if (c == "\"" || c == "\047") { inq = c; continue }
+                if (c == "<" && substr($0, i + 1, 1) == "<") {
+                    rest = substr($0, i + 2)
+                    if (match(rest, /^-?[ \t]*("[^"]+"|\047[^\047]+\047|[A-Za-z_][A-Za-z0-9_]*)/)) {
+                        tok = substr(rest, RSTART, RLENGTH)
+                    }
+                    break
+                }
+            }
+            if (tok != "") {
+                dash = (tok ~ /^-/)
                 m = tok
-                sub(/^<<-?[ \t]*/, "", m)
+                sub(/^-?[ \t]*/, "", m)
                 gsub(/["\047]/, "", m)
                 marker = m
                 in_hd = 1
-                strip = ($0 ~ /(^|[^[:alnum:]_])(bash|sh|zsh|dash|ksh|eval)([ \t]|$)/) ? 0 : 1
+                # 본문을 벗기는 것은 **데이터 싱크로 알려진 소비자일 때만**이다. 셸만
+                # 제외했더니 psql/mysql/ssh 처럼 본문을 실행하는 소비자의 heredoc 이
+                # 검사에서 사라졌다(DROP TABLE, rm -rf 가 통과했다). 모르는 소비자는
+                # 남긴다: 막는 쪽이 안전하다.
+                strip = ($0 ~ sink) ? 1 : 0
             }
             print
         }'
@@ -237,7 +259,7 @@ _is_delete() {
 
 # 게이트 대상이 되는 push 세그먼트 하나를 출력한다(없으면 빈 출력).
 _gated_push_line() {
-    _split_segments "$(_strip_heredocs "$1")" | grep -E "$GIT_PUSH_RE|$GH_PR_RE" | while IFS= read -r seg; do
+    _split_segments "$(_strip_heredocs "$1" "$HEREDOC_DATA_SINKS")" | grep -E "$GIT_PUSH_RE|$GH_PR_RE" | while IFS= read -r seg; do
         case "$seg" in
             *push*)
                 if _is_dry_run "$seg" || _is_delete "$seg"; then continue; fi
@@ -477,13 +499,17 @@ TOKENS
 # 위험하므로 개수를 세고 분기한다. quotePath=false 는 비-ASCII 경로가 C-quote 되어
 # push 시점 경로와 영영 어긋나는 것을 막는다(그러면 그 파일은 절대 covered 로 안 잡힌다).
 _git_names() {
+    # 레포 루트에서 돈다. 하위 디렉토리에서 부르면 ls-files 가 **cwd 기준** 경로를 주고,
+    # diff 는 루트 기준을 주어 두 목록이 섞인다. 섞이면 그 파일은 영영 _absent 로 기록된다.
+    # top 도 sp 와 같이 호출자가 선언한다(미선언이면 현재 위치를 쓴다).
     # sp 는 호출자(_snapshot_covered)가 선언하는 pathspec 배열이다. 선언되지 않은 채로
     # 불리면 set -u 아래서 ${#sp[@]} 가 함수를 조용히 끝내고, 빈 출력은 "변경 파일 없음"과
     # 구별되지 않아 커버리지가 통째로 비게 된다(shellcheck 도 못 잡는다). 그래서 방어한다.
     local n=0
     [ "${sp+set}" = "set" ] && n="${#sp[@]}"
-    if [ "$n" -gt 0 ]; then git -c core.quotePath=false "$@" -- "${sp[@]}" 2>/dev/null
-    else git -c core.quotePath=false "$@" 2>/dev/null; fi
+    local at="${top:-.}"
+    if [ "$n" -gt 0 ]; then git -C "$at" -c core.quotePath=false "$@" -- "${sp[@]}" 2>/dev/null
+    else git -C "$at" -c core.quotePath=false "$@" 2>/dev/null; fi
 }
 
 # 리뷰가 실제로 본 파일 내용을 blob 해시로 붙잡는다 (record 시점 = 스킬이 막 끝난 시점).
@@ -524,6 +550,10 @@ _snapshot_covered() {
         sp=("${COVERAGE_PATHS[@]}")
         [ "${#sp[@]}" -eq 0 ] && return 0
     fi
+    # git 이 주는 경로는 **레포 루트 기준**인데 [ -f ] 와 hash-object 는 cwd 기준이라,
+    # 하위 디렉토리에서 세션이 돌면 모든 파일이 _absent 로 기록되고 커버리지가 영원히
+    # 맞지 않는다(해소 불가능한 차단 루프). 루트를 앞에 붙여 맞춘다.
+    local top; top="$(git rev-parse --show-toplevel 2>/dev/null)"; [ -n "$top" ] || top="$PWD"
     range="$(_push_range)"
     # quotePath=false: 위 _range_signature 와 같은 이유다. 여기서 따옴표 붙은 경로를 적으면
     # push 시점 경로와 영원히 어긋나 그 파일은 절대 covered 로 잡히지 않는다.
@@ -537,7 +567,7 @@ _snapshot_covered() {
     # 존재하는 것과 사라진 것을 가른다(루프는 builtin 만 쓴다: fork 없음).
     present=""
     while IFS= read -r f; do
-        [ -f "$f" ] && present="${present}${f}
+        [ -f "$top/$f" ] && present="${present}${top}/${f}
 "
     done <<EOF
 $files
@@ -552,12 +582,13 @@ EOF
         # 커버리지가 비면 불필요한 차단이지만, 어긋나면 조용한 통과다.
         if [ "$(printf '%s' "$hashes" | grep -c '')" -eq "$(printf '%s' "$present" | grep -c '')" ]; then
             paste <(printf '%s' "$hashes") <(printf '%s' "$present") \
-                | awk -v s="$skill" -F'\t' 'NF>=2 {print s "\t" $1 "\t" $2}' \
+                | awk -v s="$skill" -v top="$top/" -F'\t' \
+                      'NF>=2 { p = $2; sub("^" top, "", p); print s "\t" $1 "\t" p }' \
                 >> "$COVERED_REL" 2>/dev/null || true
         fi
     fi
     # 사라진 파일은 push 시점에도 _absent 로 계산되므로 같은 표기로 남긴다.
-    printf '%s\n' "$files" | grep -vxF -f <(printf '%s' "$present") 2>/dev/null \
+    printf '%s\n' "$files" | grep -vxF -f <(printf '%s' "$present" | sed "s|^$top/||") 2>/dev/null \
         | awk -v s="$skill" 'NF {print s "\t_absent\t" $0}' >> "$COVERED_REL" 2>/dev/null || true
 
     # 여러 스킬이 같은 내용을 보므로 중복이 쌓인다. 집합으로 유지한다.
@@ -781,9 +812,13 @@ _record_fail_open() {
 
 # 우회 처리. 통과시키면 0, 우회가 아니면 1. (pretooluse 와 prepush 가 공유한다.)
 _bypassed() {
-    local rec
+    local rec="$GATE_DIR/efficacy-recorder.sh"
+    local _rec_unused
     if [ "${MANGOLOVE_SKIP_REVIEW:-}" = "1" ]; then
         echo "MangoLove review gate: MANGOLOVE_SKIP_REVIEW=1 (게이트 우회, 감사 대상)" >&2
+        # 문서가 "감사됨"이라 적어놓고 정작 원장에 남기지 않았다. 세 우회 중 이것만
+        # mangolove efficacy 에서 보이지 않아, 껐다는 사실이 측정에서 사라졌다.
+        if [ -f "$rec" ]; then bash "$rec" record-skip review "env" 2>/dev/null || true; fi
         return 0
     fi
     # 환경변수 우회는 mangolove 실행 **전에** export 돼 있어야 한다. 훅은 Claude Code
@@ -800,7 +835,6 @@ _bypassed() {
         [ -n "${why// /}" ] && echo "  근거: $why" >&2
         # 우회는 차단이 아니다. block 으로 적으면 "리뷰 미실행 push 차단" 수치가 부풀어,
         # 그 수치로 게이트가 실제로 무엇을 막았는지 판단할 수 없게 된다.
-        rec="$GATE_DIR/efficacy-recorder.sh"
         if [ -f "$rec" ]; then bash "$rec" record-skip review "bypassed" 2>/dev/null || true; fi
         return 0
     fi
@@ -933,6 +967,13 @@ do_skip() {
     git rev-parse --git-dir >/dev/null 2>&1 || { echo "review-gate: git 저장소가 아닙니다" >&2; exit 1; }
     [ -n "$reason" ] || { echo "usage: mangolove review skip \"<근거>\"" >&2; exit 2; }
     mkdir -p "$(dirname "$SKIP_REL")" 2>/dev/null || true
+    # 워킹트리에 남는 유일한 상태 파일이라 브랜치가 심볼릭 링크를 실어 올 수 있다.
+    # 링크를 따라가면 레포 밖 파일을 덮어쓴다(이 명령은 권한까지 자동 허용돼 있다).
+    if _ml_tracked "$SKIP_REL"; then
+        echo "review-gate: ${SKIP_REL} 이 git 에 추적되고 있습니다. 위조본으로 보고 거부합니다." >&2
+        exit 1
+    fi
+    _ensure_regular_file "$SKIP_REL" || { echo "review-gate: 마커 경로가 정상 파일이 아닙니다" >&2; exit 1; }
     _ml_seed_gitignore
     printf '%s\n' "$reason" > "$SKIP_REL" 2>/dev/null || { echo "review-gate: 마커를 쓸 수 없습니다" >&2; exit 1; }
     local rec="$GATE_DIR/efficacy-recorder.sh"

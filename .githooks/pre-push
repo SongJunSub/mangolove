@@ -27,7 +27,11 @@ GATE="${MANGOLOVE_DIR:-$HOME/.mangolove}/lib/review-gate.sh"
 # 설치된다. 설치본이 prepush 를 모르는 구버전이면 usage 를 내고 exit 2 하므로, 그대로
 # exec 하면 **그 머신의 push 가 전부 막힌다**(레포를 clone 한 동료, 아직 sync 하지 않은
 # 자기 머신 포함). 훅이 게이트보다 앞서 나갈 수 있다는 것을 훅이 알고 있어야 한다.
-bash "$GATE" 2>&1 | grep -q 'prepush' || exit 0
+# set -o pipefail 아래서는 파이프라인 종료코드가 **게이트의 usage exit 2** 가 되어,
+# grep 이 맞았는지와 무관하게 `|| exit 0` 이 항상 발화한다. 즉 이 훅이 통째로 no-op 이었다.
+# 변수에 받아 문자열로 판정한다.
+_probe="$(bash "$GATE" 2>&1)"
+case "$_probe" in *prepush*) ;; *) exit 0 ;; esac
 
 # pre-push 는 stdin 으로 "<local ref> <local sha> <remote ref> <remote sha>" 를 준다.
 # **버리지 않고 그대로 넘긴다**: 무엇이 실제로 올라가는지에 대한 유일한 권위 있는 정보다.

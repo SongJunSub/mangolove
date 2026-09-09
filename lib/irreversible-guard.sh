@@ -36,7 +36,7 @@ cmd="${cmd//\"/}"
 # (review-gate.sh 의 _strip_heredocs 와 같은 판단이다. 두 훅은 서로를 source 하지 않는
 #  기존 설계를 따르므로 사본을 각자 갖고, 두 사본이 갈라지지 않는지는 테스트가 강제한다.)
 _strip_heredocs() {
-    printf '%s\n' "$1" | awk '
+    printf '%s\n' "$1" | awk -v sink="$2" '
         {
             if (in_hd) {
                 line = $0
@@ -45,20 +45,41 @@ _strip_heredocs() {
                 if (strip) next
                 print; next
             }
-            if (match($0, /<<-?[ \t]*("[^"]+"|\047[^\047]+\047|[A-Za-z_][A-Za-z0-9_]*)/)) {
-                tok = substr($0, RSTART, RLENGTH)
-                dash = (tok ~ /^<<-/)
+            # << 를 **따옴표 밖에서만** 찾는다. 텍스트만 보면 echo "see <<EOF" 의 <<EOF 를
+            # 진짜 리다이렉션으로 오인하고, 닫는 마커가 영영 안 나오므로 그 뒤 명령이 통째로
+            # 사라진다(실증됨: 무해한 한 줄을 앞에 붙이면 두 훅이 모두 침묵했다).
+            n = length($0); inq = ""; tok = ""
+            for (i = 1; i <= n; i++) {
+                c = substr($0, i, 1)
+                if (inq != "") { if (c == inq) inq = ""; continue }
+                if (c == "\"" || c == "\047") { inq = c; continue }
+                if (c == "<" && substr($0, i + 1, 1) == "<") {
+                    rest = substr($0, i + 2)
+                    if (match(rest, /^-?[ \t]*("[^"]+"|\047[^\047]+\047|[A-Za-z_][A-Za-z0-9_]*)/)) {
+                        tok = substr(rest, RSTART, RLENGTH)
+                    }
+                    break
+                }
+            }
+            if (tok != "") {
+                dash = (tok ~ /^-/)
                 m = tok
-                sub(/^<<-?[ \t]*/, "", m)
+                sub(/^-?[ \t]*/, "", m)
                 gsub(/["\047]/, "", m)
                 marker = m
                 in_hd = 1
-                strip = ($0 ~ /(^|[^[:alnum:]_])(bash|sh|zsh|dash|ksh|eval)([ \t]|$)/) ? 0 : 1
+                # 본문을 벗기는 것은 **데이터 싱크로 알려진 소비자일 때만**이다. 셸만
+                # 제외했더니 psql/mysql/ssh 처럼 본문을 실행하는 소비자의 heredoc 이
+                # 검사에서 사라졌다(DROP TABLE, rm -rf 가 통과했다). 모르는 소비자는
+                # 남긴다: 막는 쪽이 안전하다.
+                strip = ($0 ~ sink) ? 1 : 0
             }
             print
         }'
 }
-cmd="$(_strip_heredocs "${cmd//\\n/$'\n'}")"
+# 가드의 패턴은 SQL 과 셸 명령이라, 본문을 실행하는 소비자(psql, ssh, python...)를
+# 벗기면 그대로 샌다. 순수 데이터 싱크만 벗긴다.
+cmd="$(_strip_heredocs "${cmd//\\n/$'\n'}" '(^|[^[:alnum:]_/])(cat|tee)([ \t]|$)')"
 
 cmd="${cmd//$'\n'/;}"
 cmd="${cmd//\\r/;}"

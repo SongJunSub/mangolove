@@ -1068,3 +1068,83 @@ _block_kinds() { grep -o '"kind":"[a-z]*"' "$MANGOLOVE_DIR/efficacy/proj.jsonl" 
     [[ "$output" == *"근거: 리뷰 3종"* ]]
     [ ! -f "$REPO_DIR/.mangolove/.review-skip" ]
 }
+
+@test "우회: MANGOLOVE_SKIP_REVIEW=1 도 효능 원장에 남는다 (감사됨이라 적혀 있다)" {
+    # 셋 중 이것만 기록되지 않아, 게이트를 껐다는 사실이 측정에서 사라졌다.
+    _commit_external_api
+    run bash -c "printf '%s' '$(_json_cmd "git push")' | MANGOLOVE_SKIP_REVIEW=1 bash '$GATE' pretooluse"
+    [ "$status" -eq 0 ]
+    grep -q '"type":"skip","phase":"review","kind":"env"' "$MANGOLOVE_DIR/efficacy/proj.jsonl"
+}
+
+# ── heredoc 판정의 두 결함 (내가 오늘 만든 것) ─────────────────
+
+@test "보안: 따옴표 안의 가짜 <<EOF 로 뒤 명령을 숨길 수 없다" {
+    # 텍스트만 보면 echo "see <<EOF" 의 <<EOF 를 진짜 리다이렉션으로 오인하고, 닫는 마커가
+    # 영영 안 나오므로 그 뒤 명령이 통째로 사라진다. 무해한 한 줄로 게이트 전체가 침묵했다.
+    # 공격은 **데이터 싱크 명령**으로 해야 성립한다. echo 는 싱크 목록에 없어 allowlist 가
+    # 먼저 막아주므로, 그걸로 시험하면 따옴표 추적이 없어도 통과한다(이빨 없는 테스트였다).
+    # 파서를 직접 부른다: 페이로드에 따옴표를 넣으면 bats 헬퍼의 인용이 먼저 깨진다.
+    run bash -c 'source "'"$GATE"'"
+        printf "%s" "$(_gated_push_line "python3 -c \"s = 12 <<EOF\"
+git push origin main")"'
+    [ -n "$output" ]
+    run bash -c 'source "'"$GATE"'"
+        printf "%s" "$(_gated_push_line "cat report.txt   # see '"'"'<<EOF'"'"' below
+git push origin main")"'
+    [ -n "$output" ]
+}
+
+@test "heredoc: 진짜 데이터 싱크의 본문은 여전히 벗긴다 (원래 오탐)" {
+    run bash -c 'source "'"$GATE"'"
+        printf "%s" "$(_gated_push_line "cat > d.md <<MD
+배포는 git push 로 한다
+MD")"'
+    [ -z "$output" ]
+}
+
+@test "heredoc: 본문을 실행하는 소비자는 벗기지 않는다 (데이터 싱크만 벗긴다)" {
+    _commit_external_api
+    _gate 'psql db <<SQL\nselect 1;\nSQL\ngit push origin main'
+    [ "$status" -eq 2 ]
+}
+
+@test "하위 디렉토리에서 세션이 돌아도 커버리지가 맞는다" {
+    # git 이 주는 경로는 레포 루트 기준인데 [ -f ] 와 hash-object 는 cwd 기준이라,
+    # 하위에서 돌면 전부 _absent 로 기록돼 해소 불가능한 차단 루프가 됐다.
+    mkdir -p "$REPO_DIR/sub"
+    printf 'const a = await axios.get("https://api.example.com/a")\n' > "$REPO_DIR/sub/api.js"
+    local s
+    for s in simplify code-review security-review; do
+        (cd "$REPO_DIR/sub" && printf '{"tool_name":"Skill","session_id":"s1","cwd":"%s","tool_input":{"skill":"%s"}}' "$PWD" "$s" | bash "$GATE" record)
+    done
+    grep -q "	sub/api.js\$" "$REPO_DIR/.git/mangolove/.review-covered"
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm sub
+    run bash -c "cd '$REPO_DIR/sub' && printf '%s' '$(_json_cmd "git push")' | bash '$GATE' pretooluse"
+    [ "$status" -eq 0 ]
+}
+
+@test "record: 비-git 디렉토리에서도 조용히 통과한다 (항상 exit 0 계약)" {
+    local nogit="$TEST_DIR/nogit2"; mkdir -p "$nogit"
+    run bash -c "cd '$nogit' && printf '{\"tool_name\":\"Skill\",\"cwd\":\"$nogit\",\"tool_input\":{\"skill\":\"simplify\"}}' | bash '$GATE' record"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "보안: skip 이 심볼릭 링크를 따라 레포 밖에 쓰지 않는다" {
+    # 워킹트리에 남는 유일한 상태 파일이고, 이 명령은 권한까지 자동 허용돼 있다.
+    local victim="$TEST_DIR/victim.txt"
+    echo ORIGINAL > "$victim"
+    mkdir -p "$REPO_DIR/.mangolove"
+    ln -s "$victim" "$REPO_DIR/.mangolove/.review-skip"
+    run bash -c "cd '$REPO_DIR' && bash '$GATE' skip 'hostile'"
+    [ "$(cat "$victim")" = "ORIGINAL" ]
+}
+
+@test "pre-push: 버전 스큐 검사가 훅을 통째로 무력화하지 않는다" {
+    # set -o pipefail 아래서 파이프라인 종료코드가 게이트의 usage exit 2 가 되어
+    # grep 결과와 무관하게 항상 우회됐다. 즉 훅 전체가 no-op 이었다.
+    grep -q '_probe=' "$BATS_TEST_DIRNAME/../.githooks/pre-push"
+    ! grep -q "grep -q 'prepush' || exit 0" "$BATS_TEST_DIRNAME/../.githooks/pre-push"
+}

@@ -43,6 +43,8 @@
 # 커버리지(왜 blob 해시인가): 세션 원장만 대조하면 "리뷰 한 번 돌리고 그 뒤로 10커밋 더
 # 쓰고 push" 가 통과한다. 리뷰가 실제로 본 파일 내용을 해시로 붙잡아 두어야, 그 뒤에
 # 새로 쓴 것만 잔여로 남는다. 내용이 같으면 커밋을 몇 개로 쪼개 담았든 통과한다.
+# 무엇을 봤는지는 스킬 호출의 args 로 좁힌다(_coverage_scope 참조): 원격 PR 이나 다른
+# worktree 를 리뷰한 스킬이 이 트리를 통과시키면 안 되기 때문이다.
 #
 # 트랙이 Trivial/Small 이면 아무 것도 요구하지 않는다: 사소한 변경에 무거운 절차를
 # 씌우지 않는 것이 이 게이트의 절반이다(과대 판정도 실패다).
@@ -237,6 +239,125 @@ _push_source_ref() {
         }'
 }
 
+# JSON 문자열 이스케이프를 되돌린다. args 에는 사람이 친 인용부호와 경로가 그대로 들어오는데
+# 훅에는 \" \\ \n 형태로 escape 되어 도착한다. 되돌리지 않으면 `/code-review "a b.js"` 의
+# 토큰이 실제 파일명과 영영 달라 경로 지정이 무시되고, 그러면 **전체가 covered 된다**(조용한 통과).
+# command 에는 _unescape_cmd 가 같은 일을 한다. args 에만 빠져 있었다.
+# 한 번의 좌->우 스캔으로 처리한다: \\n 을 개행으로 오해하지 않으려면 순차 치환이 아니어야 한다.
+_json_unescape() {
+    printf '%s' "$1" | awk '{
+        out = ""; n = length($0)
+        for (i = 1; i <= n; i++) {
+            c = substr($0, i, 1)
+            if (c == "\\" && i < n) {
+                i++; d = substr($0, i, 1)
+                if (d == "n" || d == "t" || d == "r") out = out " "
+                else out = out d
+            } else out = out c
+        }
+        print out
+    }'
+}
+
+# args 를 셸처럼 토큰으로 쪼갠다(한 줄에 하나). 인용부호는 묶음으로 인정하고 제거한다.
+# 단순 공백 분리로는 `/code-review "a b.js"` 가 ["a, b.js"] 로 갈라져 어느 것도 실제
+# 파일명과 같지 않고, 그러면 경로 지정이 통째로 무시되어 **전체가 covered 된다**(조용한 통과).
+# eval 하지 않는다: args 는 외부 입력이고, 여기서 필요한 것은 실행이 아니라 분해뿐이다.
+_tokenize_args() {
+    printf '%s' "$1" | awk '{
+        n = length($0); tok = ""; inq = ""
+        for (i = 1; i <= n; i++) {
+            c = substr($0, i, 1)
+            if (inq != "") {
+                if (c == inq) inq = ""; else tok = tok c
+            } else if (c == "\"" || c == "'"'"'") {
+                inq = c
+            } else if (c == " " || c == "\t") {
+                if (tok != "") { print tok; tok = "" }
+            } else tok = tok c
+        }
+        if (tok != "") print tok
+    }'
+}
+
+# ── 커버리지 범위: 이 스킬이 무엇을 봤는가 ─────────────────────
+# 스킬 호출의 args 는 모델의 자기보고가 아니라 도구 호출 사실이라 근거로 쓸 수 있다.
+# 실측한 실제 호출 형태: "high" / "1952" / "https://.../pull/710" /
+# "high /다른/worktree/경로" / "high a.html b.html" / 자유 서술.
+#
+# 왜 필요한가: `/code-review 1952` 는 **원격 PR** 을 리뷰한다. 이 워킹트리를 쳐다보지도
+# 않는다. 그런데 args 를 무시하면 그 리뷰에게 현재 레포의 변경 파일 전부를 credit 하게 되어,
+# 이 코드를 본 적 없는 리뷰가 이 코드를 통과시킨다. 다른 worktree 를 지정한 경우도 같다.
+#
+# 판정은 **코드가 검증할 수 있는 사실**로만 한다: 경로가 실재하는가, 순수 숫자인가,
+# PR URL 인가. 자유 서술은 해석하지 않는다(해석하면 그게 다시 모델 판단이다).
+#
+# 트랜스크립트에서 "이 스킬이 실제로 Read 한 파일"을 뽑는 쪽이 더 일반적인 신호이지만
+# 쓰지 않는다: /simplify 와 /code-review 는 서브에이전트를 띄워 파일을 읽고, 그 도구
+# 호출은 메인 트랜스크립트에 없다. 그 방식은 커버리지를 체계적으로 과소 인정해
+# 거의 모든 push 를 막는다. args 가 지금 훅이 볼 수 있는 가장 좋은 근거다.
+SCOPE_ALL="__all__"
+SCOPE_NONE="__none__"
+_coverage_scope() {
+    local args root tok n=0 last="" paths="" outside=0 pr=0 has_pr=0 has_num=0
+    args="$(_json_unescape "${1:-}")"
+    [ -z "${args//[[:space:]]/}" ] && { printf '%s' "$SCOPE_ALL"; return 0; }
+    root="$(git rev-parse --show-toplevel 2>/dev/null)"; [ -n "$root" ] || root="$PWD"
+    while IFS= read -r tok; do
+        [ -n "$tok" ] || continue
+        # 강도 지정과 플래그는 범위를 좁히지 않는다.
+        case "$tok" in
+            high|low|medium|max|xhigh|ultra|--*) continue ;;
+        esac
+        n=$((n + 1)); last="$tok"
+
+        # 절대경로는 실재 여부보다 **어느 레포인지**가 먼저다. 다른 worktree 도 디스크에는
+        # 있으므로, 존재만 보고 경로로 인정하면 남의 코드를 본 리뷰가 이 트리를 통과시킨다.
+        # macOS 의 /tmp -> /private/tmp 처럼 show-toplevel 과 PWD 가 갈릴 수 있어 둘 다 본다.
+        case "$tok" in
+            /*)
+                case "$tok" in
+                    "$root"|"$root"/*|"$PWD"|"$PWD"/*) [ -e "$tok" ] && paths="${paths}${tok}
+" ;;
+                    *) outside=1 ;;
+                esac
+                continue ;;
+        esac
+
+        # 실재하는 상대경로는 경로다. 원격 참조 휴리스틱을 적용하지 않는다
+        # (docs/pull/x.md 같은 실제 파일을 PR 링크로 오인하지 않는다).
+        if [ -e "$tok" ]; then paths="${paths}${tok}
+"; continue; fi
+
+        # 여기부터는 로컬에 없는 토큰이다. 원격 참조인지 본다.
+        case "$tok" in
+            */pull/*|*/merge_requests/*) pr=1; continue ;;
+            *'#'[0-9]*) case "${tok##*#}" in *[!0-9]*) ;; *) pr=1; continue ;; esac ;;
+        esac
+        case "$tok" in PR|pr|Pr|MR|mr|Mr) has_pr=1 ;; esac
+        case "$tok" in *[!0-9]*) ;; *) has_num=1 ;; esac
+    done <<TOKENS
+$(_tokenize_args "$args")
+TOKENS
+
+    # args 가 강도뿐이면 스킬 기본 범위(워킹트리 전체 diff)를 본 것이다.
+    [ "$n" -eq 0 ] && { printf '%s' "$SCOPE_ALL"; return 0; }
+    # 원격 PR 이나 레포 밖 경로를 봤다: 이 트리에 대해서는 아무 것도 인정하지 않는다.
+    [ "$pr" -eq 1 ] && { printf '%s' "$SCOPE_NONE"; return 0; }
+    [ "$outside" -eq 1 ] && { printf '%s' "$SCOPE_NONE"; return 0; }
+    # "PR 1891" 처럼 낱말과 숫자로 흩어진 형태. 실측한 실제 호출의 다수가 이 모양이다.
+    [ "$has_pr" -eq 1 ] && [ "$has_num" -eq 1 ] && { printf '%s' "$SCOPE_NONE"; return 0; }
+    # 순수 숫자는 PR 번호다. **단독일 때만** 그렇게 본다: 산문 속 숫자를 오인하지 않는다.
+    if [ "$n" -eq 1 ]; then
+        case "$last" in *[!0-9]*) ;; *) printf '%s' "$SCOPE_NONE"; return 0 ;; esac
+    fi
+    # 실재하는 경로를 짚었으면 그것만 인정한다.
+    [ -n "$paths" ] && { printf '%s' "$paths"; return 0; }
+    # 남은 것은 자유 서술뿐이다. 코드가 좁힐 근거가 없으므로 기본 범위로 둔다.
+    printf '%s' "$SCOPE_ALL"
+    return 0
+}
+
 # 리뷰가 실제로 본 파일 내용을 blob 해시로 붙잡는다 (record 시점 = 스킬이 막 끝난 시점).
 # 워킹트리 기준으로 해시를 뜬다: 리뷰는 커밋된 것이 아니라 지금 눈앞의 내용을 본다.
 # 그 내용이 나중에 그대로 커밋되면 push 시점 HEAD blob 해시와 일치해 covered 로 잡힌다.
@@ -244,20 +365,39 @@ _push_source_ref() {
 # **스킬 이름을 함께 적는다.** 내용만 적으면 스킬 하나만 돌려도 그 내용이 통째로 covered 가
 # 되어, /simplify 만 돌리고 /code-review 를 건너뛴 push 가 통과한다(실제로 그랬다).
 _snapshot_covered() {
-    local skill="$1" range files present hashes
+    local skill="$1" args="${2:-}" scope range files present hashes f p
+    local sp=()
+    scope="$(_coverage_scope "$args")"
+    # 이 스킬이 이 트리를 보지 않았다면 아무 것도 인정하지 않는다.
+    [ "$scope" = "$SCOPE_NONE" ] && return 0
+    # 짚은 경로가 있으면 git pathspec 으로 넘긴다. 손으로 "이 파일이 이 경로 아래인가"를
+    # 짜면 후행 슬래시(lib/ -> lib//*)에서 아무것도 안 맞는 식으로 조용히 틀린다.
+    # git 은 정확한 경로 또는 그 디렉토리 하위만 매칭하며(li 가 lib/ 를 오염시키지 않는다),
+    # 없는 경로는 빈 결과로 조용히 끝난다.
+    if [ "$scope" != "$SCOPE_ALL" ]; then
+        while IFS= read -r p; do [ -n "$p" ] && sp+=("$p"); done <<SCOPE
+$scope
+SCOPE
+        [ "${#sp[@]}" -eq 0 ] && return 0
+    fi
     range="$(_push_range)"
     # quotePath=false: 위 _range_signature 와 같은 이유다. 여기서 따옴표 붙은 경로를 적으면
     # push 시점 경로와 영원히 어긋나 그 파일은 절대 covered 로 잡히지 않는다.
     files="$( {
-        [ -n "$range" ] && git -c core.quotePath=false diff --name-only "$range" 2>/dev/null
-        git -c core.quotePath=false diff --name-only HEAD 2>/dev/null
-        git -c core.quotePath=false ls-files --others --exclude-standard 2>/dev/null
+        if [ "${#sp[@]}" -gt 0 ]; then
+            [ -n "$range" ] && git -c core.quotePath=false diff --name-only "$range" -- "${sp[@]}" 2>/dev/null
+            git -c core.quotePath=false diff --name-only HEAD -- "${sp[@]}" 2>/dev/null
+            git -c core.quotePath=false ls-files --others --exclude-standard -- "${sp[@]}" 2>/dev/null
+        else
+            [ -n "$range" ] && git -c core.quotePath=false diff --name-only "$range" 2>/dev/null
+            git -c core.quotePath=false diff --name-only HEAD 2>/dev/null
+            git -c core.quotePath=false ls-files --others --exclude-standard 2>/dev/null
+        fi
     } | sort -u | grep -v '^$' )"
     [ -z "$files" ] && return 0
 
     # 존재하는 것과 사라진 것을 가른다(루프는 builtin 만 쓴다: fork 없음).
     present=""
-    local f
     while IFS= read -r f; do
         [ -f "$f" ] && present="${present}${f}
 "
@@ -396,7 +536,7 @@ do_record() {
     grep -qxF "$skill" "$LEDGER_REL" 2>/dev/null || printf '%s\n' "$skill" >> "$LEDGER_REL" 2>/dev/null || true
     # 이 스킬이 무엇을 봤는지 내용 주소로 붙잡는다. 원장(무엇을 돌렸나)만으로는
     # "리뷰 한 번 돌리고 그 뒤로 계속 쓰기" 를 구분할 수 없다.
-    _snapshot_covered "$skill"
+    _snapshot_covered "$skill" "$(_json_str "$input" args)"
     exit 0
 }
 

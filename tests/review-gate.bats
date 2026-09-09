@@ -44,9 +44,15 @@ _json_cmd() {
 
 # PostToolUse(Skill) JSON: 실행된 스킬 이름 + cwd
 # 필드 이름은 실제 세션 트랜스크립트에서 실측한 것이다: {"skill":"simplify"}.
+# $2 가 있으면 args 까지 실은 페이로드를 만든다(런타임이 보내는 모양 그대로).
 _json_skill() {
-    printf '{"tool_name":"Skill","session_id":"%s","cwd":"%s","tool_input":{"skill":"%s"}}' \
-        "${SESSION:-s1}" "$REPO_DIR" "$1"
+    if [ -n "${2:-}" ]; then
+        printf '{"tool_name":"Skill","session_id":"%s","cwd":"%s","tool_input":{"skill":"%s","args":"%s"}}' \
+            "${SESSION:-s1}" "$REPO_DIR" "$1" "$2"
+    else
+        printf '{"tool_name":"Skill","session_id":"%s","cwd":"%s","tool_input":{"skill":"%s"}}' \
+            "${SESSION:-s1}" "$REPO_DIR" "$1"
+    fi
 }
 
 # 훅 문서가 적고 있는 대체 필드명. 런타임이 어느 쪽을 보내도 원장이 채워져야 한다.
@@ -68,9 +74,9 @@ _commit_external_api() {
 # 이 세션에서 Medium 필수 리뷰 3종을 모두 돌린 것으로 기록한다(외부 API 신호가 있으면
 # security-review 까지 필수다). record 는 그 시점 내용을 커버리지로 함께 스냅샷한다.
 _run_all_reviews() {
-    printf '%s' "$(_json_skill simplify)"        | bash "$GATE" record
-    printf '%s' "$(_json_skill code-review)"     | bash "$GATE" record
-    printf '%s' "$(_json_skill security-review)" | bash "$GATE" record
+    printf '%s' "$(_json_skill simplify "${1:-}")"        | bash "$GATE" record
+    printf '%s' "$(_json_skill code-review "${1:-}")"     | bash "$GATE" record
+    printf '%s' "$(_json_skill security-review "${1:-}")" | bash "$GATE" record
 }
 
 # ── 정책 표 (required_skills): strict.md 의 트랙별 리뷰 표와 단일 출처를 공유한다 ──
@@ -592,4 +598,153 @@ exit 2
 OLD
     run bash -c "MANGOLOVE_DIR='$old' bash '$BATS_TEST_DIRNAME/../.githooks/pre-push' origin url </dev/null"
     [ "$status" -eq 0 ]
+}
+
+# ── 커버리지 범위: 스킬이 실제로 본 것만 인정한다 ──────────────
+#
+# args 는 도구 호출 사실이라 근거로 쓸 수 있다. 무시하면 `/code-review 1952` 처럼
+# **원격 PR 을 본 리뷰**가 이 워킹트리 전체를 통과시킨다(이 트리를 쳐다보지도 않았는데).
+
+@test "범위: PR 번호를 리뷰한 스킬은 이 워킹트리를 커버하지 않는다" {
+    _commit_external_api
+    _run_all_reviews "1952"
+    _gate "git push"
+    [ "$status" -eq 2 ]
+}
+
+@test "범위: PR URL 을 리뷰한 스킬도 이 워킹트리를 커버하지 않는다" {
+    _commit_external_api
+    _run_all_reviews "https://github.com/o/r/pull/710"
+    _gate "git push"
+    [ "$status" -eq 2 ]
+}
+
+@test "범위: 레포 밖 경로(다른 worktree)를 리뷰하면 커버하지 않는다" {
+    _commit_external_api
+    local other="$TEST_DIR/otherworktree"; mkdir -p "$other"
+    _run_all_reviews "high $other"
+    _gate "git push"
+    [ "$status" -eq 2 ]
+}
+
+@test "범위: 짚은 경로만 커버한다 (짚지 않은 파일은 여전히 미검토)" {
+    printf 'const a = await axios.get("https://api.example.com/a")\n' > "$REPO_DIR/a.js"
+    printf 'const b = await axios.get("https://api.example.com/b")\n' > "$REPO_DIR/b.js"
+    _run_all_reviews "high a.js"
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm two
+    _gate "git push"
+    [ "$status" -eq 2 ]
+    # a.js 는 covered, b.js 는 아니다
+    grep -q "	a.js\$" "$REPO_DIR/.mangolove/.review-covered"
+    ! grep -q "	b.js\$" "$REPO_DIR/.mangolove/.review-covered"
+}
+
+@test "범위: 짚은 경로를 전부 덮으면 통과한다" {
+    printf 'const a = await axios.get("https://api.example.com/a")\n' > "$REPO_DIR/a.js"
+    _run_all_reviews "high a.js"
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm one
+    _gate "git push"
+    [ "$status" -eq 0 ]
+}
+
+@test "범위: 강도만 준 args 는 기존대로 전체를 커버한다" {
+    _commit_external_api
+    _run_all_reviews "high"
+    _gate "git push"
+    [ "$status" -eq 0 ]
+}
+
+@test "범위: 자유 서술은 해석하지 않는다 (산문 속 숫자를 PR 로 오인하지 않는다)" {
+    # 코드가 좁힐 근거가 없으면 기본 범위로 둔다. 산문 해석은 다시 모델 판단이 된다.
+    _commit_external_api
+    _run_all_reviews "리뷰 200 줄 정도 워킹트리 변경분 봐줘"
+    _gate "git push"
+    [ "$status" -eq 0 ]
+}
+
+# ── 코드 리뷰가 실증한 fail-open 들 (전부 조용한 통과였다) ─────
+
+@test "범위: 인용부호로 감싼 경로도 그 경로만 커버한다" {
+    # args 는 JSON 이스케이프되어 도착하고(\" ), 되돌려도 셸 인용부호가 토큰에 붙어 있다.
+    # 둘 다 처리하지 않으면 토큰이 실제 파일명과 달라 경로 지정이 통째로 무시된다.
+    printf 'const a = await axios.get("https://api.example.com/a")\n' > "$REPO_DIR/a b.js"
+    printf 'const o = await axios.get("https://api.example.com/o")\n' > "$REPO_DIR/other.js"
+    _run_all_reviews 'high \"a b.js\"'
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm quoted
+    _gate "git push"
+    [ "$status" -eq 2 ]
+    grep -q "	a b.js\$"  "$REPO_DIR/.mangolove/.review-covered"
+    ! grep -q "	other.js\$" "$REPO_DIR/.mangolove/.review-covered"
+}
+
+@test "범위: JSON 이스케이프된 개행으로 나열한 경로들을 인식한다" {
+    printf 'const a = await axios.get("https://api.example.com/a")\n' > "$REPO_DIR/a.js"
+    printf 'const b = await axios.get("https://api.example.com/b")\n' > "$REPO_DIR/b.js"
+    printf 'const c = await axios.get("https://api.example.com/c")\n' > "$REPO_DIR/c.js"
+    _run_all_reviews 'a.js\nb.js'
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm nl
+    _gate "git push"
+    [ "$status" -eq 2 ]
+    ! grep -q "	c.js\$" "$REPO_DIR/.mangolove/.review-covered"
+}
+
+@test "범위: 스킴 없는 PR 링크도 원격 참조로 본다" {
+    _commit_external_api
+    _run_all_reviews 'github.com/onda/repo/pull/710'
+    _gate "git push"
+    [ "$status" -eq 2 ]
+}
+
+@test "범위: PR 번호가 낱말과 흩어져 있어도 원격 참조로 본다" {
+    # 실측한 실제 호출의 다수가 이 모양이다: "tportio/crs PR #1891".
+    _commit_external_api
+    _run_all_reviews 'tportio/crs PR #1891'
+    _gate "git push"
+    [ "$status" -eq 2 ]
+    SESSION=s2
+    _run_all_reviews 'PR #423 (crs-admin-web)'
+    run bash -c "printf '%s' '$(SESSION=s2; _json_cmd "git push")' | bash '$GATE' pretooluse"
+    [ "$status" -eq 2 ]
+}
+
+@test "범위: 후행 슬래시 디렉토리도 그 아래를 커버한다 (git pathspec)" {
+    mkdir -p "$REPO_DIR/lib"
+    printf 'const a = await axios.get("https://api.example.com/a")\n' > "$REPO_DIR/lib/a.js"
+    _run_all_reviews 'high lib/'
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm dir
+    _gate "git push"
+    [ "$status" -eq 0 ]
+}
+
+@test "범위: 레포 안 절대경로는 경로로, 레포 밖 절대경로는 미커버로 본다" {
+    printf 'const a = await axios.get("https://api.example.com/a")\n' > "$REPO_DIR/a.js"
+    _run_all_reviews "high $REPO_DIR/a.js"
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm abs
+    _gate "git push"
+    [ "$status" -eq 0 ]
+}
+
+@test "범위: 실재하는 pull 경로는 PR 링크로 오인하지 않는다" {
+    mkdir -p "$REPO_DIR/docs/pull"
+    printf 'const a = await axios.get("https://api.example.com/a")\n' > "$REPO_DIR/docs/pull/710"
+    _run_all_reviews "high docs/pull/710"
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm realpath
+    _gate "git push"
+    [ "$status" -eq 0 ]
+}
+
+@test "범위: # 없이 'PR 1891' 로 써도 원격 참조로 본다" {
+    # #번호 규칙과 별개 경로다. 이 테스트가 없으면 낱말+숫자 규칙이 검증되지 않는다
+    # (변이 테스트로 확인: 규칙을 지워도 다른 테스트가 아무도 실패하지 않았다).
+    _commit_external_api
+    _run_all_reviews 'tportio/crs PR 1891'
+    _gate "git push"
+    [ "$status" -eq 2 ]
 }

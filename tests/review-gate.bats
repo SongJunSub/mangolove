@@ -649,11 +649,16 @@ OLD
     [ "$status" -eq 0 ]
 }
 
-@test "범위: 강도만 준 args 는 기존대로 전체를 커버한다" {
+@test "범위: 닫힌 강도 목록 전체가 기본 범위를 커버한다" {
+    # 여섯 개 중 둘만 테스트하면 목록이 낡았을 때 알아채지 못한다.
     _commit_external_api
-    _run_all_reviews "high"
-    _gate "git push"
-    [ "$status" -eq 0 ]
+    local lvl
+    for lvl in low medium high max xhigh ultra; do
+        rm -f "$REPO_DIR/.mangolove/.review-ledger" "$REPO_DIR/.mangolove/.review-covered"
+        _run_all_reviews "$lvl"
+        _gate "git push"
+        [ "$status" -eq 0 ] || { echo "강도 '$lvl' 에서 실패"; return 1; }
+    done
 }
 
 @test "범위: 무언가를 가리키는데 이 트리에서 못 찾으면 커버하지 않는다" {
@@ -694,7 +699,7 @@ OLD
     [ "$status" -eq 2 ]
     SESSION=s3
     _run_all_reviews "my-feature-branch"
-    run bash -c "printf '%s' '$(SESSION=s3; _json_cmd "git push")' | bash '$GATE' pretooluse"
+    _gate "git push"
     [ "$status" -eq 2 ]
 }
 
@@ -758,7 +763,7 @@ OLD
     [ "$status" -eq 2 ]
     SESSION=s2
     _run_all_reviews 'PR #423 (crs-admin-web)'
-    run bash -c "printf '%s' '$(SESSION=s2; _json_cmd "git push")' | bash '$GATE' pretooluse"
+    _gate "git push"
     [ "$status" -eq 2 ]
 }
 
@@ -844,4 +849,58 @@ OLD
     [ "$status" -eq 2 ]
     grep -q "	__all__\$"  "$REPO_DIR/.mangolove/.review-covered"
     ! grep -q "	other.js\$" "$REPO_DIR/.mangolove/.review-covered"
+}
+
+# ── 차단 사유 분류 (효능 측정의 근거) ──────────────────────────
+#
+# 셋이 한 버킷이면 "커버리지 판정이 너무 엄격한가"를 그 수치로 답할 수 없다.
+# 가장 흔한 stale 이 scope 를 덮어써 엄격해 보이게 만든다.
+
+_block_kinds() { grep -o '"kind":"[a-z]*"' "$MANGOLOVE_DIR/efficacy/proj.jsonl" 2>/dev/null | tail -1; }
+
+@test "사유: 스킬이 아예 안 돌았으면 missing 으로 기록한다" {
+    _commit_external_api
+    _gate "git push"
+    [ "$status" -eq 2 ]
+    [ "$(_block_kinds)" = '"kind":"missing"' ]
+}
+
+@test "사유: 돌았지만 딴 데를 리뷰했으면 scope 로 기록한다" {
+    _commit_external_api
+    _run_all_reviews "1952"
+    _gate "git push"
+    [ "$status" -eq 2 ]
+    [ "$(_block_kinds)" = '"kind":"scope"' ]
+}
+
+@test "사유: 보고 나서 더 쓴 것이면 stale 로 기록한다 (scope 와 섞이면 안 된다)" {
+    printf 'const a = await axios.get("https://api.example.com/a")\n' > "$REPO_DIR/a.js"
+    _run_all_reviews
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm reviewed
+    # 리뷰 뒤에 새로 쓴 코드
+    local i
+    for i in $(seq 1 11); do
+        echo "export const V$i = $i" > "$REPO_DIR/n$i.js"
+    done
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm more
+    _gate "git push"
+    [ "$status" -eq 2 ]
+    [ "$(_block_kinds)" = '"kind":"stale"' ]
+}
+
+@test "플래그: 대상을 담은 옵션은 모르는 토큰으로 본다" {
+    # --* 를 전부 건너뛰면 --pr=1952 가 유일하게 판정을 빠져나가 전체를 커버했다.
+    _commit_external_api
+    _run_all_reviews "--pr=1952"
+    _gate "git push"
+    [ "$status" -eq 2 ]
+}
+
+@test "플래그: 범위와 무관한 알려진 플래그는 기본 범위를 유지한다" {
+    _commit_external_api
+    _run_all_reviews "high --fix"
+    _gate "git push"
+    [ "$status" -eq 0 ]
 }

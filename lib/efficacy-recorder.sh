@@ -61,6 +61,14 @@ report() {
         dng="$(grep -cE '"type":"block","phase":"guard"' "$lg" 2>/dev/null)"; dng="${dng:-0}"
         lt="$(grep -cE '"type":"block","phase":"gate","kind":"(lint|test)"' "$lg" 2>/dev/null)"; lt="${lt:-0}"
         rev="$(grep -cE '"type":"block","phase":"review"' "$lg" 2>/dev/null)"; rev="${rev:-0}"
+        # 리뷰 차단은 사유를 갈라 본다. 둘이 한 숫자면 "엄격해진 커버리지 판정이 오탐 차단을
+        # 늘리고 있는가"를 데이터로 답할 수 없고, safe-by-default 가 조용히
+        # ignored-by-default(우회 파일 상습 사용)로 바뀌는 것을 놓친다.
+        # 하위 분류이므로 rev 에 이미 포함된다. 버킷합에 따로 더하지 않는다.
+        local rev_miss rev_scope rev_stale
+        rev_miss="$(grep -cE '"type":"block","phase":"review","kind":"missing"' "$lg" 2>/dev/null)"; rev_miss="${rev_miss:-0}"
+        rev_scope="$(grep -cE '"type":"block","phase":"review","kind":"scope"' "$lg" 2>/dev/null)"; rev_scope="${rev_scope:-0}"
+        rev_stale="$(grep -cE '"type":"block","phase":"review","kind":"stale"' "$lg" 2>/dev/null)"; rev_stale="${rev_stale:-0}"
         # 세션 예산은 exit 2 를 쓰지만 **차단이 아니라 안내**다(Stop 훅에서 모델에 메시지를
         # 전달하는 경로가 exit 2 뿐이라 그 턴을 한 번 붙잡을 뿐이다). 별도 버킷으로 빼고
         # 차단 합계에서 제외한다. 여기 섞으면 장기 세션마다 반복되는 안내가 시크릿/가드
@@ -72,7 +80,12 @@ report() {
         printf '  시크릿 커밋 차단:        %s\n' "$sec"
         printf '  위험/비가역 명령 차단:   %s\n' "$dng"
         printf '  커밋 게이트(lint/test):  %s\n' "$lt"
-        printf '  리뷰 미실행 커밋 차단:   %s\n' "$rev"
+        printf '  리뷰 미실행 push 차단:   %s\n' "$rev"
+        if [ "$((rev_miss + rev_scope + rev_stale))" -gt 0 ]; then
+            printf '    - 스킬이 안 돌았음:    %s\n' "$rev_miss"
+            printf '    - 딴 데를 리뷰함:      %s  (이 값이 크면 커버리지 판정이 너무 엄격하다)\n' "$rev_scope"
+            printf '    - 보고 나서 더 씀:     %s  (정상. 설계상 가장 흔한 사유다)\n' "$rev_stale"
+        fi
         [ "$other" -gt 0 ] && printf '  기타 차단:               %s\n' "$other"
         printf '  (총 %s회 게이트/가드 차단, 재시도 포함, 고유 사고 수 아님)\n' "$hard"
         [ "$bud" -gt 0 ] && printf '  세션 예산 안내:          %s회 (차단 아님, 위 합계에 포함되지 않음)\n' "$bud"

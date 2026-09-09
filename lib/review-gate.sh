@@ -300,22 +300,31 @@ _tokenize_args() {
 # PR URL 인가. 자유 서술은 해석하지 않는다(해석하면 그게 다시 모델 판단이다).
 #
 # 트랜스크립트에서 "이 스킬이 실제로 Read 한 파일"을 뽑는 쪽이 더 일반적인 신호이지만
-# 쓰지 않는다: /simplify 와 /code-review 는 서브에이전트를 띄워 파일을 읽고, 그 도구
-# 호출은 메인 트랜스크립트에 없다. 그 방식은 커버리지를 체계적으로 과소 인정해
-# 거의 모든 push 를 막는다. args 가 지금 훅이 볼 수 있는 가장 좋은 근거다.
-# 결과는 **전역으로** 돌려준다. 문자열 하나로 "전체/없음/경로목록"을 다 실어 보내면
-# 그 세 도메인이 겹친다: 실제로 __all__ 이라는 이름의 파일을 짚으면 paths 가 "__all__\n" 이 되고,
-# 명령치환이 끝의 개행을 떼어내 SCOPE_ALL 과 바이트가 같아진다. 그러면 그 한 파일만 인정하려던
-# 호출이 **범위 전체를 인정**하게 된다(실증됨). 제어 신호와 데이터를 같은 채널에 싣지 않는다.
-# (이 파일의 _analyze 도 같은 이유로 전역을 쓴다: 명령치환으로 부르지 않는다.)
-COVERAGE_MODE=""    # all | none | paths
-COVERAGE_PATHS=""   # paths 일 때만 채운다
+# 쓰지 않는다. **이유는 상관 짓기가 어려워서가 아니다**(서브에이전트 트랜스크립트는
+# ~/.claude/projects/<프로젝트>/<세션>/subagents/ 에 실제로 있고, tool_result 의 agentId 가
+# 결정적 조인 키다). 타이밍이 안 맞는다: fork 되는 스킬은 4초 만에 "background 로 시작함"을
+# 돌려주고 PostToolUse 는 **그때** 발화하는데, 실제 리뷰는 그 뒤로 10분을 더 돈다. 훅이 볼
+# 시점에 그 파일에는 리뷰의 도구 호출이 하나도 없다(실측: SubagentStop 은 이 실행 모드에서
+# 한 번도 발화하지 않았다). 게다가 실측한 /code-review 는 Read 0회, Bash 21회였다.
+# "무엇을 봤나"를 알려면 임의의 셸 파이프라인을 파싱해야 하고, 그건 이 파일이 git push
+# 감지에서 이미 싸우고 있는 문제의 더 어려운 판본이다. args 가 지금 훅이 볼 수 있는 근거다.
+# 결과는 **전역으로** 돌려준다. 문자열 하나로 "전체/없음/경로목록"을 다 실어 보내면 그 세
+# 도메인이 겹친다: 실제로 __all__ 이라는 이름의 파일을 짚으면 목록이 그 한 줄이 되고,
+# 명령치환이 끝의 개행을 떼어내 "전체"를 뜻하던 값과 바이트가 같아진다. 그러면 그 한 파일만
+# 인정하려던 호출이 **범위 전체를 인정**한다(실증됨). 경로는 배열로 담아 그 부류를 구조적으로
+# 없앤다. (이 파일의 _analyze 도 같은 이유로 전역을 쓴다: 명령치환으로 부르지 않는다.)
+COVERAGE_MODE=""      # all | none | paths
+COVERAGE_PATHS=()     # paths 일 때만 채운다
 _coverage_scope() {
-    local args root tok paths="" unknown=0
-    COVERAGE_MODE=""; COVERAGE_PATHS=""
+    local args root refs tok
+    COVERAGE_MODE=""; COVERAGE_PATHS=()
     args="$(_json_unescape "${1:-}")"
     [ -z "${args//[[:space:]]/}" ] && { COVERAGE_MODE="all"; return 0; }
     root="$(git rev-parse --show-toplevel 2>/dev/null)"; [ -n "$root" ] || root="$PWD"
+    # ref 목록은 **한 번만** 뜬다. 토큰마다 git rev-parse 를 부르면 파일 목록을 넘긴 호출에서
+    # fork 가 파일 수만큼 난다. HEAD 는 for-each-ref 에 없으므로 직접 넣는다.
+    refs="HEAD
+$(git for-each-ref --format='%(refname:short)' refs/heads refs/tags refs/remotes 2>/dev/null)"
 
     # **인자 전체가 알아볼 수 있는 것이어야** 범위를 인정한다. 하나라도 모르는 토큰이 있으면
     # 아무 것도 인정하지 않는다. 모르는 토큰을 "수식어겠지" 하고 무시했더니 두 가지가 샜다:
@@ -323,23 +332,23 @@ _coverage_scope() {
     #   - /code-review main 처럼 **다른 브랜치**를 리뷰한 호출이 전체를 커버했다.
     while IFS= read -r tok; do
         [ -n "$tok" ] || continue
-        case "$tok" in --*) continue ;; esac
+        # 플래그는 **닫힌 목록만** 건너뛴다. 전부 건너뛰면 --pr=1952 처럼 원격 대상을 담은
+        # 옵션이 유일하게 "모르는 토큰" 판정을 빠져나가, 이 트리를 보지 않은 리뷰가 전체를
+        # 커버한다(실증됨). 스킬이 실제로 갖는 비-범위 플래그만 적는다.
+        case "$tok" in
+            --|--fix|--comment|--post|--no-post) continue ;;
+        esac
 
         # 원격 참조 판정을 **경로 검사보다 먼저** 한다. 순서를 뒤집으면 이름이 겹치는 로컬
         # 경로가 원격 참조를 가린다: 공격자가 브랜치에 1952/ 나 main/ 디렉토리를 심어 두면
         # `/code-review 1952`(원격 PR 리뷰)가 그 디렉토리를 봤다고 기록된다(실증됨).
-        #   - 순수 숫자: PR 번호다. 같은 이름의 파일이 있어도 그쪽이 아니다.
-        #   - :// 를 포함: URL 이다.
-        #   - git ref 로 풀리는 이름: 다른 브랜치나 태그다(main, develop, v1.0).
-        # 셋 다 애매하면 엄격한 쪽(unknown)으로 틀린다.
-        case "$tok" in
-            *://*) unknown=1; continue ;;
-            *[!0-9]*) ;;
-            *) unknown=1; continue ;;
-        esac
-        if git rev-parse --verify --quiet "${tok}^{commit}" >/dev/null 2>&1; then
-            unknown=1; continue
-        fi
+        case "$tok" in *://*) COVERAGE_MODE="none"; return 0 ;; esac
+        if [[ "$tok" =~ ^[0-9]+$ ]]; then COVERAGE_MODE="none"; return 0; fi   # PR 번호
+        case "
+$refs
+" in *"
+$tok
+"*) COVERAGE_MODE="none"; return 0 ;; esac                                     # 브랜치, 태그
 
         # 이 레포 안의 실재하는 경로. 절대경로는 레포 안일 때만 인정한다: 다른 worktree 도
         # 디스크에는 있으므로 존재만 보면 남의 코드를 본 리뷰가 통과한다.
@@ -347,30 +356,27 @@ _coverage_scope() {
         case "$tok" in
             /*) case "$tok" in
                     "$root"|"$root"/*|"$PWD"|"$PWD"/*)
-                        if [ -e "$tok" ]; then paths="${paths}${tok}
-"; continue; fi ;;
+                        if [ -e "$tok" ]; then COVERAGE_PATHS+=("$tok"); continue; fi ;;
                 esac ;;
-            *)  if [ -e "$tok" ]; then paths="${paths}${tok}
-"; continue; fi ;;
+            *)  if [ -e "$tok" ]; then COVERAGE_PATHS+=("$tok"); continue; fi ;;
         esac
 
         # 강도 지정만 범위를 좁히지 않는 것으로 인정한다. 닫힌 목록인 것이 의도다:
-        # 스킬에 새 강도가 생기면 이 목록에 없어 unknown 이 되고, 그러면 **더 엄격해진다**.
+        # 스킬에 새 강도가 생기면 이 목록에 없어 모르는 토큰이 되고, 그러면 **더 엄격해진다**.
         case "$tok" in
             low|medium|high|max|xhigh|ultra) continue ;;
         esac
 
-        unknown=1
+        # 모르는 토큰이 하나라도 있으면 이 호출이 무엇을 봤는지 코드가 알 수 없다.
+        # **기본값을 all 로 두지 않는다.** "해석하지 않겠다"는 안전한 쪽으로 두겠다는 뜻이지
+        # 최대로 믿겠다는 뜻이 아니다. 과소 인정은 눈에 보이고 되돌릴 수 있지만(경로를 짚거나
+        # 강도만 주고 다시 돌리면 된다), 과대 인정은 조용하고 감사 기록도 남지 않는다.
+        COVERAGE_MODE="none"; return 0
     done <<TOKENS
 $(_tokenize_args "$args")
 TOKENS
 
-    # 모르는 토큰이 하나라도 있으면 이 호출이 무엇을 봤는지 코드가 알 수 없다.
-    # **기본값을 all 로 두지 않는다.** "해석하지 않겠다"는 안전한 쪽으로 두겠다는 뜻이지
-    # 최대로 믿겠다는 뜻이 아니다. 과소 인정은 눈에 보이고 되돌릴 수 있지만(경로를 짚거나
-    # 강도만 주고 다시 돌리면 된다), 과대 인정은 조용하고 감사 기록도 남지 않는다.
-    if [ "$unknown" -eq 1 ]; then COVERAGE_MODE="none"; return 0; fi
-    if [ -n "$paths" ]; then COVERAGE_MODE="paths"; COVERAGE_PATHS="$paths"; return 0; fi
+    if [ "${#COVERAGE_PATHS[@]}" -gt 0 ]; then COVERAGE_MODE="paths"; return 0; fi
     # 강도뿐이거나 인자가 없다 = 스킬 기본 범위(워킹트리 전체 diff)를 본 것이다.
     COVERAGE_MODE="all"
     return 0
@@ -396,20 +402,27 @@ _git_names() {
 # **스킬 이름을 함께 적는다.** 내용만 적으면 스킬 하나만 돌려도 그 내용이 통째로 covered 가
 # 되어, /simplify 만 돌리고 /code-review 를 건너뛴 push 가 통과한다(실제로 그랬다).
 _snapshot_covered() {
-    local skill="$1" args="${2:-}" range files present hashes f p
+    local skill="$1" args="${2:-}" range files present hashes f
     local sp=()
     # 명령치환으로 부르지 않는다: 서브셸이면 전역이 안 남는다(위 COVERAGE_MODE 주석).
     _coverage_scope "$args"
     # 이 스킬이 이 트리를 보지 않았다면 아무 것도 인정하지 않는다.
-    [ "$COVERAGE_MODE" = "none" ] && return 0
+    if [ "$COVERAGE_MODE" = "none" ]; then
+        # 왜 마커를 남기나: 이 스킬이 "돌긴 했지만 이 트리를 안 봤다"는 사실을 push 시점에
+        # 알아야 차단 사유를 가를 수 있다. 원장 등재 여부만 보면 이 경우와 "리뷰 뒤에 코드를
+        # 더 쓴 경우"(가장 흔한 차단)가 한 덩어리가 되어, 그 수치로는 커버리지 판정이
+        # 엄격한지 아닌지 판단할 수 없다. blob 자리가 경로와 절대 안 맞아 판정에는 무해하다.
+        _ensure_regular_file "$COVERED_REL" || return 0
+        grep -qxF "$skill	_noscope	_noscope" "$COVERED_REL" 2>/dev/null \
+            || printf '%s\t_noscope\t_noscope\n' "$skill" >> "$COVERED_REL" 2>/dev/null || true
+        return 0
+    fi
     # 짚은 경로가 있으면 git pathspec 으로 넘긴다. 손으로 "이 파일이 이 경로 아래인가"를
     # 짜면 후행 슬래시(lib/ -> lib//*)에서 아무것도 안 맞는 식으로 조용히 틀린다.
     # git 은 정확한 경로 또는 그 디렉토리 하위만 매칭하며(li 가 lib/ 를 오염시키지 않는다),
     # 없는 경로는 빈 결과로 조용히 끝난다.
     if [ "$COVERAGE_MODE" = "paths" ]; then
-        while IFS= read -r p; do [ -n "$p" ] && sp+=("$p"); done <<SCOPE
-$COVERAGE_PATHS
-SCOPE
+        sp=("${COVERAGE_PATHS[@]}")
         [ "${#sp[@]}" -eq 0 ] && return 0
     fi
     range="$(_push_range)"
@@ -578,9 +591,18 @@ _track_and_required() {
 }
 
 REVIEW_TRACK=""; REVIEW_JSON=""; REVIEW_REQUIRED=""; REVIEW_MISSING=""; REVIEW_RANGE=""; REVIEW_DETAIL=""
+# 차단 사유. 효능 원장에서 둘을 갈라 봐야 "엄격해진 기본값이 오탐 차단을 늘리고 있는가"를
+# 논쟁이 아니라 데이터로 답할 수 있다. 그게 안 보이면 safe-by-default 가 조용히
+# ignored-by-default 로 바뀌는 것(우회 파일의 상습 사용)을 알아채지 못한다.
+#   missing = 그 스킬이 이 세션에서 아예 안 돌았다
+#   scope   = 돌긴 했는데 그 호출이 이 트리를 보지 않았다(원격 PR, 다른 worktree 등)
+#   stale   = 보긴 했는데 그 뒤에 코드를 더 썼다 (가장 흔하다. 이걸 scope 와 섞으면
+#             "커버리지 판정이 엄격한가"를 그 수치로 판단할 수 없다)
+REVIEW_BLOCK_KIND=""
 _analyze() {
     local ref="${1:-}" session="${2:-}" json tr s missing="" detail="" p
     local sig total paths=() key rj rt rreq cache_key="" cache_rt="" cache_rreq=""
+    REVIEW_BLOCK_KIND=""
     _drop_stale_ledger "$session"
 
     if [ -z "$ref" ]; then ref="$(_push_range)"; fi
@@ -631,6 +653,14 @@ _analyze() {
         esac
 
         missing="$missing $s"
+        # 사유는 엄격한 순으로 덮어쓴다: missing > scope > stale.
+        if ! grep -qxF "$s" "$LEDGER_REL" 2>/dev/null; then
+            REVIEW_BLOCK_KIND="missing"                       # 아예 안 돌았다
+        elif grep -qxF "$s	_noscope	_noscope" "$COVERED_REL" 2>/dev/null; then
+            [ "$REVIEW_BLOCK_KIND" = "missing" ] || REVIEW_BLOCK_KIND="scope"   # 돌았으나 딴 데를 봤다
+        else
+            [ -n "$REVIEW_BLOCK_KIND" ] || REVIEW_BLOCK_KIND="stale"            # 보고 나서 더 썼다
+        fi
         detail="${detail}  - /${s}: 이 스킬이 보지 않은 파일 ${#paths[@]}개 (그 자체로 ${rt})
 "
     done
@@ -692,7 +722,7 @@ _emit_block() {
         echo " 명령 앞에 붙인 값은 훅에 닿지 않습니다.)"
     } >&2
     local rec="$GATE_DIR/efficacy-recorder.sh"
-    if [ -f "$rec" ]; then bash "$rec" record-block review "missing" 2>/dev/null || true; fi
+    if [ -f "$rec" ]; then bash "$rec" record-block review "${REVIEW_BLOCK_KIND:-missing}" 2>/dev/null || true; fi
 }
 
 # ── pretooluse: git push / gh pr create 경계에서만 게이트.

@@ -580,3 +580,16 @@ _run_all_reviews() {
     run bash -c "cd '$REPO_DIR' && bash '$GATE' prepush origin /tmp/fake.git </dev/null"
     [ "$status" -eq 0 ]
 }
+
+@test "prepush: 설치된 게이트가 구버전이면 push 를 막지 않는다 (버전 스큐 fail-open)" {
+    # 훅은 레포에 커밋돼 함께 배포되고 게이트는 머신마다 따로 설치된다. 설치본이
+    # prepush 를 모르면 usage + exit 2 라, 그대로 exec 하면 그 머신의 push 가 전부 막힌다.
+    local old="$TEST_DIR/oldinstall"; mkdir -p "$old/lib"
+    cat > "$old/lib/review-gate.sh" <<'OLD'
+#!/usr/bin/env bash
+echo "usage: review-gate.sh {record|pretooluse|required|status}" >&2
+exit 2
+OLD
+    run bash -c "MANGOLOVE_DIR='$old' bash '$BATS_TEST_DIRNAME/../.githooks/pre-push' origin url </dev/null"
+    [ "$status" -eq 0 ]
+}

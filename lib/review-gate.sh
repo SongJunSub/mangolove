@@ -782,15 +782,26 @@ _emit_block() {
         echo "${REVIEW_TRACK} 트랙에 필요한 리뷰 중 아직 이 내용을 보지 않은 것:"
         printf '%s' "${REVIEW_DETAIL}"
         echo ""
-        echo "생략을 사후에 보고하지 말고 실행하세요. 과하다고 판단되면 실행하는 대신"
-        echo "**push 전에** 사용자에게 물으세요."
+        case "$REVIEW_BLOCK_KIND" in
+            missing)
+                echo "이 스킬들은 이 세션에서 아예 실행되지 않았습니다. 그냥 실행하세요."
+                echo "사용자에게 묻지 마세요: 물어야 할 결정이 아니라 하면 되는 일입니다."
+                ;;
+            scope)
+                echo "스킬은 돌았지만 그 호출이 이 트리를 보지 않았습니다"
+                echo "  (원격 PR 번호, 다른 worktree, 이 트리에 없는 경로를 인자로 준 경우)."
+                echo "강도만 주거나(/code-review high) 이 트리의 경로를 짚어 다시 돌리세요."
+                ;;
+            *)
+                echo "스킬은 이 내용을 봤지만 그 뒤에 코드가 더 들어왔습니다."
+                echo "델타가 사소하면 근거를 남기고 스스로 우회하세요. 이것도 묻지 마세요:"
+                echo "  mangolove review skip \"<무엇을 리뷰했고 델타가 무엇인지>\""
+                echo "델타가 사소하지 않으면 다시 돌리는 편이 낫습니다."
+                ;;
+        esac
         echo "부족분 확인: mangolove review status"
-        echo "리뷰를 돌렸는데도 이 목록이 남으면, 그 호출이 이 트리를 보지 않았다는 뜻입니다."
-        echo "  (원격 PR, 다른 worktree, 이 트리에 없는 경로를 인자로 준 경우)"
-        echo "  강도만 주거나(/code-review high) 이 트리의 경로를 짚어 다시 돌리세요."
-        echo "부득이한 1회 우회(감사됨): touch .mangolove/.review-skip 후 다시 push"
-        echo "(MANGOLOVE_SKIP_REVIEW=1 은 mangolove 실행 전에 export 돼 있어야 합니다."
-        echo " 명령 앞에 붙인 값은 훅에 닿지 않습니다.)"
+        echo "(우회는 효능 원장에 남습니다. MANGOLOVE_SKIP_REVIEW=1 은 mangolove 실행 전에"
+        echo " export 돼 있어야 합니다: 명령 앞에 붙인 값은 훅에 닿지 않습니다.)"
     } >&2
     local rec="$GATE_DIR/efficacy-recorder.sh"
     if [ -f "$rec" ]; then bash "$rec" record-block review "${REVIEW_BLOCK_KIND:-missing}" 2>/dev/null || true; fi
@@ -875,6 +886,23 @@ do_prepush() {
     exit 0
 }
 
+# ── skip: 1회용 우회 마커를 근거와 함께 남긴다.
+# 왜 CLI 로 두나: 안내문이 `touch .mangolove/.review-skip` 를 시키는데 에이전트가 그 명령을
+# 실행하지 못하면, 차단이 전부 사용자 호출이 된다(실제로 그렇게 됐다). 게이트가 시키는 일은
+# 게이트를 설치한 도구가 할 수 있게 해야 한다. 근거를 인자로 받아 효능 원장에 함께 남긴다.
+do_skip() {
+    local reason="${*:-}"
+    git rev-parse --git-dir >/dev/null 2>&1 || { echo "review-gate: git 저장소가 아닙니다" >&2; exit 1; }
+    [ -n "$reason" ] || { echo "usage: mangolove review skip \"<근거>\"" >&2; exit 2; }
+    mkdir -p "$(dirname "$SKIP_REL")" 2>/dev/null || true
+    _ml_seed_gitignore
+    printf '%s\n' "$reason" > "$SKIP_REL" 2>/dev/null || { echo "review-gate: 마커를 쓸 수 없습니다" >&2; exit 1; }
+    local rec="$GATE_DIR/efficacy-recorder.sh"
+    if [ -f "$rec" ]; then bash "$rec" record-skip review "requested" 2>/dev/null || true; fi
+    echo "MangoLove review gate: 다음 1회를 우회합니다 (감사 대상)" >&2
+    echo "  근거: $reason" >&2
+}
+
 # ── status: 사람용 진단. 인자가 없으면 게이트가 실제로 볼 push 범위를 그대로 보여준다.
 do_status() {
     local ref="${1:-}"
@@ -911,9 +939,10 @@ main() {
         record)     do_record ;;
         pretooluse) do_pretooluse ;;
         prepush)    shift; do_prepush "$@" ;;
+        skip)       shift; do_skip "$@" ;;
         required)   required_skills "${2:-}" "${3:-false}" "${4:-false}" "${5:-false}"; echo ;;
         status)     do_status "${2:-}" ;;
-        *) echo "usage: review-gate.sh {record|pretooluse|prepush|required <track> <db> <auth> <ext>|status [ref]}" >&2; exit 2 ;;
+        *) echo "usage: review-gate.sh {record|pretooluse|prepush|skip <근거>|required <track> <db> <auth> <ext>|status [ref]}" >&2; exit 2 ;;
     esac
 }
 

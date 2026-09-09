@@ -30,7 +30,37 @@ cmd="${cmd//\"/}"
 # 이들을 명령 구분자로 치환한다: 안 그러면 \n 이 글자 'n' 이 되어 여러 줄 명령이 한 줄로
 # 붙고, push 세그먼트 격리([^;|&])가 깨져 다른 명령의 -f/--force(예: 'git commit -F -')가
 # push 의 force 로 오탐된다. (개행=명령 경계이므로 ';' 로 치환)
-cmd="${cmd//\\n/;}"
+# heredoc 본문은 데이터라 명령이 아니다. 개행을 ';' 로 누르기 **전에** 벗겨야 한다:
+# 누른 뒤에는 heredoc 구조가 사라져 본문과 명령을 구별할 수 없다.
+# 셸이 소비하는 heredoc(bash <<EOF)의 본문은 실행되는 코드라 벗기지 않는다.
+# (review-gate.sh 의 _strip_heredocs 와 같은 판단이다. 두 훅은 서로를 source 하지 않는
+#  기존 설계를 따르므로 사본을 각자 갖고, 두 사본이 갈라지지 않는지는 테스트가 강제한다.)
+_strip_heredocs() {
+    printf '%s\n' "$1" | awk '
+        {
+            if (in_hd) {
+                line = $0
+                if (dash) sub(/^\t+/, "", line)
+                if (line == marker) { in_hd = 0; print; next }
+                if (strip) next
+                print; next
+            }
+            if (match($0, /<<-?[ \t]*("[^"]+"|\047[^\047]+\047|[A-Za-z_][A-Za-z0-9_]*)/)) {
+                tok = substr($0, RSTART, RLENGTH)
+                dash = (tok ~ /^<<-/)
+                m = tok
+                sub(/^<<-?[ \t]*/, "", m)
+                gsub(/["\047]/, "", m)
+                marker = m
+                in_hd = 1
+                strip = ($0 ~ /(^|[^[:alnum:]_])(bash|sh|zsh|dash|ksh|eval)([ \t]|$)/) ? 0 : 1
+            }
+            print
+        }'
+}
+cmd="$(_strip_heredocs "${cmd//\\n/$'\n'}")"
+
+cmd="${cmd//$'\n'/;}"
 cmd="${cmd//\\r/;}"
 cmd="${cmd//\\t/ }"
 cmd="${cmd//\\/}"

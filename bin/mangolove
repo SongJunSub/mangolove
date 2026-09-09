@@ -756,10 +756,11 @@ Continue from where you left off. Summarize the previous session state and ask w
             # 게이트가 push 시점에 무엇을 볼지 지금 보여준다. 차단 메시지가 안내하는 진단 경로.
             # status 로 고정한다: record/pretooluse 는 stdin 으로 훅 페이로드를 기다리는
             # 내부 모드라, 사람이 터미널에서 부르면 그대로 멈춰 선다.
-            [ "${1:-status}" = "status" ] || {
-                echo "usage: mangolove review [status] [<A...B>]" >&2; exit 2; }
-            [ "$#" -gt 0 ] && shift
-            bash "$REVIEW_SCRIPT" status "$@"
+            case "${1:-status}" in
+                status) shift 2>/dev/null || true; bash "$REVIEW_SCRIPT" status "$@" ;;
+                skip)   shift; bash "$REVIEW_SCRIPT" skip "$@" ;;
+                *) echo "usage: mangolove review [status [<A...B>] | skip \"<근거>\"]" >&2; exit 2 ;;
+            esac
             exit 0
             ;;
         audit-methodology)
@@ -1059,6 +1060,9 @@ SLEOF
 
     cat > "$out" << SESSIONEOF
 {
+  "permissions": {
+    "allow": ["Bash(mangolove review skip:*)"]
+  },
 ${statusline_block}
   "hooks": {
     "PreToolUse": [

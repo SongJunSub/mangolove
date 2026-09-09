@@ -322,3 +322,35 @@ _json() {
     run bash "$(_guard)" <<< "$(_json 'rm -rf /tmp/a /etc')"
     [ "$status" -eq 2 ]
 }
+
+
+
+# ── heredoc 오탐 (실사용을 막고 있었다) ────────────────────────
+#
+# 가드는 셸을 파싱하지 않고 명령 문자열을 본다. 문서나 스크립트를 heredoc 으로 쓰면서
+# 본문에 위험 명령을 적으면 그것을 실행으로 오인해 무관한 작업이 막혔다.
+# 위험 문자열은 조각내어 만든다: 이 테스트 파일 자체가 가드에 걸리지 않게 한다.
+
+@test "guard heredoc: 문서 본문에 적은 위험 명령을 실행으로 오인하지 않는다" {
+    local danger="r""m -rf /"
+    run bash "$(_guard)" <<< "$(_json "cat > doc.md <<MD\ncaution: ${danger} is forbidden\nMD")"
+    [ "$status" -eq 0 ]
+}
+
+@test "guard heredoc: 파이썬 본문의 force push 문자열도 오인하지 않는다" {
+    local pu="pu""sh" fo="--fo""rce"
+    run bash "$(_guard)" <<< "$(_json "python3 - <<PY\nprint('git ${pu} ${fo}')\nPY")"
+    [ "$status" -eq 0 ]
+}
+
+@test "guard heredoc: 셸이 소비하는 heredoc 의 위험 명령은 여전히 잡는다" {
+    local danger="r""m -rf /"
+    run bash "$(_guard)" <<< "$(_json "bash <<SH\n${danger}\nSH")"
+    [ "$status" -eq 2 ]
+}
+
+@test "guard heredoc: 본문을 벗겨도 그 뒤의 진짜 위험 명령은 잡는다" {
+    local danger="r""m -rf /"
+    run bash "$(_guard)" <<< "$(_json "cat > d.md <<MD\ndoc\nMD\n${danger}")"
+    [ "$status" -eq 2 ]
+}

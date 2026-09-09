@@ -982,3 +982,40 @@ _block_kinds() { grep -o '"kind":"[a-z]*"' "$MANGOLOVE_DIR/efficacy/proj.jsonl" 
     _gate 'cat > doc.md <<MD\n배포는 git push 로 합니다\nMD\ngit push origin main'
     [ "$status" -eq 2 ]
 }
+
+@test "우회: mangolove review skip 이 근거와 함께 마커를 남긴다" {
+    # 안내문이 시키는 우회를 에이전트가 실행하지 못하면 차단이 전부 사용자 호출이 된다.
+    run bash -c "cd '$REPO_DIR' && bash '$GATE' skip '리뷰 3종 실행, 델타는 테스트 파일뿐'"
+    [ "$status" -eq 0 ]
+    grep -q '델타는 테스트' "$REPO_DIR/.mangolove/.review-skip"
+    # 그 우회가 실제로 다음 1회를 통과시킨다
+    _commit_external_api
+    _gate "git push"
+    [ "$status" -eq 0 ]
+}
+
+@test "우회: 근거 없이 부르면 거부한다 (왜 우회했는지가 기록의 전부다)" {
+    run bash -c "cd '$REPO_DIR' && bash '$GATE' skip"
+    [ "$status" -eq 2 ]
+}
+
+@test "차단 안내: 스킬 미실행이면 묻지 말고 실행하라고 한다" {
+    _commit_external_api
+    _gate "git push"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"묻지 마세요"* ]]
+}
+
+@test "차단 안내: 리뷰 뒤 델타면 스스로 우회하는 길을 알려준다" {
+    printf 'const a = await axios.get("https://api.example.com/a")\n' > "$REPO_DIR/a.js"
+    _run_all_reviews
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm reviewed
+    local i
+    for i in $(seq 1 11); do echo "export const V$i = $i" > "$REPO_DIR/n$i.js"; done
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm more
+    _gate "git push"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"review skip"* ]]
+}

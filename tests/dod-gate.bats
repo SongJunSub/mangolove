@@ -363,3 +363,14 @@ release_gate_as() {
     [ "$(_json_str '{"a":"b"}' cwd)" = "" ]                        # 키 없음
     [ "$(_json_str '{"cwd":"/first","cwd":"/second"}' cwd)" = "/first" ]   # 첫 번째를 취한다
 }
+
+
+@test "boundary: review-gate 와 irreversible-guard 의 _strip_heredocs 가 바이트 동일하다" {
+    # 두 훅은 서로를 source 하지 않는다(한쪽이 깨져도 다른 쪽이 같이 죽지 않게 하는 기존
+    # 설계). 사본이 갈라지면 한쪽만 오탐을 내거나 한쪽만 진짜 명령을 놓친다.
+    local a b
+    a="$(awk '/^_strip_heredocs\(\) \{/,/^\}$/' "$BATS_TEST_DIRNAME/../lib/review-gate.sh")"
+    b="$(awk '/^_strip_heredocs\(\) \{/,/^\}$/' "$BATS_TEST_DIRNAME/../lib/irreversible-guard.sh")"
+    [ -n "$a" ]
+    [ "$a" = "$b" ]
+}

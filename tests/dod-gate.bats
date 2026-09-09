@@ -259,7 +259,9 @@ release_gate_as() {
     run_gate_as SESSION-A >/dev/null 2>&1 || true
 
     grep -qx '.review-skip' "$PROJ/.mangolove/.gitignore"
-    grep -qx '.review-ledger' "$PROJ/.mangolove/.gitignore"
+    # 원장과 커버리지는 .git/ 아래로 옮겼으므로 여기 심지 않는다: 브랜치가 실어 올 수
+    # 없는 자리라 무시 목록 자체가 필요 없다.
+    ! grep -qx '.review-ledger' "$PROJ/.mangolove/.gitignore"
     [ "$(grep -cx 'dod.sh' "$PROJ/.mangolove/.gitignore")" = "1" ]   # 중복 append 하지 않는다
 }
 

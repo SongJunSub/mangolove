@@ -71,6 +71,28 @@ case "${BASH_SOURCE[0]}" in
     *)   GATE_DIR="$PWD" ;;
 esac
 IMPACT="$GATE_DIR/impact-score.sh"
+
+# ── 게이트 상태는 워킹트리에 두지 않는다 ────────────────
+# 왜: .gitignore 는 `git add -f` 를 막지 못한다. 적대적 브랜치가 원장과 커버리지를 위조해
+# 커밋해 두면, 그 브랜치를 checkout 한 사람의 워킹트리에 그대로 배달된다. 터미널 경로
+# (do_prepush)는 세션 ID 가 없어 디스크의 원장을 그대로 믿으므로, **리뷰를 한 번도 돌리지
+# 않고 공유가 통과한다**(실증됨: 위조 원장을 실은 브랜치에서 종료코드 0).
+# .git/ 아래는 checkout 이 절대 쓰지 않으므로 이 경로 자체가 사라진다. 링크드 worktree 에서는
+# git-dir 이 worktree 별로 갈리는데, 리뷰 상태도 worktree 별인 것이 맞다.
+# 비-git 디렉토리에서는 빈 값이 되고, 그때는 어차피 게이트가 fail-open 한다.
+_ml_state_dir() {
+    local g; g="$(git rev-parse --absolute-git-dir 2>/dev/null)" || return 0
+    [ -n "$g" ] || return 0
+    printf '%s/mangolove' "$g"
+}
+# 경로는 **cd 이후에** 확정해야 한다. 훅은 stdin 의 cwd 로 이동하므로, 로드 시점에 계산하면
+# 엉뚱한 레포의 .git 을 가리킨다. 여기서는 기본값만 두고 _ml_init_state 로 다시 잡는다.
+STATE_DIR=""
+
+# 추적되는 게이트 상태는 브랜치가 실어 온 위조본이다. 이 파일들은 일시 상태라 절대
+# 추적되지 않으며, 추적된 사본이 있다는 것 자체가 변조 신호다.
+_ml_tracked() { git ls-files --error-unmatch -- "$1" >/dev/null 2>&1; }
+
 LEDGER_REL=".mangolove/.review-ledger"
 # 원장이 어느 세션의 것인지 기록한다. 어제 돌린 리뷰가 오늘의 첫 push 를 통과시키면 안 된다.
 # HEAD 로는 무효화하지 **않는다**: push 경계에서는 HEAD 가 커밋마다 움직이므로 HEAD 기준
@@ -80,7 +102,19 @@ LEDGER_BASE_REL=".mangolove/.review-ledger.base"
 # 리뷰가 본 내용: "<스킬>\t<blob 해시>\t<경로>" 줄들. 세션 스코프.
 COVERED_REL=".mangolove/.review-covered"
 # 세션 도중 쓸 수 있는 1회용 우회 파일. 환경변수 우회는 훅에 닿지 않기 때문에 필요하다.
+# 이것만은 워킹트리에 남긴다: 사람이 직접 touch 하는 경로라 안내문에 적히기 때문이다.
+# 대신 추적된 사본은 신뢰하지 않는다(_ml_tracked).
 SKIP_REL=".mangolove/.review-skip"
+
+# cwd 가 정해진 뒤 상태 경로를 확정한다. git-dir 을 못 구하면(비-git) 워킹트리 기본값을
+# 그대로 쓰는데, 그 경우는 어차피 게이트가 fail-open 한다.
+_ml_init_state() {
+    STATE_DIR="$(_ml_state_dir)"
+    [ -n "$STATE_DIR" ] || return 0
+    LEDGER_REL="$STATE_DIR/.review-ledger"
+    LEDGER_BASE_REL="$STATE_DIR/.review-ledger.base"
+    COVERED_REL="$STATE_DIR/.review-covered"
+}
 
 # .mangolove/ 는 프로젝트가 버전관리할 수도 있는 디렉토리다(.mangolove/hooks/ 는 감사 대상).
 # 그러니 통째로 무시하지 않고, 게이트가 만드는 **일시 파일만** 자기 자신을 무시하게 한다.
@@ -118,7 +152,7 @@ _ml_seed_gitignore() {
     if [ -s "$f" ] && [ -n "$(tail -c1 "$f" 2>/dev/null)" ]; then
         printf '\n' >> "$f" 2>/dev/null || return 0
     fi
-    for p in .gitignore dod.sh .dod-gate-attempts .review-ledger .review-ledger.base .review-covered .review-skip; do
+    for p in .gitignore dod.sh .dod-gate-attempts .review-skip; do
         grep -qxF "$p" "$f" 2>/dev/null || printf '%s\n' "$p" >> "$f" 2>/dev/null || true
     done
 }
@@ -554,6 +588,7 @@ do_record() {
     # 그때도 읽은 내용은 input 에 담긴다.
     IFS= read -r -d '' input || true
     _cd_to_hook_cwd "$input"
+    _ml_init_state
     # 필드 이름은 런타임에서 실측했다: Skill 도구의 tool_input 은 {"skill":"simplify"} 다.
     # 훅 문서는 skill_name 이라고 적고 있어 양쪽을 다 받는다: 한쪽만 읽고 맞췄다가는
     # 원장이 영영 비어 Medium 이상 push 가 전부 막힌다(경계면 교차검증).
@@ -564,6 +599,7 @@ do_record() {
     [ -z "$skill" ] && exit 0
     skill="$(_normalize_skill "$skill")"
     mkdir -p "$(dirname "$LEDGER_REL")" 2>/dev/null || exit 0
+    mkdir -p ".mangolove" 2>/dev/null || true
     _ensure_regular_file "$LEDGER_REL" || exit 0
     _ensure_regular_file "$LEDGER_BASE_REL" || exit 0
     _ensure_regular_file "$COVERED_REL" || exit 0
@@ -688,7 +724,11 @@ _bypassed() {
     # 환경변수 우회는 mangolove 실행 **전에** export 돼 있어야 한다. 훅은 Claude Code
     # 프로세스의 환경에서 뜨므로, 명령 앞에 붙인 VAR=1 은 훅에 닿지 않는다. 세션 도중
     # 우회해야 할 때를 위해 에이전트가 직접 쓸 수 있는 파일 경로를 둔다(1회용, 감사됨).
-    if [ -f "$SKIP_REL" ]; then
+    if [ -f "$SKIP_REL" ] && _ml_tracked "$SKIP_REL"; then
+        echo "MangoLove review gate: .mangolove/.review-skip 이 git 에 추적되고 있습니다." >&2
+        echo "  우회 파일은 추적될 수 없습니다. 브랜치가 실어 온 위조본으로 보고 무시합니다." >&2
+        echo "  의도한 우회라면 git rm --cached 후 다시 touch 하세요." >&2
+    elif [ -f "$SKIP_REL" ]; then
         rm -f "$SKIP_REL" 2>/dev/null || true
         echo "MangoLove review gate: .mangolove/.review-skip 으로 1회 우회 (감사 대상)" >&2
         # 우회는 차단이 아니다. block 으로 적으면 "리뷰 미실행 push 차단" 수치가 부풀어,
@@ -739,6 +779,7 @@ do_pretooluse() {
 
     _cd_to_hook_cwd "$input"
     git rev-parse --git-dir >/dev/null 2>&1 || exit 0
+    _ml_init_state
 
     _bypassed && exit 0
 
@@ -771,6 +812,7 @@ do_prepush() {
     local from_git=0 lref lsha rref rsha base range blocked=0 saw=0
     [ "$#" -ge 2 ] && from_git=1
     git rev-parse --git-dir >/dev/null 2>&1 || exit 0
+    _ml_init_state
     _bypassed && exit 0
 
     # lref/rref 는 git 이 주는 4개 필드 중 쓰지 않는 두 개다. 이름을 남겨 두어야
@@ -805,6 +847,7 @@ do_prepush() {
 # ── status: 사람용 진단. 인자가 없으면 게이트가 실제로 볼 push 범위를 그대로 보여준다.
 do_status() {
     local ref="${1:-}"
+    _ml_init_state
     # _range_signature 는 A...B 만 이해한다. sha 나 --working 을 넘기면 서명이 비어
     # 모든 스킬이 충족으로 보이는 **거짓 PASS** 가 난다. 아예 받지 않는다.
     case "$ref" in

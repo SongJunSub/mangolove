@@ -141,7 +141,7 @@ _run_all_reviews() {
 @test "gate: 원장에 필수 스킬이 기록돼 있고 그 내용이면 통과한다" {
     _commit_external_api
     _run_all_reviews
-    [ -f "$REPO_DIR/.mangolove/.review-ledger" ]
+    [ -f "$REPO_DIR/.git/mangolove/.review-ledger" ]
     _gate "git push"
     [ "$status" -eq 0 ]
 }
@@ -380,7 +380,7 @@ _run_all_reviews() {
     printf '%s' "$(_json_skill simplify)" | bash "$GATE" record
     printf '%s' "$(_json_skill simplify)" | bash "$GATE" record
     printf '%s' "$(_json_skill "code-review:simplify")" | bash "$GATE" record
-    [ "$(grep -cx simplify "$REPO_DIR/.mangolove/.review-ledger")" -eq 1 ]
+    [ "$(grep -cx simplify "$REPO_DIR/.git/mangolove/.review-ledger")" -eq 1 ]
 }
 
 @test "record: tool_input 의 skill 과 skill_name 을 모두 받는다 (문서와 런타임이 다르다)" {
@@ -388,23 +388,23 @@ _run_all_reviews() {
     # 전부 막힌다. 실측한 런타임 필드는 skill, 훅 문서가 적은 것은 skill_name 이다.
     printf '%s' "$(_json_skill simplify)"        | bash "$GATE" record
     printf '%s' "$(_json_skill_alt code-review)" | bash "$GATE" record
-    grep -qx simplify    "$REPO_DIR/.mangolove/.review-ledger"
-    grep -qx code-review "$REPO_DIR/.mangolove/.review-ledger"
+    grep -qx simplify    "$REPO_DIR/.git/mangolove/.review-ledger"
+    grep -qx code-review "$REPO_DIR/.git/mangolove/.review-ledger"
 }
 
 @test "record: 리뷰가 본 내용을 커버리지 파일에 blob 해시로 남긴다" {
     echo changed > "$REPO_DIR/seed.txt"
     printf '%s' "$(_json_skill simplify)" | bash "$GATE" record
-    [ -f "$REPO_DIR/.mangolove/.review-covered" ]
+    [ -f "$REPO_DIR/.git/mangolove/.review-covered" ]
     local h; h=$(git -C "$REPO_DIR" hash-object "$REPO_DIR/seed.txt")
-    grep -qF "$h" "$REPO_DIR/.mangolove/.review-covered"
+    grep -qF "$h" "$REPO_DIR/.git/mangolove/.review-covered"
 }
 
 @test "record: 커버리지는 중복 없이 집합으로 유지된다" {
     echo changed > "$REPO_DIR/seed.txt"
     printf '%s' "$(_json_skill simplify)"    | bash "$GATE" record
     printf '%s' "$(_json_skill code-review)" | bash "$GATE" record
-    local cov="$REPO_DIR/.mangolove/.review-covered"
+    local cov="$REPO_DIR/.git/mangolove/.review-covered"
     [ "$(sort -u "$cov" | wc -l | tr -d ' ')" -eq "$(wc -l < "$cov" | tr -d ' ')" ]
 }
 
@@ -413,9 +413,10 @@ _run_all_reviews() {
     # 단, .mangolove/ 를 통째로 무시하면 안 된다: .mangolove/hooks/ 는 버전관리 감사 대상이다.
     printf '%s' "$(_json_skill simplify)" | bash "$GATE" record
     [ -f "$REPO_DIR/.mangolove/.gitignore" ]
-    grep -qx '.review-ledger' "$REPO_DIR/.mangolove/.gitignore"
-    grep -qx '.review-covered' "$REPO_DIR/.mangolove/.gitignore"
+    grep -qx '.review-skip' "$REPO_DIR/.mangolove/.gitignore"
     grep -qx 'dod.sh' "$REPO_DIR/.mangolove/.gitignore"
+    # 원장과 커버리지는 이제 .git/ 아래라 무시 목록에 없어야 한다(브랜치가 실어 올 수 없다).
+    ! grep -qx '.review-ledger' "$REPO_DIR/.mangolove/.gitignore"
     # 자기 자신도 무시해야 사용자 레포에 요청하지 않은 파일이 생기지 않는다.
     grep -qx '.gitignore' "$REPO_DIR/.mangolove/.gitignore"
     # 통째 무시(*)는 안 된다: .mangolove/hooks/ 는 버전관리 감사 대상이다.
@@ -484,7 +485,7 @@ _run_all_reviews() {
     echo changed > "$REPO_DIR/seed.txt"
     printf '%s' "$(_json_skill simplify)" | bash "$GATE" record
     local h; h=$(git -C "$REPO_DIR" hash-object "$REPO_DIR/seed.txt")
-    grep -qxF "simplify	$h	seed.txt" "$REPO_DIR/.mangolove/.review-covered"
+    grep -qxF "simplify	$h	seed.txt" "$REPO_DIR/.git/mangolove/.review-covered"
 }
 
 # ── 코드/보안 리뷰가 찾은 우회들 (전부 조용한 통과였다) ────────
@@ -554,12 +555,12 @@ _run_all_reviews() {
     # 리뷰 스킬 한 번으로 그 파일에 공격자가 정한 경로 문자열이 append 된다.
     local target="$TEST_DIR/outside.txt"
     echo "원본" > "$target"
-    mkdir -p "$REPO_DIR/.mangolove"
-    ln -s "$target" "$REPO_DIR/.mangolove/.review-covered"
+    mkdir -p "$REPO_DIR/.git/mangolove"
+    ln -s "$target" "$REPO_DIR/.git/mangolove/.review-covered"
     echo changed > "$REPO_DIR/seed.txt"
     printf '%s' "$(_json_skill simplify)" | bash "$GATE" record
     [ "$(cat "$target")" = "원본" ]
-    [ ! -L "$REPO_DIR/.mangolove/.review-covered" ]
+    [ ! -L "$REPO_DIR/.git/mangolove/.review-covered" ]
 }
 
 # ── prepush: git 이 주는 ref 목록을 쓴다 ───────────────────────
@@ -636,8 +637,8 @@ OLD
     _gate "git push"
     [ "$status" -eq 2 ]
     # a.js 는 covered, b.js 는 아니다
-    grep -q "	a.js\$" "$REPO_DIR/.mangolove/.review-covered"
-    ! grep -q "	b.js\$" "$REPO_DIR/.mangolove/.review-covered"
+    grep -q "	a.js\$" "$REPO_DIR/.git/mangolove/.review-covered"
+    ! grep -q "	b.js\$" "$REPO_DIR/.git/mangolove/.review-covered"
 }
 
 @test "범위: 짚은 경로를 전부 덮으면 통과한다" {
@@ -654,7 +655,7 @@ OLD
     _commit_external_api
     local lvl
     for lvl in low medium high max xhigh ultra; do
-        rm -f "$REPO_DIR/.mangolove/.review-ledger" "$REPO_DIR/.mangolove/.review-covered"
+        rm -f "$REPO_DIR/.git/mangolove/.review-ledger" "$REPO_DIR/.git/mangolove/.review-covered"
         _run_all_reviews "$lvl"
         _gate "git push"
         [ "$status" -eq 0 ] || { echo "강도 '$lvl' 에서 실패"; return 1; }
@@ -732,8 +733,8 @@ OLD
     git -C "$REPO_DIR" commit -qm quoted
     _gate "git push"
     [ "$status" -eq 2 ]
-    grep -q "	a b.js\$"  "$REPO_DIR/.mangolove/.review-covered"
-    ! grep -q "	other.js\$" "$REPO_DIR/.mangolove/.review-covered"
+    grep -q "	a b.js\$"  "$REPO_DIR/.git/mangolove/.review-covered"
+    ! grep -q "	other.js\$" "$REPO_DIR/.git/mangolove/.review-covered"
 }
 
 @test "범위: JSON 이스케이프된 개행으로 나열한 경로들을 인식한다" {
@@ -745,7 +746,7 @@ OLD
     git -C "$REPO_DIR" commit -qm nl
     _gate "git push"
     [ "$status" -eq 2 ]
-    ! grep -q "	c.js\$" "$REPO_DIR/.mangolove/.review-covered"
+    ! grep -q "	c.js\$" "$REPO_DIR/.git/mangolove/.review-covered"
 }
 
 @test "범위: 스킴 없는 PR 링크도 원격 참조로 본다" {
@@ -818,8 +819,8 @@ OLD
     git -C "$REPO_DIR" commit -qm decoy
     _gate "git push"
     [ "$status" -eq 2 ]
-    [ ! -s "$REPO_DIR/.mangolove/.review-covered" ] || \
-        ! grep -q "1952/decoy.js" "$REPO_DIR/.mangolove/.review-covered"
+    [ ! -s "$REPO_DIR/.git/mangolove/.review-covered" ] || \
+        ! grep -q "1952/decoy.js" "$REPO_DIR/.git/mangolove/.review-covered"
 }
 
 @test "보안: 브랜치 이름과 같은 디렉토리가 있어도 브랜치 리뷰로 본다" {
@@ -832,8 +833,8 @@ OLD
     _gate "git push"
     [ "$status" -eq 2 ]
     # 차단만으로는 부족하다(real.js 때문에 어차피 막힌다). decoy 가 covered 면 안 된다.
-    [ ! -s "$REPO_DIR/.mangolove/.review-covered" ] || \
-        ! grep -q "main/decoy.js" "$REPO_DIR/.mangolove/.review-covered"
+    [ ! -s "$REPO_DIR/.git/mangolove/.review-covered" ] || \
+        ! grep -q "main/decoy.js" "$REPO_DIR/.git/mangolove/.review-covered"
 }
 
 @test "보안: __all__ 이라는 이름의 파일이 sentinel 과 충돌하지 않는다" {
@@ -847,8 +848,8 @@ OLD
     git -C "$REPO_DIR" commit -qm sentinel
     _gate "git push"
     [ "$status" -eq 2 ]
-    grep -q "	__all__\$"  "$REPO_DIR/.mangolove/.review-covered"
-    ! grep -q "	other.js\$" "$REPO_DIR/.mangolove/.review-covered"
+    grep -q "	__all__\$"  "$REPO_DIR/.git/mangolove/.review-covered"
+    ! grep -q "	other.js\$" "$REPO_DIR/.git/mangolove/.review-covered"
 }
 
 # ── 차단 사유 분류 (효능 측정의 근거) ──────────────────────────
@@ -903,4 +904,51 @@ _block_kinds() { grep -o '"kind":"[a-z]*"' "$MANGOLOVE_DIR/efficacy/proj.jsonl" 
     _run_all_reviews "high --fix"
     _gate "git push"
     [ "$status" -eq 0 ]
+}
+
+# ── 게이트 상태 위조 (Critical) ────────────────────────────────
+#
+# .gitignore 는 git add -f 를 막지 못한다. 상태가 워킹트리에 있으면 적대적 브랜치가
+# 위조본을 커밋해 두고, 그 브랜치를 checkout 한 사람에게 그대로 배달할 수 있다.
+# 터미널 경로는 세션 ID 가 없어 디스크의 원장을 그대로 믿으므로 리뷰 0회로 통과했다.
+
+@test "위조: 브랜치가 실어 온 원장은 터미널 push 를 통과시키지 못한다" {
+    _commit_external_api
+    local sha base
+    # 위조본을 추적되게 커밋한다
+    mkdir -p "$REPO_DIR/.mangolove"
+    printf 'simplify\ncode-review\nsecurity-review\n' > "$REPO_DIR/.mangolove/.review-ledger"
+    : > "$REPO_DIR/.mangolove/.review-covered"
+    local f h s
+    for f in client.js; do
+        h=$(git -C "$REPO_DIR" hash-object "$REPO_DIR/$f")
+        for s in simplify code-review security-review; do
+            printf '%s\t%s\t%s\n' "$s" "$h" "$f" >> "$REPO_DIR/.mangolove/.review-covered"
+        done
+    done
+    git -C "$REPO_DIR" add -f .mangolove/.review-ledger .mangolove/.review-covered
+    git -C "$REPO_DIR" commit -qm forged
+    sha=$(git -C "$REPO_DIR" rev-parse HEAD)
+    base=$(git -C "$REPO_DIR" rev-parse origin/main)
+    run bash -c "cd '$REPO_DIR' && printf 'refs/heads/main %s refs/heads/main %s\n' '$sha' '$base' | bash '$GATE' prepush origin /tmp/fake.git"
+    [ "$status" -eq 1 ]
+}
+
+@test "위조: 게이트 상태는 워킹트리가 아니라 git-dir 아래에 쓴다" {
+    printf '%s' "$(_json_skill simplify)" | bash "$GATE" record
+    [ -f "$REPO_DIR/.git/mangolove/.review-ledger" ]
+    [ ! -f "$REPO_DIR/.mangolove/.review-ledger" ]
+}
+
+@test "위조: 추적된 .review-skip 은 우회로 인정하지 않는다" {
+    _commit_external_api
+    mkdir -p "$REPO_DIR/.mangolove"
+    touch "$REPO_DIR/.mangolove/.review-skip"
+    git -C "$REPO_DIR" add -f .mangolove/.review-skip
+    git -C "$REPO_DIR" commit -qm "forged skip"
+    _gate "git push"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"추적되고 있습니다"* ]]
+    # 소비되지 않아야 한다(추적 파일을 지우면 워킹트리가 더러워진다)
+    [ -f "$REPO_DIR/.mangolove/.review-skip" ]
 }

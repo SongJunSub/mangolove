@@ -121,7 +121,7 @@ _ml_seed_gitignore() {
     if [ -s "$f" ] && [ -n "$(tail -c1 "$f" 2>/dev/null)" ]; then
         printf '\n' >> "$f" 2>/dev/null || return 0
     fi
-    for p in .gitignore dod.sh .dod-gate-attempts .review-ledger .review-ledger.base .review-covered .review-skip; do
+    for p in .gitignore dod.sh .dod-gate-attempts .review-skip; do
         grep -qxF "$p" "$f" 2>/dev/null || printf '%s\n' "$p" >> "$f" 2>/dev/null || true
     done
 }
@@ -226,6 +226,17 @@ fi
 #    그 사이 다른 세션의 Stop 이 발화하면 같은 빌드를 한 번 더 돌린 뒤 소유권까지 가져간다
 #    (그러면 정작 DoD 를 쓴 세션이 자기 DoD 를 남의 것으로 보고 영영 건너뛴다).
 _write_state "$ATTEMPTS" "$TOTAL"
+# 추적되는 dod.sh 는 브랜치가 실어 온 것이다. 이 파일은 세션이 만드는 일시 상태라 절대
+# 추적되지 않으며, 추적된 사본은 곧 **적대적 브랜치를 checkout 한 사람이 이 훅으로
+# 임의 코드를 실행하게 되는 것**을 뜻한다(.gitignore 는 git add -f 를 막지 못한다).
+if git ls-files --error-unmatch -- "$DOD" >/dev/null 2>&1; then
+    {
+        echo "MangoLove DoD gate: ${DOD} 가 git 에 추적되고 있습니다. 실행하지 않습니다."
+        echo "  DoD 스크립트는 세션이 만드는 일시 파일이라 추적될 수 없습니다."
+        echo "  브랜치가 실어 온 것으로 보입니다: git rm --cached '${DOD}' 로 걷어내세요."
+    } >&2
+    exit 0
+fi
 out="$(bash "$DOD" 2>&1)"; rc=$?
 if [ "$rc" -eq 0 ]; then
     rm -f "$DOD" "$STATE"

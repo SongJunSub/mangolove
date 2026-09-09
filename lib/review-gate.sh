@@ -381,7 +381,7 @@ _tokenize_args() {
 COVERAGE_MODE=""      # all | none | paths
 COVERAGE_PATHS=()     # paths 일 때만 채운다
 _coverage_scope() {
-    local args root refs tok
+    local args root refs tok saw_pr=0 saw_num=0
     COVERAGE_MODE=""; COVERAGE_PATHS=()
     args="$(_json_unescape "${1:-}")"
     [ -z "${args//[[:space:]]/}" ] && { COVERAGE_MODE="all"; return 0; }
@@ -402,6 +402,7 @@ $(git for-each-ref --format='%(refname:short)' refs/heads refs/tags refs/remotes
         # 커버한다(실증됨). 스킬이 실제로 갖는 비-범위 플래그만 적는다.
         case "$tok" in
             --|--fix|--comment|--post|--no-post) continue ;;
+            --*) COVERAGE_MODE="none"; return 0 ;;   # 대상을 품을 수 있다(--pr=1952)
         esac
 
         # 원격 참조 판정을 **경로 검사보다 먼저** 한다. 순서를 뒤집으면 이름이 겹치는 로컬
@@ -409,6 +410,18 @@ $(git for-each-ref --format='%(refname:short)' refs/heads refs/tags refs/remotes
         # `/code-review 1952`(원격 PR 리뷰)가 그 디렉토리를 봤다고 기록된다(실증됨).
         case "$tok" in *://*) COVERAGE_MODE="none"; return 0 ;; esac
         if [[ "$tok" =~ ^[0-9]+$ ]]; then COVERAGE_MODE="none"; return 0; fi   # PR 번호
+        case "$tok" in                                                          # crs#1891, #423
+            *'#'[0-9]*) case "${tok##*#}" in *[!0-9]*) ;; *) COVERAGE_MODE="none"; return 0 ;; esac ;;
+        esac
+        # 경로로 풀리지 않는 /pull/ /merge_requests/ 는 원격 링크다(스킴이 없어도).
+        # 실재하는 docs/pull/x 는 아래 경로 검사에서 먼저 잡히므로 여기 오지 않는다.
+        if [ ! -e "$tok" ]; then
+            case "$tok" in */pull/*|*/merge_requests/*) COVERAGE_MODE="none"; return 0 ;; esac
+        fi
+        # PR/MR 낱말과 숫자를 품은 토큰이 함께 있으면 원격 리뷰다("크스-1952 관련 PR 검토").
+        case "$tok" in PR|pr|Pr|MR|mr|Mr) saw_pr=1 ;; esac
+        case "$tok" in *[0-9]*) [ -e "$tok" ] || saw_num=1 ;; esac
+        if [ "$saw_pr" = 1 ] && [ "$saw_num" = 1 ]; then COVERAGE_MODE="none"; return 0; fi
         case "
 $refs
 " in *"
@@ -422,21 +435,27 @@ $tok
             /*) case "$tok" in
                     "$root"|"$root"/*|"$PWD"|"$PWD"/*)
                         if [ -e "$tok" ]; then COVERAGE_PATHS+=("$tok"); continue; fi ;;
-                esac ;;
+                    # 레포 밖 절대경로 = 남의 코드를 봤다. 산문 낱말과 달리 형태로 확정된다.
+                    *) COVERAGE_MODE="none"; return 0 ;;
+                esac
+                continue ;;
             *)  if [ -e "$tok" ]; then COVERAGE_PATHS+=("$tok"); continue; fi ;;
         esac
 
-        # 강도 지정만 범위를 좁히지 않는 것으로 인정한다. 닫힌 목록인 것이 의도다:
-        # 스킬에 새 강도가 생기면 이 목록에 없어 모르는 토큰이 되고, 그러면 **더 엄격해진다**.
-        case "$tok" in
-            low|medium|high|max|xhigh|ultra) continue ;;
-        esac
-
-        # 모르는 토큰이 하나라도 있으면 이 호출이 무엇을 봤는지 코드가 알 수 없다.
-        # **기본값을 all 로 두지 않는다.** "해석하지 않겠다"는 안전한 쪽으로 두겠다는 뜻이지
-        # 최대로 믿겠다는 뜻이 아니다. 과소 인정은 눈에 보이고 되돌릴 수 있지만(경로를 짚거나
-        # 강도만 주고 다시 돌리면 된다), 과대 인정은 조용하고 감사 기록도 남지 않는다.
-        COVERAGE_MODE="none"; return 0
+        # 그 밖의 토큰(강도 지정, 산문 낱말)은 범위를 좁히지도 넓히지도 않는다. 무시한다.
+        #
+        # 한때 "모르는 토큰이 하나라도 있으면 아무 것도 인정하지 않는다"로 두었다. 그 결정은
+        # 데이터 없이 내린 것이었고, 실측이 뒤집었다: 실사용 args 35종 중 33종(94%)이
+        # 커버리지 0 이 됐다. 에이전트는 리뷰 스킬을 한국어 서술로 부른다
+        # ("modules/.../X.sql 의 직전 커밋 변경분만"). 실재하는 경로를 짚었는데도 `의`,
+        # `직전` 같은 낱말 때문에 통째로 무효가 되어, 게이트가 충족 불가능해지고 모든 차단이
+        # 사용자 호출로 끝났다.
+        #
+        # 대신 **명확히 다른 대상을 가리키는 신호**(PR 번호, URL, git ref, 레포 밖 절대경로,
+        # 값을 품은 --옵션)만 위에서 전체를 무효화한다. 그것들은 형태로 확정되지 알아맞히는
+        # 것이 아니다. 남는 한계: "lib 는 빼고" 같은 부정문의 경로는 여전히 커버 대상으로
+        # 읽힌다. 산문의 의미를 해석하지 않는 한 못 막는다. 그 과대 인정은 **짚은 경로 하나**로
+        # 제한되고, 범위의 나머지는 여전히 미검토로 남는다.
     done <<TOKENS
 $(_tokenize_args "$args")
 TOKENS

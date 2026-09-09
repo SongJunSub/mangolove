@@ -811,9 +811,10 @@ _record_fail_open() {
 }
 
 # 우회 처리. 통과시키면 0, 우회가 아니면 1. (pretooluse 와 prepush 가 공유한다.)
+# $1 = 1 이면 마커를 소비한다(이 호출이 마지막 게이트라는 뜻).
 _bypassed() {
+    local _consume_skip="${1:-1}"
     local rec="$GATE_DIR/efficacy-recorder.sh"
-    local _rec_unused
     if [ "${MANGOLOVE_SKIP_REVIEW:-}" = "1" ]; then
         echo "MangoLove review gate: MANGOLOVE_SKIP_REVIEW=1 (게이트 우회, 감사 대상)" >&2
         # 문서가 "감사됨"이라 적어놓고 정작 원장에 남기지 않았다. 세 우회 중 이것만
@@ -830,7 +831,11 @@ _bypassed() {
         echo "  의도한 우회라면 git rm --cached 후 다시 touch 하세요." >&2
     elif [ -f "$SKIP_REL" ]; then
         local why; why="$(head -c 400 "$SKIP_REL" 2>/dev/null | tr '\n' ' ')"
-        rm -f "$SKIP_REL" 2>/dev/null || true
+        # 마커는 **마지막 게이트가** 소비한다. 두 게이트가 직렬로 걸려 있는데(에이전트
+        # 경로의 PreToolUse, 그리고 터미널 경로의 .githooks/pre-push) 앞쪽이 지워 버리면
+        # 뒤쪽이 근거 없이 다시 막아 한 번의 공유가 두 번의 우회를 요구하게 된다.
+        # pre-push 가 걸려 있지 않은 레포에서는 여기가 마지막이므로 여기서 지운다.
+        if [ "$_consume_skip" = "1" ]; then rm -f "$SKIP_REL" 2>/dev/null || true; fi
         echo "MangoLove review gate: .mangolove/.review-skip 으로 1회 우회 (감사 대상)" >&2
         [ -n "${why// /}" ] && echo "  근거: $why" >&2
         # 우회는 차단이 아니다. block 으로 적으면 "리뷰 미실행 push 차단" 수치가 부풀어,
@@ -895,7 +900,11 @@ do_pretooluse() {
     git rev-parse --git-dir >/dev/null 2>&1 || exit 0
     _ml_init_state
 
-    _bypassed && exit 0
+    # pre-push 훅이 걸려 있으면 그쪽이 마지막 게이트다. 마커를 여기서 소비하지 않는다.
+    local hooks consume=1
+    hooks="$(git rev-parse --git-path hooks 2>/dev/null)"
+    [ -n "$hooks" ] && [ -x "$hooks/pre-push" ] && consume=0
+    _bypassed "$consume" && exit 0
 
     # 범위를 못 정하거나 impact 계산이 실패하면 fail-open: 게이트가 작업을 인질로 잡지 않는다.
     # 다만 조용히 넘기지 않는다(위 _record_fail_open 주석).

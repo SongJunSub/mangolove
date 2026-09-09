@@ -93,7 +93,7 @@ description: "MangoLove Large 트랙 구현~완료 단계에서 사용한다. �
   - Large Track: `security-review` 결과를 보안/인가 전문가 서브에이전트 리뷰와 병합하여 중복 제거
   - Medium Track: DB/인증/외부 API 신호가 있을 때만 필수이며, 그때는 `security-review` 가 보안 관점 리뷰를 대체한다(별도 보안 서브에이전트 불필요)
 
-이 목록은 코어의 「트랙별 필수 리뷰」 표를 따르고, `lib/review-gate.sh` 가 커밋 시점에 실행 여부를 대조한다. 미실행이면 커밋이 차단되므로, 생략하려면 커밋 전에 물어야 한다. 우회 경로는 `.mangolove/.review-skip`(1회용) 하나뿐이고 효능 원장에 기록된다.
+이 목록은 코어의 「트랙별 필수 리뷰」 표를 따르고, `lib/review-gate.sh` 가 push 시점에 실행 여부를 대조한다. 미실행이면 push 가 차단되므로, 생략하려면 push 전에 물어야 한다. 우회 경로는 `.mangolove/.review-skip`(1회용) 하나뿐이고 효능 원장에 기록된다.
 
 두 스킬에서 발견된 이슈는 서브에이전트 리뷰 이슈와 동일한 심각도 분류(Critical/Major/Minor)를 적용한다.
 

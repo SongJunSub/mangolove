@@ -147,7 +147,7 @@ mangolove impact            # 워킹트리의 결정적 트랙(track_floor)
 
 ### 트랙별 필수 리뷰 (단일 출처)
 
-트랙별로 **반드시 실행되는 스킬**은 다음이 전부다. 시스템 프롬프트와 스킬 문서가 이 표와 다르면 이 표를 따른다. `lib/review-gate.sh` 의 `required_skills` 가 같은 표를 코드로 강제하며, 커밋 시점에 미실행이면 커밋이 차단된다.
+트랙별로 **반드시 실행되는 스킬**은 다음이 전부다. 시스템 프롬프트와 스킬 문서가 이 표와 다르면 이 표를 따른다. `lib/review-gate.sh` 의 `required_skills` 가 같은 표를 코드로 강제하며, **push 시점에** 미실행이면 push 가 차단된다.
 
 | 트랙 | 필수 스킬 |
 |------|----------|
@@ -549,7 +549,7 @@ Trivial/Small 트랙은 위의 트랙 표만으로 충분하다 (구현 → 빌�
 |---------------|-----------------|
 | "린트/테스트 통과 후 커밋" | git pre-commit hook 또는 CI required check |
 | "PR 전 보안 리뷰 수행" | CI에서 보안 스캐너(/security-review 자동화, gitleaks, semgrep 등) |
-| "트랙별 필수 리뷰를 반드시 실행" | **구현됨**: `lib/review-gate.sh`: PostToolUse(Skill)가 실제 실행된 스킬을 원장에 남기고, PreToolUse(git commit)가 코드로 계산한 트랙과 대조해 차단 |
+| "트랙별 필수 리뷰를 반드시 실행" | **구현됨**: `lib/review-gate.sh`: PostToolUse(Skill)가 실제 실행된 스킬과 그때 본 내용을 원장에 남기고, PreToolUse(git push)와 `.githooks/pre-push` 가 코드로 계산한 트랙과 대조해 차단 |
 | "민감 정보 커밋 금지" | gitleaks, trufflehog의 pre-commit hook |
 | "DB 마이그레이션 dry-run 후 실행" | CI에서 `migrate plan` 후 사람 승인 게이트 |
 | "최소 권한 토큰 확인" | IAM 정책 검증 스크립트, terraform plan에 IAM diff 노출 |

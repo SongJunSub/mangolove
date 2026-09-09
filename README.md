@@ -19,13 +19,15 @@ MangoLove는 Claude Code를 감쌉니다. 4-track 방법론을 시스템 프롬�
 | **시크릿 커밋** | 미검사 | 커밋 시점에 시크릿 스캔 게이트로 **차단** |
 | **작업 분류** | 없음 | **Trivial / Small / Medium / Large** 자동 분류, 비례 워크플로우 |
 | **코드 리뷰** | 요청해야 수행 | Large 트랙에서 **find → verify** 탈상관 멀티에이전트 리뷰 |
-| **리뷰 누락** | 알 수 없음 | Medium 이상 변경에서 필수 리뷰 미실행이면 **커밋 차단**(Stop/PreToolUse 훅) |
+| **리뷰 누락** | 알 수 없음 | Medium 이상 변경에서 필수 리뷰 미실행이면 **push 차단**(PreToolUse 훅 + `.githooks/pre-push`). 로컬 커밋은 막지 않습니다 |
 | **품질 측정** | 측정 안 됨 | `mangolove efficacy`(게이트가 막은 것 + 넘긴 것 + under-triage), `mangolove eval`(결정적 부품 점수) |
 | **오버헤드** | 0 | 훅 몇 개 + 크고 위험한 변경에 더 무거운 절차(사소한 작업은 가볍게 유지) |
 
 **`claude`**는 의견도 오버헤드도 0인 즉석 탐색에, **`mangolove`**는 안전망, 일관된 절차, 측정 가능한 품질이 중요한 실제 프로젝트 작업에 쓰세요.
 
-> **리뷰 게이트의 경계**: 리뷰 게이트는 품질 장치이지 보안 경계가 아닙니다. 원장은 `PostToolUse(Skill)` 훅이 남기므로 "정말 스킬이 실행됐는가"는 결정적이지만, "그 스킬이 실제로 리뷰를 했는가"까지는 보장하지 않습니다. 프로젝트에 `simplify` 라는 이름의 빈 스킬을 두면 게이트는 통과합니다. 의도적 우회를 막는 장치가 아니라, 잊고 지나가는 것을 막는 장치입니다. 명시적 우회는 `MANGOLOVE_SKIP_REVIEW=1` 로 감사 가능하게 남기세요.
+> **리뷰 게이트의 경계**: 게이트는 `git push` 와 `gh pr create` 에서 발화하고, 판정 범위는 `<upstream>...HEAD`(세 점) 입니다. 이미 upstream 에 있는 내용은 merge base 가 자동으로 빼주므로 머지 커밋 특별처리가 없고, upstream 에 없는 브랜치를 머지하면 그 내용은 범위에 남습니다. 터미널에서 직접 push 하는 경로는 `.githooks/pre-push` 가 같은 판정을 재사용해 막습니다(레포당 1회 `git config core.hooksPath .githooks`).
+>
+> 리뷰 게이트는 품질 장치이지 보안 경계가 아닙니다. 커버리지는 스킬이 실행된 시점의 변경 파일 전체를 그 스킬이 본 것으로 기록합니다. 즉 그때 열려 있던 무관한 파일까지 함께 covered 로 잡힙니다. 훅이 볼 수 있는 정보의 한계이며, 커버리지를 실제보다 넓게(느슨하게) 잡는 방향입니다. 원장은 `PostToolUse(Skill)` 훅이 남기므로 "정말 스킬이 실행됐는가"는 결정적이지만, "그 스킬이 실제로 리뷰를 했는가"까지는 보장하지 않습니다. 프로젝트에 `simplify` 라는 이름의 빈 스킬을 두면 게이트는 통과합니다. 의도적 우회를 막는 장치가 아니라, 잊고 지나가는 것을 막는 장치입니다. 명시적 우회는 `MANGOLOVE_SKIP_REVIEW=1` 로 감사 가능하게 남기세요.
 
 > **정직한 경계**: 방법론은 *프롬프트*로 주입됩니다. 즉 모델에게 따르라고 *요청*하는 것입니다. **게이트, 가드는 결정적**(exit code로 실제 차단)이지만, 산문 규율은 확률적으로 지켜집니다. MangoLove는 그 규율을 기본값으로 만들고 단단한 결정적 안전망을 더하는 것이지, 모델을 무오류로 만들지는 않습니다. 실제로 무엇이 측정되고 무엇이 안 되는지는 `mangolove eval` 참조.
 
@@ -42,7 +44,7 @@ MangoLove는 Claude Code를 감쌉니다. 4-track 방법론을 시스템 프롬�
 | **Medium** | 새 비즈니스 로직, API 수정, 서비스 연동 | + Spec → 승인 → `/simplify` + `/code-review` |
 | **Large** | 신규 API, DB 스키마, 인증 변경, 대규모 리팩토링 | + 적대적 Spec 리뷰 → Product/Engineering 리뷰 → `/security-review` → 3인 탈상관 리뷰 |
 
-트랙별 **필수 리뷰**는 [`methodology/strict.md`](methodology/strict.md)의 「트랙별 필수 리뷰」 표가 단일 출처이고, [`lib/review-gate.sh`](lib/review-gate.sh)가 같은 표를 커밋 경계에서 코드로 강제합니다(아래 안전 게이트). 트랙 판정도 모델의 암산이 아니라 `mangolove impact`가 계산한 `track_floor`를 씁니다. 산술은 코드가, 의미론은 모델이 맡습니다.
+트랙별 **필수 리뷰**는 [`methodology/strict.md`](methodology/strict.md)의 「트랙별 필수 리뷰」 표가 단일 출처이고, [`lib/review-gate.sh`](lib/review-gate.sh)가 같은 표를 push 경계에서 코드로 강제합니다(아래 안전 게이트). 커밋은 막지 않습니다: 리뷰가 의미를 갖는 단위는 작업이 머신을 떠나는 시점입니다. 트랙 판정도 모델의 암산이 아니라 `mangolove impact`가 계산한 `track_floor`를 씁니다. 산술은 코드가, 의미론은 모델이 맡습니다.
 
 트랙은 파일 수 + 신호로 계산되고, [`lib/impact-score.sh`](lib/impact-score.sh)의 결정적 floor가 점수와 무관하게 **승격 트리거**를 강제합니다. DB 스키마 변경은 최소 **Medium**, 외부 API 연동은 최소 **Medium**, 인증 변경은 최소 **Large**. (`mangolove impact`로 임의 변경의 계산된 트랙 확인.)
 

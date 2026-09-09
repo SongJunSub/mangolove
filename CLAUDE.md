@@ -25,6 +25,8 @@
 - 커밋 메시지: 파일이 아니라 테스트가 구조적으로 못 본다. `.githooks/commit-msg` 가 맡는다.
   레포당 1회 활성화: `git config core.hooksPath .githooks`
   (이 저장소는 활성화돼 있다. 우회는 `--no-verify`, 감사 대상.)
+- 같은 `core.hooksPath` 로 `.githooks/pre-push` 도 걸린다. 리뷰 게이트를 터미널 직접 push
+  에도 적용한다(판정은 `lib/review-gate.sh prepush` 에 위임, 로직 복제 없음).
 
 ## 메서드러지 전달 구조 (개선 #1 이후)
 - 방법론 단일 출처: `methodology/strict.md`.

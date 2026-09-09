@@ -187,6 +187,37 @@ _unescape_cmd() { printf '%s' "$1" | awk '{gsub(/\\n/,"\n"); gsub(/\\t/," "); pr
 GIT_PUSH_RE='(^|[^[:alnum:]_])git([[:space:]]+-[^[:space:]]+([[:space:]]+[^-][^[:space:]]*)?)*[[:space:]]+push([[:space:]]|$)'
 GH_PR_RE='(^|[^[:alnum:]_])gh[[:space:]]+pr[[:space:]]+create([[:space:]]|$)'
 
+# heredoc 본문을 매칭 대상에서 뺀다. 게이트는 셸을 파싱하지 않고 명령 **문자열**을 보므로,
+# `python3 - <<PY ... PY` 로 넘긴 스크립트 본문에 "git push" 라는 글자가 있으면 그것을
+# 명령으로 오인해 무관한 작업을 막는다(실제로 다른 레포 작업 중에 반복해서 걸렸다).
+#
+# 다만 **셸이 소비하는 heredoc 은 벗기지 않는다**: `bash <<EOF ... EOF` 의 본문은 데이터가
+# 아니라 실행되는 코드라, 벗기면 진짜 push 가 통째로 새어 나간다. 소비하는 명령이 셸인지로
+# 가른다. 판별이 애매하면 벗기지 않는다(막는 쪽 = 안전한 쪽).
+_strip_heredocs() {
+    printf '%s\n' "$1" | awk '
+        {
+            if (in_hd) {
+                line = $0
+                if (dash) sub(/^\t+/, "", line)
+                if (line == marker) { in_hd = 0; print; next }
+                if (strip) next
+                print; next
+            }
+            if (match($0, /<<-?[ \t]*("[^"]+"|\047[^\047]+\047|[A-Za-z_][A-Za-z0-9_]*)/)) {
+                tok = substr($0, RSTART, RLENGTH)
+                dash = (tok ~ /^<<-/)
+                m = tok
+                sub(/^<<-?[ \t]*/, "", m)
+                gsub(/["\047]/, "", m)
+                marker = m
+                in_hd = 1
+                strip = ($0 ~ /(^|[^[:alnum:]_])(bash|sh|zsh|dash|ksh|eval)([ \t]|$)/) ? 0 : 1
+            }
+            print
+        }'
+}
+
 # 명령을 셸 구분자에서 쪼개 **명령 하나당 한 줄**로 만든다.
 # 줄 단위로만 보면 `git push --dry-run && git push origin main` 이 한 줄이라, 앞의
 # dry-run 만 보고 뒤의 진짜 push 를 통째로 놓친다. 쪼갠 뒤 세그먼트마다 판정한다.
@@ -205,7 +236,7 @@ _is_delete() {
 
 # 게이트 대상이 되는 push 세그먼트 하나를 출력한다(없으면 빈 출력).
 _gated_push_line() {
-    _split_segments "$1" | grep -E "$GIT_PUSH_RE|$GH_PR_RE" | while IFS= read -r seg; do
+    _split_segments "$(_strip_heredocs "$1")" | grep -E "$GIT_PUSH_RE|$GH_PR_RE" | while IFS= read -r seg; do
         case "$seg" in
             *push*)
                 if _is_dry_run "$seg" || _is_delete "$seg"; then continue; fi

@@ -952,3 +952,33 @@ _block_kinds() { grep -o '"kind":"[a-z]*"' "$MANGOLOVE_DIR/efficacy/proj.jsonl" 
     # 소비되지 않아야 한다(추적 파일을 지우면 워킹트리가 더러워진다)
     [ -f "$REPO_DIR/.mangolove/.review-skip" ]
 }
+
+# ── heredoc 오탐 (실사용을 막고 있었다) ────────────────────────
+#
+# 게이트는 셸을 파싱하지 않고 명령 문자열을 본다. 스크립트를 heredoc 으로 넘기는
+# 흔한 패턴에서 본문의 글자가 명령으로 오인돼 무관한 작업이 막혔다.
+
+@test "heredoc: python3 로 넘긴 본문 속 문자열을 명령으로 오인하지 않는다" {
+    _commit_external_api
+    _gate 'python3 - <<PYEOF\nprint("run git push later")\nPYEOF'
+    [ "$status" -eq 0 ]
+}
+
+@test "heredoc: cat 으로 파일을 쓰는 본문도 오인하지 않는다" {
+    _commit_external_api
+    _gate 'cat > doc.md <<MD\n배포는 git push 로 합니다\nMD'
+    [ "$status" -eq 0 ]
+}
+
+@test "heredoc: 셸이 소비하는 heredoc 의 push 는 여전히 잡는다" {
+    # 본문이 데이터가 아니라 실행되는 코드다. 벗기면 진짜 push 가 새어 나간다.
+    _commit_external_api
+    _gate 'bash <<SH\ngit push origin main\nSH'
+    [ "$status" -eq 2 ]
+}
+
+@test "heredoc: 본문을 벗겨도 그 뒤의 진짜 push 는 잡는다" {
+    _commit_external_api
+    _gate 'cat > doc.md <<MD\n배포는 git push 로 합니다\nMD\ngit push origin main'
+    [ "$status" -eq 2 ]
+}

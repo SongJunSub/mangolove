@@ -1149,9 +1149,68 @@ MD")"'
     ! grep -q "grep -q 'prepush' || exit 0" "$BATS_TEST_DIRNAME/../.githooks/pre-push"
 }
 
-@test "우회: 마커는 마지막 게이트가 소비한다 (한 번의 공유에 두 번 요구 금지)" {
-    # 에이전트 경로(PreToolUse)와 터미널 경로(.githooks/pre-push)가 직렬로 걸린다.
-    # 앞쪽이 마커를 지우면 뒤쪽이 근거 없이 다시 막아, 한 번 공유하는 데 우회가 두 번 든다.
+@test "우회: 앞선 게이트가 승인한 push 를 pre-push 가 이어받는다" {
+    # 게이트 둘이 직렬로 걸린다. 앞쪽이 마커를 소비하면 뒤쪽이 근거 없이 다시 막아,
+    # 한 번 공유하는 데 우회가 두 번 든다.
+    _commit_external_api
+    mkdir -p "$REPO_DIR/.mangolove"
+    printf '근거\n' > "$REPO_DIR/.mangolove/.review-skip"
+    _gate "git push"
+    [ "$status" -eq 0 ]
+    local sha base
+    sha=$(git -C "$REPO_DIR" rev-parse HEAD); base=$(git -C "$REPO_DIR" rev-parse origin/main)
+    run bash -c "cd '$REPO_DIR' && printf 'refs/heads/main %s refs/heads/main %s\n' '$sha' '$base' | bash '$GATE' prepush origin /tmp/f.git"
+    [ "$status" -eq 0 ]
+    run bash -c "cd '$REPO_DIR' && printf 'refs/heads/main %s refs/heads/main %s\n' '$sha' '$base' | bash '$GATE' prepush origin /tmp/f.git"
+    [ "$status" -eq 1 ]
+}
+
+@test "우회: 커밋을 끼워 sha 가 바뀌어도 이어받는다" {
+    # PreToolUse 는 **명령 실행 전에** 발화한다. `git add && git commit && git push` 한 줄에서
+    # 그때의 HEAD 는 실제 push 되는 sha 와 다르다. sha 를 식별자로 쓰면 여기서 깨진다.
+    _commit_external_api
+    mkdir -p "$REPO_DIR/.mangolove"
+    printf '근거\n' > "$REPO_DIR/.mangolove/.review-skip"
+    _gate "git push"
+    [ "$status" -eq 0 ]
+    echo more > "$REPO_DIR/other.txt"
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm other
+    local sha base
+    sha=$(git -C "$REPO_DIR" rev-parse HEAD); base=$(git -C "$REPO_DIR" rev-parse origin/main)
+    run bash -c "cd '$REPO_DIR' && printf 'refs/heads/main %s refs/heads/main %s\n' '$sha' '$base' | bash '$GATE' prepush origin /tmp/f.git"
+    [ "$status" -eq 0 ]
+}
+
+@test "우회: 오래된 이어받기 표시는 다음 push 를 통과시키지 않는다" {
+    # 표시가 남으면 1회용이 무제한 무료 통과가 된다. 창은 두 훅이 이어 도는 간격만 덮는다.
+    _commit_external_api
+    mkdir -p "$REPO_DIR/.mangolove"
+    printf '근거\n' > "$REPO_DIR/.mangolove/.review-skip"
+    _gate "git push"
+    [ "$status" -eq 0 ]
+    echo "$(( $(date +%s) - 300 ))" > "$REPO_DIR/.git/mangolove/.review-skip.used"
+    local sha base
+    sha=$(git -C "$REPO_DIR" rev-parse HEAD); base=$(git -C "$REPO_DIR" rev-parse origin/main)
+    run bash -c "cd '$REPO_DIR' && printf 'refs/heads/main %s refs/heads/main %s\n' '$sha' '$base' | bash '$GATE' prepush origin /tmp/f.git"
+    [ "$status" -eq 1 ]
+}
+
+@test "우회: 터미널 경로의 우회는 이어받기 표시를 남기지 않는다" {
+    # 남기면 그 다음 push 까지 무료로 통과한다. 소비할 하위 게이트가 없다.
+    _commit_external_api
+    mkdir -p "$REPO_DIR/.mangolove"
+    printf '근거\n' > "$REPO_DIR/.mangolove/.review-skip"
+    local sha base
+    sha=$(git -C "$REPO_DIR" rev-parse HEAD); base=$(git -C "$REPO_DIR" rev-parse origin/main)
+    run bash -c "cd '$REPO_DIR' && printf 'refs/heads/main %s refs/heads/main %s\n' '$sha' '$base' | bash '$GATE' prepush origin /tmp/f.git"
+    [ "$status" -eq 0 ]
+    [ ! -f "$REPO_DIR/.git/mangolove/.review-skip.used" ]
+}
+
+@test "보안: 무력화된 pre-push 훅이 있어도 우회는 1회로 끝난다" {
+    # "하위 게이트가 있으니 그쪽이 소비하겠지"로 두면, 훅 파일이 있기만 하고 게이트를
+    # 부르지 않는 경우(no-op 훅, husky 등 남의 훅) 마커가 영영 안 지워져 상시 우회가 된다.
     _commit_external_api
     mkdir -p "$REPO_DIR/.githooks"
     printf '#!/usr/bin/env bash\nexit 0\n' > "$REPO_DIR/.githooks/pre-push"
@@ -1161,21 +1220,31 @@ MD")"'
     printf '근거\n' > "$REPO_DIR/.mangolove/.review-skip"
     _gate "git push"
     [ "$status" -eq 0 ]
-    # pre-push 가 걸려 있으므로 마커는 아직 남아 있어야 한다
-    [ -f "$REPO_DIR/.mangolove/.review-skip" ]
-    # 그리고 pre-push 가 그것을 소비한다
-    local sha base
-    sha=$(git -C "$REPO_DIR" rev-parse HEAD); base=$(git -C "$REPO_DIR" rev-parse origin/main)
-    run bash -c "cd '$REPO_DIR' && printf 'refs/heads/main %s refs/heads/main %s\n' '$sha' '$base' | bash '$GATE' prepush origin /tmp/f.git"
+    [ ! -f "$REPO_DIR/.mangolove/.review-skip" ]
+}
+
+@test "보안: pre-push 자리가 디렉토리여도 우회는 1회로 끝난다" {
+    # 디렉토리는 기본 권한에 실행 비트가 있어 [ -x ] 가 참이 된다.
+    _commit_external_api
+    mkdir -p "$REPO_DIR/.githooks/pre-push"
+    git -C "$REPO_DIR" config core.hooksPath .githooks
+    mkdir -p "$REPO_DIR/.mangolove"
+    printf '근거\n' > "$REPO_DIR/.mangolove/.review-skip"
+    _gate "git push"
     [ "$status" -eq 0 ]
     [ ! -f "$REPO_DIR/.mangolove/.review-skip" ]
 }
 
-@test "우회: pre-push 가 없는 레포에서는 PreToolUse 가 소비한다" {
+@test "보안: gh pr create 는 git 훅을 거치지 않으므로 그 자리에서 소진된다" {
+    # 하위 게이트가 구조적으로 없다. 미루면 마커가 살아남아 다음 push 까지 통과시킨다.
     _commit_external_api
+    mkdir -p "$REPO_DIR/.githooks"
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$REPO_DIR/.githooks/pre-push"
+    chmod +x "$REPO_DIR/.githooks/pre-push"
+    git -C "$REPO_DIR" config core.hooksPath .githooks
     mkdir -p "$REPO_DIR/.mangolove"
     printf '근거\n' > "$REPO_DIR/.mangolove/.review-skip"
-    _gate "git push"
+    _gate "gh pr create --fill"
     [ "$status" -eq 0 ]
     [ ! -f "$REPO_DIR/.mangolove/.review-skip" ]
 }

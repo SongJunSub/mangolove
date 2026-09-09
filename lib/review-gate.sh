@@ -102,6 +102,19 @@ LEDGER_BASE_REL=".mangolove/.review-ledger.base"
 # 리뷰가 본 내용: "<스킬>\t<blob 해시>\t<경로>" 줄들. 세션 스코프.
 COVERED_REL=".mangolove/.review-covered"
 NOSCOPE_REL=".mangolove/.review-noscope"
+# 우회를 방금 썼다는 표시(찍힌 시각). 게이트 둘이 직렬로 걸리는데(에이전트 경로,
+# 터미널 경로) 앞쪽이 마커를 소비하면 뒤쪽이 근거 없이 다시 막아 한 번의 공유에 우회가
+# 두 번 든다. 시도한 대안과 그 결말:
+#   - "마지막 게이트가 소비한다": 하위 게이트가 없는 경로(gh pr create)나 실패한 push 에서
+#     마커가 살아남아 1회용이 아니게 된다. 남의 pre-push(husky 등)도 우리 것으로 셌다.
+#   - "push sha 를 식별자로": PreToolUse 는 **명령 실행 전에** 발화하므로,
+#     `git add && git commit && git push` 한 줄에서 찍히는 HEAD 가 실제 push 되는 sha 와
+#     다르다. 가장 흔한 형태에서 깨진다(실증됨).
+# 그래서 아주 좁은 시간 창으로 둔다. 남는 한계: 우회 직후 창 안에 들어온 **다른** push 도
+# 이어받는다. 창이 한 번의 git push 안에서 두 훅이 이어 도는 간격(보통 1초 미만)만
+# 덮으면 되므로 좁게 잡는다.
+USED_REL=".mangolove/.review-skip.used"
+SKIP_HANDOFF_SECONDS=20
 # 세션 도중 쓸 수 있는 1회용 우회 파일. 환경변수 우회는 훅에 닿지 않기 때문에 필요하다.
 # 이것만은 워킹트리에 남긴다: 사람이 직접 touch 하는 경로라 안내문에 적히기 때문이다.
 # 대신 추적된 사본은 신뢰하지 않는다(_ml_tracked).
@@ -116,6 +129,7 @@ _ml_init_state() {
     LEDGER_BASE_REL="$STATE_DIR/.review-ledger.base"
     COVERED_REL="$STATE_DIR/.review-covered"
     NOSCOPE_REL="$STATE_DIR/.review-noscope"
+    USED_REL="$STATE_DIR/.review-skip.used"
 }
 
 # .mangolove/ 는 프로젝트가 버전관리할 수도 있는 디렉토리다(.mangolove/hooks/ 는 감사 대상).
@@ -652,7 +666,7 @@ _drop_stale_ledger() {
     [ -f "$LEDGER_BASE_REL" ] && base="$(cat "$LEDGER_BASE_REL" 2>/dev/null)"
     b_session="${base%%	*}"
     [ "$b_session" = "$session" ] && return 0
-    rm -f "$LEDGER_REL" "$LEDGER_BASE_REL" "$COVERED_REL" "$NOSCOPE_REL" 2>/dev/null || true
+    rm -f "$LEDGER_REL" "$LEDGER_BASE_REL" "$COVERED_REL" "$NOSCOPE_REL" "$USED_REL" 2>/dev/null || true
 }
 
 # ── 정책 단일 출처 ──────────────────────────────────────────────
@@ -811,9 +825,7 @@ _record_fail_open() {
 }
 
 # 우회 처리. 통과시키면 0, 우회가 아니면 1. (pretooluse 와 prepush 가 공유한다.)
-# $1 = 1 이면 마커를 소비한다(이 호출이 마지막 게이트라는 뜻).
 _bypassed() {
-    local _consume_skip="${1:-1}"
     local rec="$GATE_DIR/efficacy-recorder.sh"
     if [ "${MANGOLOVE_SKIP_REVIEW:-}" = "1" ]; then
         echo "MangoLove review gate: MANGOLOVE_SKIP_REVIEW=1 (게이트 우회, 감사 대상)" >&2
@@ -831,11 +843,12 @@ _bypassed() {
         echo "  의도한 우회라면 git rm --cached 후 다시 touch 하세요." >&2
     elif [ -f "$SKIP_REL" ]; then
         local why; why="$(head -c 400 "$SKIP_REL" 2>/dev/null | tr '\n' ' ')"
-        # 마커는 **마지막 게이트가** 소비한다. 두 게이트가 직렬로 걸려 있는데(에이전트
-        # 경로의 PreToolUse, 그리고 터미널 경로의 .githooks/pre-push) 앞쪽이 지워 버리면
-        # 뒤쪽이 근거 없이 다시 막아 한 번의 공유가 두 번의 우회를 요구하게 된다.
-        # pre-push 가 걸려 있지 않은 레포에서는 여기가 마지막이므로 여기서 지운다.
-        if [ "$_consume_skip" = "1" ]; then rm -f "$SKIP_REL" 2>/dev/null || true; fi
+        # 소비는 항상 여기서 한다. 뒤 게이트는 위 USED_REL 주석의 시간 창으로 이어받는다.
+        rm -f "$SKIP_REL" 2>/dev/null || true
+        # 상태 디렉토리는 record 만 만든다. 리뷰를 한 번도 안 돌린 세션에서도 우회는 쓰인다.
+        mkdir -p "$(dirname "$USED_REL")" 2>/dev/null || true
+        _ensure_regular_file "$USED_REL" 2>/dev/null || true
+        date +%s > "$USED_REL" 2>/dev/null || true
         echo "MangoLove review gate: .mangolove/.review-skip 으로 1회 우회 (감사 대상)" >&2
         [ -n "${why// /}" ] && echo "  근거: $why" >&2
         # 우회는 차단이 아니다. block 으로 적으면 "리뷰 미실행 push 차단" 수치가 부풀어,
@@ -900,11 +913,7 @@ do_pretooluse() {
     git rev-parse --git-dir >/dev/null 2>&1 || exit 0
     _ml_init_state
 
-    # pre-push 훅이 걸려 있으면 그쪽이 마지막 게이트다. 마커를 여기서 소비하지 않는다.
-    local hooks consume=1
-    hooks="$(git rev-parse --git-path hooks 2>/dev/null)"
-    [ -n "$hooks" ] && [ -x "$hooks/pre-push" ] && consume=0
-    _bypassed "$consume" && exit 0
+    _bypassed && exit 0
 
     # 범위를 못 정하거나 impact 계산이 실패하면 fail-open: 게이트가 작업을 인질로 잡지 않는다.
     # 다만 조용히 넘기지 않는다(위 _record_fail_open 주석).
@@ -932,11 +941,24 @@ do_pretooluse() {
 #    git 이 부른 경우($# >= 2: 원격 이름 + URL)에는 stdin 만 믿는다. 올릴 것이 없으면
 #    stdin 이 비고, 그때는 공유되는 내용도 없으므로 통과다.
 do_prepush() {
-    local from_git=0 lref lsha rref rsha base range blocked=0 saw=0
+    local from_git=0 lref lsha rref rsha base range blocked=0 saw=0 _used
     [ "$#" -ge 2 ] && from_git=1
     git rev-parse --git-dir >/dev/null 2>&1 || exit 0
     _ml_init_state
-    _bypassed && exit 0
+    _bypassed && { rm -f "$USED_REL" 2>/dev/null || true; exit 0; }
+    # 앞선 게이트가 방금 이 공유를 우회로 통과시켰으면 여기서 또 막지 않는다.
+    # 표시는 무조건 지운다: 남겨 두면 다음 push 까지 무료로 통과시킨다.
+    if [ -f "$USED_REL" ]; then
+        _used="$(cat "$USED_REL" 2>/dev/null)"
+        rm -f "$USED_REL" 2>/dev/null || true
+        case "$_used" in
+            ''|*[!0-9]*) ;;
+            *) if [ "$(( $(date +%s) - _used ))" -le "$SKIP_HANDOFF_SECONDS" ]; then
+                   echo "MangoLove review gate: 직전 우회를 이어받아 통과 (감사 대상)" >&2
+                   exit 0
+               fi ;;
+        esac
+    fi
 
     # lref/rref 는 git 이 주는 4개 필드 중 쓰지 않는 두 개다. 이름을 남겨 두어야
     # 필드 순서를 헷갈리지 않는다.

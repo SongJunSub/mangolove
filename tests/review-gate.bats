@@ -1025,3 +1025,34 @@ _block_kinds() { grep -o '"kind":"[a-z]*"' "$MANGOLOVE_DIR/efficacy/proj.jsonl" 
     [ "$status" -eq 2 ]
     [[ "$output" == *"review skip"* ]]
 }
+
+
+# ── 미커버 표시의 수명 (측정의 정확도) ────────────────────────
+
+@test "사유: 딴 데를 본 뒤 제대로 리뷰하면 표시가 걷힌다 (고착 금지)" {
+    # 표시가 남으면 그 스킬은 영영 "딴 데를 봤다"로 분류되어, 정작 가장 흔한 사유
+    # (보고 나서 더 씀)가 통계에서 사라진다. grep -v 는 출력이 비면 exit 1 이라
+    # 종료코드로 분기하면 마지막 한 줄이 안 지워진다.
+    _commit_external_api
+    _run_all_reviews "1952"
+    [ -s "$REPO_DIR/.git/mangolove/.review-noscope" ]
+    _run_all_reviews "high"
+    [ ! -s "$REPO_DIR/.git/mangolove/.review-noscope" ]
+    # 그 뒤 델타를 얹으면 scope 가 아니라 stale 로 기록돼야 한다
+    local i
+    for i in $(seq 1 11); do echo "export const V$i = $i" > "$REPO_DIR/n$i.js"; done
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm more
+    _gate "git push"
+    [ "$status" -eq 2 ]
+    [ "$(_block_kinds)" = '"kind":"stale"' ]
+}
+
+@test "미커버 표시는 커버리지 파일이 아니라 전용 파일에 쓴다" {
+    # 커버리지 파일의 스키마는 "무엇을 실제로 봤나"다. 진단 비트를 얹지 않는다.
+    _commit_external_api
+    _run_all_reviews "1952"
+    grep -qx 'simplify' "$REPO_DIR/.git/mangolove/.review-noscope"
+    [ ! -f "$REPO_DIR/.git/mangolove/.review-covered" ] || \
+        ! grep -q '_noscope' "$REPO_DIR/.git/mangolove/.review-covered"
+}

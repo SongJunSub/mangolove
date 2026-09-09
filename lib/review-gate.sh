@@ -114,6 +114,7 @@ _ml_init_state() {
     LEDGER_REL="$STATE_DIR/.review-ledger"
     LEDGER_BASE_REL="$STATE_DIR/.review-ledger.base"
     COVERED_REL="$STATE_DIR/.review-covered"
+    NOSCOPE_REL="$STATE_DIR/.review-noscope"
 }
 
 # .mangolove/ 는 프로젝트가 버전관리할 수도 있는 디렉토리다(.mangolove/hooks/ 는 감사 대상).
@@ -332,9 +333,9 @@ _json_unescape() {
 }
 
 # args 를 셸처럼 토큰으로 쪼갠다(한 줄에 하나). 인용부호는 묶음으로 인정하고 제거한다.
-# 단순 공백 분리로는 `/code-review "a b.js"` 가 ["a, b.js"] 로 갈라져 어느 것도 실제
-# 파일명과 같지 않고, 그러면 경로 지정이 통째로 무시되어 **전체가 covered 된다**(조용한 통과).
-# eval 하지 않는다: args 는 외부 입력이고, 여기서 필요한 것은 실행이 아니라 분해뿐이다.
+# 단순 공백 분리로는 `/code-review "a b.js"` 가 세 토막으로 갈라져 경로 지정이 무시된다
+# (그 결과는 위 _json_unescape 주석 참조). eval 하지 않는다: args 는 외부 입력이고,
+# 여기서 필요한 것은 실행이 아니라 분해뿐이다.
 _tokenize_args() {
     printf '%s' "$1" | awk '{
         n = length($0); tok = ""; inq = ""
@@ -381,15 +382,14 @@ _tokenize_args() {
 COVERAGE_MODE=""      # all | none | paths
 COVERAGE_PATHS=()     # paths 일 때만 채운다
 _coverage_scope() {
-    local args root refs tok saw_pr=0 saw_num=0
+    local args root="" refs="" tok saw_pr=0 saw_num=0
     COVERAGE_MODE=""; COVERAGE_PATHS=()
     args="$(_json_unescape "${1:-}")"
     [ -z "${args//[[:space:]]/}" ] && { COVERAGE_MODE="all"; return 0; }
-    root="$(git rev-parse --show-toplevel 2>/dev/null)"; [ -n "$root" ] || root="$PWD"
+    # root/refs 는 첫 실토큰에서 늦게 잡는다. --fix 처럼 플래그뿐인 호출은 둘 다 쓰지 않는데
+    # 미리 뜨면 fork 2회를 그냥 버린다.
     # ref 목록은 **한 번만** 뜬다. 토큰마다 git rev-parse 를 부르면 파일 목록을 넘긴 호출에서
     # fork 가 파일 수만큼 난다. HEAD 는 for-each-ref 에 없으므로 직접 넣는다.
-    refs="HEAD
-$(git for-each-ref --format='%(refname:short)' refs/heads refs/tags refs/remotes 2>/dev/null)"
 
     # **인자 전체가 알아볼 수 있는 것이어야** 범위를 인정한다. 하나라도 모르는 토큰이 있으면
     # 아무 것도 인정하지 않는다. 모르는 토큰을 "수식어겠지" 하고 무시했더니 두 가지가 샜다:
@@ -408,6 +408,13 @@ $(git for-each-ref --format='%(refname:short)' refs/heads refs/tags refs/remotes
         # 원격 참조 판정을 **경로 검사보다 먼저** 한다. 순서를 뒤집으면 이름이 겹치는 로컬
         # 경로가 원격 참조를 가린다: 공격자가 브랜치에 1952/ 나 main/ 디렉토리를 심어 두면
         # `/code-review 1952`(원격 PR 리뷰)가 그 디렉토리를 봤다고 기록된다(실증됨).
+        if [ -z "$root" ]; then
+            root="$(git rev-parse --show-toplevel 2>/dev/null)"; [ -n "$root" ] || root="$PWD"
+            # HEAD 는 for-each-ref 에 없으므로 직접 넣는다.
+            refs="HEAD
+$(git for-each-ref --format='%(refname:short)' refs/heads refs/tags refs/remotes 2>/dev/null)"
+        fi
+
         case "$tok" in *://*) COVERAGE_MODE="none"; return 0 ;; esac
         if [[ "$tok" =~ ^[0-9]+$ ]]; then COVERAGE_MODE="none"; return 0; fi   # PR 번호
         case "$tok" in                                                          # crs#1891, #423
@@ -422,11 +429,11 @@ $(git for-each-ref --format='%(refname:short)' refs/heads refs/tags refs/remotes
         case "$tok" in PR|pr|Pr|MR|mr|Mr) saw_pr=1 ;; esac
         case "$tok" in *[0-9]*) [ -e "$tok" ] || saw_num=1 ;; esac
         if [ "$saw_pr" = 1 ] && [ "$saw_num" = 1 ]; then COVERAGE_MODE="none"; return 0; fi
-        case "
-$refs
-" in *"
-$tok
-"*) COVERAGE_MODE="none"; return 0 ;; esac                                     # 브랜치, 태그
+        case $'
+'"$refs"$'
+' in *$'
+'"$tok"$'
+'*) COVERAGE_MODE="none"; return 0 ;; esac
 
         # 이 레포 안의 실재하는 경로. 절대경로는 레포 안일 때만 인정한다: 다른 worktree 도
         # 디스크에는 있으므로 존재만 보면 남의 코드를 본 리뷰가 통과한다.
@@ -492,14 +499,22 @@ _snapshot_covered() {
     _coverage_scope "$args"
     # 이 스킬이 이 트리를 보지 않았다면 아무 것도 인정하지 않는다.
     if [ "$COVERAGE_MODE" = "none" ]; then
+        _ensure_regular_file "$NOSCOPE_REL" || return 0
         # 왜 마커를 남기나: 이 스킬이 "돌긴 했지만 이 트리를 안 봤다"는 사실을 push 시점에
         # 알아야 차단 사유를 가를 수 있다. 원장 등재 여부만 보면 이 경우와 "리뷰 뒤에 코드를
-        # 더 쓴 경우"(가장 흔한 차단)가 한 덩어리가 되어, 그 수치로는 커버리지 판정이
-        # 엄격한지 아닌지 판단할 수 없다. blob 자리가 경로와 절대 안 맞아 판정에는 무해하다.
-        _ensure_regular_file "$COVERED_REL" || return 0
-        grep -qxF "$skill	_noscope	_noscope" "$COVERED_REL" 2>/dev/null \
-            || printf '%s\t_noscope\t_noscope\n' "$skill" >> "$COVERED_REL" 2>/dev/null || true
+        # 더 쓴 경우"(가장 흔한 차단)가 한 덩어리가 되어, 그 수치로는 판정이 엄격한지 알 수 없다.
+        grep -qxF "$skill" "$NOSCOPE_REL" 2>/dev/null \
+            || printf '%s
+' "$skill" >> "$NOSCOPE_REL" 2>/dev/null || true
         return 0
+    fi
+    # 이번엔 실제로 봤다. 지난 미커버 표시를 걷어낸다: 남겨 두면 그 스킬은 영영 "딴 데를
+    # 봤다"로 분류되어, 정작 가장 흔한 사유(보고 나서 더 씀)가 통계에서 사라진다.
+    if [ -s "$NOSCOPE_REL" ] 2>/dev/null; then
+        # grep -v 는 **출력이 비면 exit 1** 이다. 종료코드로 분기하면 마지막 한 줄이
+        # 영영 안 지워지고, 그 스킬은 계속 "딴 데를 봤다"로 분류된다(실측으로 걸렸다).
+        grep -vxF "$skill" "$NOSCOPE_REL" > "$NOSCOPE_REL.tmp" 2>/dev/null || true
+        mv -f "$NOSCOPE_REL.tmp" "$NOSCOPE_REL" 2>/dev/null || rm -f "$NOSCOPE_REL.tmp" 2>/dev/null || true
     fi
     # 짚은 경로가 있으면 git pathspec 으로 넘긴다. 손으로 "이 파일이 이 경로 아래인가"를
     # 짜면 후행 슬래시(lib/ -> lib//*)에서 아무것도 안 맞는 식으로 조용히 틀린다.
@@ -600,13 +615,13 @@ _ledger_stamp() { printf '%s\t%s' "${1:-}" "$(_head_sha)"; }
 
 _drop_stale_ledger() {
     local session="${1:-}"
-    [ -f "$LEDGER_REL" ] || [ -f "$COVERED_REL" ] || return 0
+    [ -f "$LEDGER_REL" ] || [ -f "$COVERED_REL" ] || [ -f "$NOSCOPE_REL" ] || return 0
     [ -z "$session" ] && return 0
     local base="" b_session
     [ -f "$LEDGER_BASE_REL" ] && base="$(cat "$LEDGER_BASE_REL" 2>/dev/null)"
     b_session="${base%%	*}"
     [ "$b_session" = "$session" ] && return 0
-    rm -f "$LEDGER_REL" "$LEDGER_BASE_REL" "$COVERED_REL" 2>/dev/null || true
+    rm -f "$LEDGER_REL" "$LEDGER_BASE_REL" "$COVERED_REL" "$NOSCOPE_REL" 2>/dev/null || true
 }
 
 # ── 정책 단일 출처 ──────────────────────────────────────────────
@@ -742,7 +757,7 @@ _analyze() {
         # 사유는 엄격한 순으로 덮어쓴다: missing > scope > stale.
         if ! grep -qxF "$s" "$LEDGER_REL" 2>/dev/null; then
             REVIEW_BLOCK_KIND="missing"                       # 아예 안 돌았다
-        elif grep -qxF "$s	_noscope	_noscope" "$COVERED_REL" 2>/dev/null; then
+        elif grep -qxF "$s" "$NOSCOPE_REL" 2>/dev/null; then
             [ "$REVIEW_BLOCK_KIND" = "missing" ] || REVIEW_BLOCK_KIND="scope"   # 돌았으나 딴 데를 봤다
         else
             [ -n "$REVIEW_BLOCK_KIND" ] || REVIEW_BLOCK_KIND="stale"            # 보고 나서 더 썼다

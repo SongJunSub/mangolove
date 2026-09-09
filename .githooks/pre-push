@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# ─────────────────────────────────────────────
+# MangoLove: pre-push 훅. 리뷰 게이트를 터미널 push 에도 적용한다.
+#
+# 왜 필요한가: 리뷰 게이트의 본체는 Claude Code 의 PreToolUse 훅이라 에이전트가 부른
+# Bash 만 본다. 사용자가 터미널에서 직접 push 하면 게이트가 아예 뜨지 않는다. 그 구멍을
+# 닫는다. 판정 로직은 복제하지 않고 review-gate.sh prepush 에 위임한다(단일 출처).
+#
+# 활성화(레포당 1회):
+#   git config core.hooksPath .githooks
+#
+# 우회(감사됨): git push --no-verify
+#               또는 touch .mangolove/.review-skip (1회용)
+# 비활성: MANGOLOVE_REVIEW_GATE=off
+# ─────────────────────────────────────────────
+set -uo pipefail
+
+case "${MANGOLOVE_REVIEW_GATE:-on}" in
+    off|0|false|no) exit 0 ;;
+esac
+
+GATE="${MANGOLOVE_DIR:-$HOME/.mangolove}/lib/review-gate.sh"
+# 게이트가 설치돼 있지 않은 머신에서 push 를 막지 않는다(fail-open).
+[ -f "$GATE" ] || exit 0
+
+# pre-push 는 stdin 으로 "<local ref> <local sha> <remote ref> <remote sha>" 를 준다.
+# **버리지 않고 그대로 넘긴다**: 무엇이 실제로 올라가는지에 대한 유일한 권위 있는 정보다.
+# 현재 브랜치를 가정하면 `git push origin other:main`, `--tags`, 삭제, detached HEAD 에서
+# 엉뚱한 범위를 본다. 인자($1=원격 이름, $2=원격 URL)도 함께 넘겨 "git 이 불렀음"을 알린다.
+exec bash "$GATE" prepush "$@"

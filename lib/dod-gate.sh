@@ -121,7 +121,7 @@ _ml_seed_gitignore() {
     if [ -s "$f" ] && [ -n "$(tail -c1 "$f" 2>/dev/null)" ]; then
         printf '\n' >> "$f" 2>/dev/null || return 0
     fi
-    for p in .gitignore dod.sh .dod-gate-attempts .review-ledger .review-ledger.base .review-skip; do
+    for p in .gitignore dod.sh .dod-gate-attempts .review-ledger .review-ledger.base .review-covered .review-skip; do
         grep -qxF "$p" "$f" 2>/dev/null || printf '%s\n' "$p" >> "$f" 2>/dev/null || true
     done
 }

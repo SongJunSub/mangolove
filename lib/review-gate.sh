@@ -303,22 +303,43 @@ _tokenize_args() {
 # 쓰지 않는다: /simplify 와 /code-review 는 서브에이전트를 띄워 파일을 읽고, 그 도구
 # 호출은 메인 트랜스크립트에 없다. 그 방식은 커버리지를 체계적으로 과소 인정해
 # 거의 모든 push 를 막는다. args 가 지금 훅이 볼 수 있는 가장 좋은 근거다.
-SCOPE_ALL="__all__"
-SCOPE_NONE="__none__"
+# 결과는 **전역으로** 돌려준다. 문자열 하나로 "전체/없음/경로목록"을 다 실어 보내면
+# 그 세 도메인이 겹친다: 실제로 __all__ 이라는 이름의 파일을 짚으면 paths 가 "__all__\n" 이 되고,
+# 명령치환이 끝의 개행을 떼어내 SCOPE_ALL 과 바이트가 같아진다. 그러면 그 한 파일만 인정하려던
+# 호출이 **범위 전체를 인정**하게 된다(실증됨). 제어 신호와 데이터를 같은 채널에 싣지 않는다.
+# (이 파일의 _analyze 도 같은 이유로 전역을 쓴다: 명령치환으로 부르지 않는다.)
+COVERAGE_MODE=""    # all | none | paths
+COVERAGE_PATHS=""   # paths 일 때만 채운다
 _coverage_scope() {
     local args root tok paths="" unknown=0
+    COVERAGE_MODE=""; COVERAGE_PATHS=""
     args="$(_json_unescape "${1:-}")"
-    [ -z "${args//[[:space:]]/}" ] && { printf '%s' "$SCOPE_ALL"; return 0; }
+    [ -z "${args//[[:space:]]/}" ] && { COVERAGE_MODE="all"; return 0; }
     root="$(git rev-parse --show-toplevel 2>/dev/null)"; [ -n "$root" ] || root="$PWD"
 
     # **인자 전체가 알아볼 수 있는 것이어야** 범위를 인정한다. 하나라도 모르는 토큰이 있으면
     # 아무 것도 인정하지 않는다. 모르는 토큰을 "수식어겠지" 하고 무시했더니 두 가지가 샜다:
     #   - "review everything except lib" 의 lib 를 **커버 대상으로** 읽었다(부정을 긍정으로).
     #   - /code-review main 처럼 **다른 브랜치**를 리뷰한 호출이 전체를 커버했다.
-    # 둘 다 이 게이트가 막으려는 바로 그 조용한 통과다.
     while IFS= read -r tok; do
         [ -n "$tok" ] || continue
         case "$tok" in --*) continue ;; esac
+
+        # 원격 참조 판정을 **경로 검사보다 먼저** 한다. 순서를 뒤집으면 이름이 겹치는 로컬
+        # 경로가 원격 참조를 가린다: 공격자가 브랜치에 1952/ 나 main/ 디렉토리를 심어 두면
+        # `/code-review 1952`(원격 PR 리뷰)가 그 디렉토리를 봤다고 기록된다(실증됨).
+        #   - 순수 숫자: PR 번호다. 같은 이름의 파일이 있어도 그쪽이 아니다.
+        #   - :// 를 포함: URL 이다.
+        #   - git ref 로 풀리는 이름: 다른 브랜치나 태그다(main, develop, v1.0).
+        # 셋 다 애매하면 엄격한 쪽(unknown)으로 틀린다.
+        case "$tok" in
+            *://*) unknown=1; continue ;;
+            *[!0-9]*) ;;
+            *) unknown=1; continue ;;
+        esac
+        if git rev-parse --verify --quiet "${tok}^{commit}" >/dev/null 2>&1; then
+            unknown=1; continue
+        fi
 
         # 이 레포 안의 실재하는 경로. 절대경로는 레포 안일 때만 인정한다: 다른 worktree 도
         # 디스크에는 있으므로 존재만 보면 남의 코드를 본 리뷰가 통과한다.
@@ -335,7 +356,6 @@ _coverage_scope() {
 
         # 강도 지정만 범위를 좁히지 않는 것으로 인정한다. 닫힌 목록인 것이 의도다:
         # 스킬에 새 강도가 생기면 이 목록에 없어 unknown 이 되고, 그러면 **더 엄격해진다**.
-        # 열거가 낡아도 안전한 쪽으로 틀리는 방향이라 드리프트를 감수할 수 있다.
         case "$tok" in
             low|medium|high|max|xhigh|ultra) continue ;;
         esac
@@ -346,13 +366,13 @@ $(_tokenize_args "$args")
 TOKENS
 
     # 모르는 토큰이 하나라도 있으면 이 호출이 무엇을 봤는지 코드가 알 수 없다.
-    # **기본값을 ALL 로 두지 않는다.** "해석하지 않겠다"는 안전한 쪽으로 두겠다는 뜻이지
+    # **기본값을 all 로 두지 않는다.** "해석하지 않겠다"는 안전한 쪽으로 두겠다는 뜻이지
     # 최대로 믿겠다는 뜻이 아니다. 과소 인정은 눈에 보이고 되돌릴 수 있지만(경로를 짚거나
     # 강도만 주고 다시 돌리면 된다), 과대 인정은 조용하고 감사 기록도 남지 않는다.
-    [ "$unknown" -eq 1 ] && { printf '%s' "$SCOPE_NONE"; return 0; }
-    [ -n "$paths" ] && { printf '%s' "$paths"; return 0; }
+    if [ "$unknown" -eq 1 ]; then COVERAGE_MODE="none"; return 0; fi
+    if [ -n "$paths" ]; then COVERAGE_MODE="paths"; COVERAGE_PATHS="$paths"; return 0; fi
     # 강도뿐이거나 인자가 없다 = 스킬 기본 범위(워킹트리 전체 diff)를 본 것이다.
-    printf '%s' "$SCOPE_ALL"
+    COVERAGE_MODE="all"
     return 0
 }
 
@@ -376,18 +396,19 @@ _git_names() {
 # **스킬 이름을 함께 적는다.** 내용만 적으면 스킬 하나만 돌려도 그 내용이 통째로 covered 가
 # 되어, /simplify 만 돌리고 /code-review 를 건너뛴 push 가 통과한다(실제로 그랬다).
 _snapshot_covered() {
-    local skill="$1" args="${2:-}" scope range files present hashes f p
+    local skill="$1" args="${2:-}" range files present hashes f p
     local sp=()
-    scope="$(_coverage_scope "$args")"
+    # 명령치환으로 부르지 않는다: 서브셸이면 전역이 안 남는다(위 COVERAGE_MODE 주석).
+    _coverage_scope "$args"
     # 이 스킬이 이 트리를 보지 않았다면 아무 것도 인정하지 않는다.
-    [ "$scope" = "$SCOPE_NONE" ] && return 0
+    [ "$COVERAGE_MODE" = "none" ] && return 0
     # 짚은 경로가 있으면 git pathspec 으로 넘긴다. 손으로 "이 파일이 이 경로 아래인가"를
     # 짜면 후행 슬래시(lib/ -> lib//*)에서 아무것도 안 맞는 식으로 조용히 틀린다.
     # git 은 정확한 경로 또는 그 디렉토리 하위만 매칭하며(li 가 lib/ 를 오염시키지 않는다),
     # 없는 경로는 빈 결과로 조용히 끝난다.
-    if [ "$scope" != "$SCOPE_ALL" ]; then
+    if [ "$COVERAGE_MODE" = "paths" ]; then
         while IFS= read -r p; do [ -n "$p" ] && sp+=("$p"); done <<SCOPE
-$scope
+$COVERAGE_PATHS
 SCOPE
         [ "${#sp[@]}" -eq 0 ] && return 0
     fi

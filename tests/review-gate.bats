@@ -799,3 +799,49 @@ OLD
     _gate "git push"
     [ "$status" -eq 2 ]
 }
+
+# ── 보안 리뷰가 실증한 우회 (둘 다 조용한 과대 인정이었다) ─────
+
+@test "보안: 이름이 겹치는 로컬 경로가 원격 참조를 가리지 않는다" {
+    # 공격자가 브랜치에 1952/ 디렉토리를 심어 두면, /code-review 1952(원격 PR 리뷰)가
+    # 그 디렉토리를 봤다고 기록됐다. 원격 참조 판정을 경로 검사보다 먼저 한다.
+    mkdir -p "$REPO_DIR/1952"
+    echo decoy > "$REPO_DIR/1952/decoy.js"
+    printf 'const a = await axios.get("https://api.example.com/a")\n' > "$REPO_DIR/real.js"
+    _run_all_reviews "1952"
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm decoy
+    _gate "git push"
+    [ "$status" -eq 2 ]
+    [ ! -s "$REPO_DIR/.mangolove/.review-covered" ] || \
+        ! grep -q "1952/decoy.js" "$REPO_DIR/.mangolove/.review-covered"
+}
+
+@test "보안: 브랜치 이름과 같은 디렉토리가 있어도 브랜치 리뷰로 본다" {
+    mkdir -p "$REPO_DIR/main"
+    echo decoy > "$REPO_DIR/main/decoy.js"
+    printf 'const a = await axios.get("https://api.example.com/a")\n' > "$REPO_DIR/real.js"
+    _run_all_reviews "main"
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm branchname
+    _gate "git push"
+    [ "$status" -eq 2 ]
+    # 차단만으로는 부족하다(real.js 때문에 어차피 막힌다). decoy 가 covered 면 안 된다.
+    [ ! -s "$REPO_DIR/.mangolove/.review-covered" ] || \
+        ! grep -q "main/decoy.js" "$REPO_DIR/.mangolove/.review-covered"
+}
+
+@test "보안: __all__ 이라는 이름의 파일이 sentinel 과 충돌하지 않는다" {
+    # 문자열 하나로 전체/없음/경로목록을 다 실어 보내면 도메인이 겹친다. paths 가
+    # "__all__\n" 이 되면 명령치환이 개행을 떼어 SCOPE_ALL 과 바이트가 같아지고,
+    # 그 한 파일만 인정하려던 호출이 **범위 전체**를 인정했다.
+    echo x > "$REPO_DIR/__all__"
+    printf 'const o = await axios.get("https://api.example.com/o")\n' > "$REPO_DIR/other.js"
+    _run_all_reviews "__all__"
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm sentinel
+    _gate "git push"
+    [ "$status" -eq 2 ]
+    grep -q "	__all__\$"  "$REPO_DIR/.mangolove/.review-covered"
+    ! grep -q "	other.js\$" "$REPO_DIR/.mangolove/.review-covered"
+}

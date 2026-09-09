@@ -478,3 +478,130 @@ _mkcommit_track() {
     run bash "$(IMPACT)" triage-commit "$sha"
     [[ "$output" == *'"verdict":"over_triage"'* ]]
 }
+
+# ── 범위 ref (A...B) 와 경로 제한: push 경계 게이트가 쓰는 입력 ──
+#
+# 세 점 범위를 쓰는 이유는 merge base 다. 이미 upstream 에 있는 머지 내용은 자동으로
+# 빠지고, upstream 에 없는(= 어디서도 검토되지 않은) 브랜치를 머지하면 그 내용은 범위에
+# 남는다. 머지 특별처리 코드 없이 두 성질을 동시에 얻는다.
+
+# base 를 origin/main 처럼 쓸 로컬 레포를 만든다 (원격 없이 브랜치로 흉내).
+_repo_with_base() {
+    local r; r=$(_repo "$1")
+    echo base > "$r/base.txt"
+    git -C "$r" add -A
+    git -C "$r" -c user.email=t@t.com -c user.name=t commit -qm base >/dev/null
+    git -C "$r" branch -q upstream
+    echo "$r"
+}
+
+@test "impact range: A...B 로 브랜치 순변경만 점수화한다" {
+    local r; r=$(_repo_with_base "rng-basic")
+    cd "$r"
+    printf 'const r = await axios.get("https://api.example.com/v1")\n' > client.js
+    _mkcommit "$r" "work" >/dev/null
+    run bash "$(IMPACT)" score 'upstream...HEAD'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"files":1'* ]]
+    [[ "$output" == *'"ext":true'* ]]
+}
+
+@test "impact range: 이미 upstream 에 있는 브랜치를 머지하면 merge base 가 빼준다" {
+    local r; r=$(_repo_with_base "rng-merged-upstream")
+    cd "$r"
+    # feat 를 만들고 upstream 에 먼저 반영한다 (= 이미 검토, 공유된 코드)
+    git checkout -q -b feat
+    printf 'const a = await axios.get("https://api.example.com/a")\n' > feat.js
+    _mkcommit "$r" "feat" >/dev/null
+    git checkout -q upstream
+    git merge -q --no-ff -m "merge feat" feat
+    git checkout -q -b mine feat
+    git merge -q --no-ff -m "merge feat into mine" feat 2>/dev/null || true
+    echo mine > mine.txt
+    _mkcommit "$r" "mine" >/dev/null
+    run bash "$(IMPACT)" score 'upstream...HEAD'
+    [ "$status" -eq 0 ]
+    # feat.js 는 upstream 에 이미 있으므로 범위 밖. 내 작업만 남는다.
+    [[ "$output" == *'"files":1'* ]]
+    [[ "$output" == *'"ext":false'* ]]
+}
+
+@test "impact range: upstream 에 없는 브랜치를 머지하면 그 내용이 범위에 남는다" {
+    local r; r=$(_repo_with_base "rng-merged-rogue")
+    cd "$r"
+    git checkout -q -b rogue
+    printf 'const r = await axios.post("https://api.example.com/x", {})\n' > rogue.js
+    _mkcommit "$r" "rogue" >/dev/null
+    git checkout -q upstream
+    git checkout -q -b mine
+    git merge -q --no-ff -m "merge rogue" rogue
+    run bash "$(IMPACT)" score 'upstream...HEAD'
+    [ "$status" -eq 0 ]
+    # 미검토 코드는 머지로 숨지 못한다.
+    [[ "$output" == *'"ext":true'* ]]
+}
+
+@test "impact range: 커밋을 잘게 쪼개도 범위 점수는 합쳐서 계산된다 (누적 우회 차단)" {
+    # 이것이 push 경계로 옮기는 핵심 이유다. 커밋마다 판정하면 개별로는 전부 Trivial 이라
+    # 전부 통과하지만, 범위로 보면 Medium 이다. 쪼개서 빠져나갈 구멍이 구조적으로 없다.
+    local r; r=$(_repo_with_base "rng-salami")
+    cd "$r"
+    local i last
+    for i in $(seq 1 11); do
+        echo "export const V$i = $i" > "f$i.js"
+        last=$(_mkcommit "$r" "c$i")
+    done
+
+    # 커밋 하나만 보면 Trivial: 커밋 경계 게이트가 전부 통과시켰을 변경이다.
+    run bash "$(IMPACT)" score "$last"
+    [[ "$output" == *'"files":1'* ]]
+    [[ "$output" == *'"track_floor":"Trivial"'* ]]
+
+    # 범위로 보면 파일 11개(file_pts 8) → Medium.
+    run bash "$(IMPACT)" score 'upstream...HEAD'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"files":11'* ]]
+    [[ "$output" == *'"track_floor":"Medium"'* ]]
+}
+
+@test "impact range: -- 로 경로를 제한하면 그 경로만 점수화한다" {
+    local r; r=$(_repo_with_base "rng-paths")
+    cd "$r"
+    printf 'const r = await axios.get("https://api.example.com/v1")\n' > client.js
+    echo plain > plain.txt
+    _mkcommit "$r" "two files" >/dev/null
+    run bash "$(IMPACT)" score 'upstream...HEAD' -- plain.txt
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"files":1'* ]]
+    # 제한된 경로 밖의 외부 API 신호는 잡히지 않아야 한다 (잔여 점수화의 전제)
+    [[ "$output" == *'"ext":false'* ]]
+}
+
+@test "impact range: 경로 제한은 기존 ref 형태에도 적용된다" {
+    local r; r=$(_repo_with_base "rng-paths-staged")
+    cd "$r"
+    printf 'const r = await axios.get("https://api.example.com/v1")\n' > client.js
+    echo plain > plain.txt
+    git add -A
+    run bash "$(IMPACT)" score --staged -- plain.txt
+    [[ "$output" == *'"files":1'* ]]
+    [[ "$output" == *'"ext":false'* ]]
+}
+
+@test "impact range: 존재하지 않는 끝점이 있으면 조용히 Trivial 로 흐르지 않는다" {
+    local r; r=$(_repo_with_base "rng-badref")
+    cd "$r"
+    run bash "$(IMPACT)" score 'nosuchbranch...HEAD'
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"unknown range"* ]]
+}
+
+@test "impact range: 범위에는 Change-Track trailer 판정을 적용하지 않는다" {
+    local r; r=$(_repo_with_base "rng-trailer")
+    cd "$r"
+    echo x > a.txt
+    _mkcommit "$r" "x" >/dev/null
+    run bash "$(IMPACT)" declared-track 'upstream...HEAD'
+    [ "$status" -eq 0 ]
+    [ -z "$(echo "$output" | tr -d '[:space:]')" ]
+}

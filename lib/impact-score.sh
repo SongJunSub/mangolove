@@ -12,8 +12,8 @@
 # Python, Go, Rails/Django, C#/.NET(EF, [Authorize]), Rust(reqwest, tower/axum auth), PHP/Laravel(Schema),
 # Ruby/Elixir HTTP (그 밖 스택, 관용구는 미커버: track_floor 보장은 커버 스택 한정).
 #
-# 사용:
-#   impact-score.sh score          <sha|--working|--staged>    → JSON 1줄 (점수 분해 + track_floor)
+# 사용: ref 는 <sha|--working|--staged|A...B> 이고, 뒤에 `-- <path>...` 로 경로를 제한할 수 있다.
+#   impact-score.sh score          <ref> [-- <path>...]        → JSON 1줄 (점수 분해 + track_floor)
 #   impact-score.sh triage         <predicted> <sha|--working> → under_triage|ok|over_triage 판정(JSON)
 #   impact-score.sh declared-track <sha>                       → 커밋의 Change-Track: trailer (없으면 빈 출력)
 #   impact-score.sh triage-commit  <sha|--working>             → score + 선언트랙 + verdict(JSON 1줄)
@@ -21,39 +21,54 @@
 # ─────────────────────────────────────────────
 set -uo pipefail
 
+# 경로 제한(선택): 호출자가 IMPACT_PATHS 에 담으면 그 경로만 점수화한다. 비어 있으면 전체.
+# push 게이트가 "이미 리뷰가 본 파일을 뺀 잔여"만 점수화할 때 쓴다.
+# 빈 배열 확장은 set -u 아래서 위험하므로 ${#arr[@]} 로 세고 분기한다(bash 3.2/5.x 공통 안전).
+IMPACT_PATHS=()
+_gitp() {
+    if [ "${#IMPACT_PATHS[@]}" -gt 0 ]; then git "$@" -- "${IMPACT_PATHS[@]}" 2>/dev/null
+    else git "$@" 2>/dev/null; fi
+}
+
 # diff 추출: 커밋(sha; 머지는 --first-parent 로 mainline 기준), 워킹트리(--working),
-# 인덱스(--staged) 지원.
+# 인덱스(--staged), 범위(A...B) 지원.
 # --working 은 untracked(아직 git add 안 한) 신규 파일도 포함한다(인덱스 변경 없이).
-# --staged 는 인덱스에 올라간 것만 본다: `git commit` 이 실제로 담을 범위와 일치하므로
-# 커밋 경계 게이트(review-gate)가 이걸 쓴다. (`commit -a` 는 호출자가 --working 으로 넓힌다.)
+# --staged 는 인덱스에 올라간 것만 본다.
+# A...B 는 세 점(merge base 기준)이다: push 게이트가 `<upstream>...HEAD` 로 "이 브랜치가
+# upstream 에 더하는 순변경"을 본다. 이미 upstream 에 있는 머지 내용은 merge base 가
+# 자동으로 빼주므로 머지 특별처리가 필요 없다. 반대로 upstream 에 없는 브랜치를 머지하면
+# 그 내용은 범위에 남아 그대로 점수화된다(미검토 코드가 머지로 숨지 못한다).
 _ref_names() {
     case "$1" in
-        --working) { git diff --name-only HEAD 2>/dev/null; git ls-files --others --exclude-standard 2>/dev/null; } | sort -u ;;
-        --staged)  git diff --cached --name-only 2>/dev/null ;;
-        *)         git show --first-parent --name-only --format='' "$1" 2>/dev/null ;;
+        --working) { _gitp diff --name-only HEAD; _gitp ls-files --others --exclude-standard; } | sort -u ;;
+        --staged)  _gitp diff --cached --name-only ;;
+        *...*)     _gitp diff --name-only "$1" ;;
+        *)         _gitp show --first-parent --name-only --format='' "$1" ;;
     esac
 }
 _ref_numstat() {
     case "$1" in
         --working)
-            git diff --numstat HEAD 2>/dev/null
-            git ls-files --others --exclude-standard 2>/dev/null | awk 'NF{print "1\t0\t" $0}'
+            _gitp diff --numstat HEAD
+            _gitp ls-files --others --exclude-standard | awk 'NF{print "1\t0\t" $0}'
             ;;
-        --staged) git diff --cached --numstat 2>/dev/null ;;
-        *)        git show --first-parent --numstat --format='' "$1" 2>/dev/null ;;
+        --staged) _gitp diff --cached --numstat ;;
+        *...*)    _gitp diff --numstat "$1" ;;
+        *)        _gitp show --first-parent --numstat --format='' "$1" ;;
     esac
 }
 _ref_diff() {
     case "$1" in
         --working)
-            git diff HEAD 2>/dev/null
+            _gitp diff HEAD
             local f
-            git ls-files --others --exclude-standard 2>/dev/null | while IFS= read -r f; do
+            _gitp ls-files --others --exclude-standard | while IFS= read -r f; do
                 git diff --no-index --no-color -- /dev/null "$f" 2>/dev/null
             done
             ;;
-        --staged) git diff --cached 2>/dev/null ;;
-        *)        git show --first-parent --format='' "$1" 2>/dev/null ;;
+        --staged) _gitp diff --cached ;;
+        *...*)    _gitp diff "$1" ;;
+        *)        _gitp show --first-parent --format='' "$1" ;;
     esac
 }
 
@@ -81,6 +96,20 @@ _bool() { if [ "$1" -eq 1 ]; then echo true; else echo false; fi; }
 _require_ref() {
     [ "$1" = "--working" ] && return 0
     [ "$1" = "--staged" ] && return 0
+    case "$1" in
+        *...*)
+            # 범위는 양 끝을 모두 확인한다. 한쪽만 보면 없는 upstream 이 조용히 Trivial 이 된다.
+            local a="${1%%...*}" b="${1##*...}"
+            [ -z "$a" ] && a=HEAD
+            [ -z "$b" ] && b=HEAD
+            if git rev-parse --verify --quiet "${a}^{commit}" >/dev/null 2>&1 \
+               && git rev-parse --verify --quiet "${b}^{commit}" >/dev/null 2>&1; then
+                return 0
+            fi
+            echo "impact-score: unknown range: $1" >&2
+            exit 1
+            ;;
+    esac
     git rev-parse --verify --quiet "${1}^{commit}" >/dev/null 2>&1 && return 0
     echo "impact-score: unknown revision: $1" >&2
     exit 1
@@ -182,6 +211,8 @@ declared_track() {
     local ref="$1" raw norm
     [ "$ref" = "--working" ] && return 0
     [ "$ref" = "--staged" ] && return 0
+    # 범위는 커밋 하나가 아니라 여러 커밋이라 단일 트레일러가 없다.
+    case "$ref" in *...*) return 0 ;; esac
     raw="$(git show -s --format='%B' "$ref" 2>/dev/null \
         | git interpret-trailers --parse 2>/dev/null \
         | grep -iE '^Change-Track:' | tail -1 \
@@ -240,12 +271,23 @@ main() {
     if ! git rev-parse --git-dir >/dev/null 2>&1; then
         echo "impact-score: not a git repository" >&2; exit 1
     fi
+    # `<cmd> <ref> -- <path>...` 형태면 `--` 뒤를 경로 제한으로 떼어낸다(없으면 전체 점수화).
+    local sub=() in_paths=0 a
+    for a in "$@"; do
+        if   [ "$in_paths" -eq 1 ]; then IMPACT_PATHS+=("$a")
+        elif [ "$a" = "--" ];      then in_paths=1
+        else sub+=("$a")
+        fi
+    done
+    if [ "${#sub[@]}" -gt 0 ]; then set -- "${sub[@]}"; else set --; fi
+
+    local u="<sha|--working|--staged|A...B> [-- <path>...]"
     case "${1:-}" in
-        score)  [ -n "${2:-}" ] || { echo "usage: impact-score.sh score <sha|--working|--staged>" >&2; exit 2; }; _require_ref "$2"; compute "$2" ;;
-        triage) [ -n "${3:-}" ] || { echo "usage: impact-score.sh triage <predicted> <sha|--working|--staged>" >&2; exit 2; }; _require_ref "$3"; triage "$2" "$3" ;;
+        score)  [ -n "${2:-}" ] || { echo "usage: impact-score.sh score $u" >&2; exit 2; }; _require_ref "$2"; compute "$2" ;;
+        triage) [ -n "${3:-}" ] || { echo "usage: impact-score.sh triage <predicted> $u" >&2; exit 2; }; _require_ref "$3"; triage "$2" "$3" ;;
         declared-track) [ -n "${2:-}" ] || { echo "usage: impact-score.sh declared-track <sha>" >&2; exit 2; }; _require_ref "$2"; declared_track "$2" ;;
-        triage-commit)  [ -n "${2:-}" ] || { echo "usage: impact-score.sh triage-commit <sha|--working|--staged>" >&2; exit 2; }; _require_ref "$2"; triage_commit "$2" ;;
-        report) [ -n "${2:-}" ] || { echo "usage: impact-score.sh report <sha|--working|--staged>" >&2; exit 2; }; _require_ref "$2"; report "$2" ;;
+        triage-commit)  [ -n "${2:-}" ] || { echo "usage: impact-score.sh triage-commit $u" >&2; exit 2; }; _require_ref "$2"; triage_commit "$2" ;;
+        report) [ -n "${2:-}" ] || { echo "usage: impact-score.sh report $u" >&2; exit 2; }; _require_ref "$2"; report "$2" ;;
         *) echo "usage: impact-score.sh {score|triage|declared-track|triage-commit|report} ..." >&2; exit 2 ;;
     esac
 }

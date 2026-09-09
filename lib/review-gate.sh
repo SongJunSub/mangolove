@@ -244,6 +244,13 @@ _push_source_ref() {
 # 토큰이 실제 파일명과 영영 달라 경로 지정이 무시되고, 그러면 **전체가 covered 된다**(조용한 통과).
 # command 에는 _unescape_cmd 가 같은 일을 한다. args 에만 빠져 있었다.
 # 한 번의 좌->우 스캔으로 처리한다: \\n 을 개행으로 오해하지 않으려면 순차 치환이 아니어야 한다.
+#
+# _unescape_cmd 와 합치지 않는다. 같은 JSON 이스케이프를 풀지만 \n 의 목적지가 반대다:
+# 저쪽은 **실제 개행**으로 되돌려야 멀티라인 명령을 줄 단위로 grep 할 수 있고(합치면 그
+# 84/411 회귀가 되돌아온다), 이쪽은 **공백**으로 만들어야 args 가 한 줄 토큰 흐름이 된다.
+# 저쪽은 \" 와 \\ 를 건드리지 않는데, 이쪽에서 그러면 인용부호가 파일명과 어긋나 조용히
+# 전체를 covered 시킨다. 목적지가 갈리는 만큼 각자 두고, 합치려면 매핑을 인자로 받는
+# 하위 프리미티브를 따로 만들어야 한다.
 _json_unescape() {
     printf '%s' "$1" | awk '{
         out = ""; n = length($0)
@@ -299,63 +306,67 @@ _tokenize_args() {
 SCOPE_ALL="__all__"
 SCOPE_NONE="__none__"
 _coverage_scope() {
-    local args root tok n=0 last="" paths="" outside=0 pr=0 has_pr=0 has_num=0
+    local args root tok paths="" unknown=0
     args="$(_json_unescape "${1:-}")"
     [ -z "${args//[[:space:]]/}" ] && { printf '%s' "$SCOPE_ALL"; return 0; }
     root="$(git rev-parse --show-toplevel 2>/dev/null)"; [ -n "$root" ] || root="$PWD"
+
+    # **인자 전체가 알아볼 수 있는 것이어야** 범위를 인정한다. 하나라도 모르는 토큰이 있으면
+    # 아무 것도 인정하지 않는다. 모르는 토큰을 "수식어겠지" 하고 무시했더니 두 가지가 샜다:
+    #   - "review everything except lib" 의 lib 를 **커버 대상으로** 읽었다(부정을 긍정으로).
+    #   - /code-review main 처럼 **다른 브랜치**를 리뷰한 호출이 전체를 커버했다.
+    # 둘 다 이 게이트가 막으려는 바로 그 조용한 통과다.
     while IFS= read -r tok; do
         [ -n "$tok" ] || continue
-        # 강도 지정과 플래그는 범위를 좁히지 않는다.
-        case "$tok" in
-            high|low|medium|max|xhigh|ultra|--*) continue ;;
-        esac
-        n=$((n + 1)); last="$tok"
+        case "$tok" in --*) continue ;; esac
 
-        # 절대경로는 실재 여부보다 **어느 레포인지**가 먼저다. 다른 worktree 도 디스크에는
-        # 있으므로, 존재만 보고 경로로 인정하면 남의 코드를 본 리뷰가 이 트리를 통과시킨다.
-        # macOS 의 /tmp -> /private/tmp 처럼 show-toplevel 과 PWD 가 갈릴 수 있어 둘 다 본다.
+        # 이 레포 안의 실재하는 경로. 절대경로는 레포 안일 때만 인정한다: 다른 worktree 도
+        # 디스크에는 있으므로 존재만 보면 남의 코드를 본 리뷰가 통과한다.
+        # (macOS 의 /tmp -> /private/tmp 처럼 show-toplevel 과 PWD 가 갈릴 수 있어 둘 다 본다.)
         case "$tok" in
-            /*)
-                case "$tok" in
-                    "$root"|"$root"/*|"$PWD"|"$PWD"/*) [ -e "$tok" ] && paths="${paths}${tok}
-" ;;
-                    *) outside=1 ;;
-                esac
-                continue ;;
+            /*) case "$tok" in
+                    "$root"|"$root"/*|"$PWD"|"$PWD"/*)
+                        if [ -e "$tok" ]; then paths="${paths}${tok}
+"; continue; fi ;;
+                esac ;;
+            *)  if [ -e "$tok" ]; then paths="${paths}${tok}
+"; continue; fi ;;
         esac
 
-        # 실재하는 상대경로는 경로다. 원격 참조 휴리스틱을 적용하지 않는다
-        # (docs/pull/x.md 같은 실제 파일을 PR 링크로 오인하지 않는다).
-        if [ -e "$tok" ]; then paths="${paths}${tok}
-"; continue; fi
-
-        # 여기부터는 로컬에 없는 토큰이다. 원격 참조인지 본다.
+        # 강도 지정만 범위를 좁히지 않는 것으로 인정한다. 닫힌 목록인 것이 의도다:
+        # 스킬에 새 강도가 생기면 이 목록에 없어 unknown 이 되고, 그러면 **더 엄격해진다**.
+        # 열거가 낡아도 안전한 쪽으로 틀리는 방향이라 드리프트를 감수할 수 있다.
         case "$tok" in
-            */pull/*|*/merge_requests/*) pr=1; continue ;;
-            *'#'[0-9]*) case "${tok##*#}" in *[!0-9]*) ;; *) pr=1; continue ;; esac ;;
+            low|medium|high|max|xhigh|ultra) continue ;;
         esac
-        case "$tok" in PR|pr|Pr|MR|mr|Mr) has_pr=1 ;; esac
-        case "$tok" in *[!0-9]*) ;; *) has_num=1 ;; esac
+
+        unknown=1
     done <<TOKENS
 $(_tokenize_args "$args")
 TOKENS
 
-    # args 가 강도뿐이면 스킬 기본 범위(워킹트리 전체 diff)를 본 것이다.
-    [ "$n" -eq 0 ] && { printf '%s' "$SCOPE_ALL"; return 0; }
-    # 원격 PR 이나 레포 밖 경로를 봤다: 이 트리에 대해서는 아무 것도 인정하지 않는다.
-    [ "$pr" -eq 1 ] && { printf '%s' "$SCOPE_NONE"; return 0; }
-    [ "$outside" -eq 1 ] && { printf '%s' "$SCOPE_NONE"; return 0; }
-    # "PR 1891" 처럼 낱말과 숫자로 흩어진 형태. 실측한 실제 호출의 다수가 이 모양이다.
-    [ "$has_pr" -eq 1 ] && [ "$has_num" -eq 1 ] && { printf '%s' "$SCOPE_NONE"; return 0; }
-    # 순수 숫자는 PR 번호다. **단독일 때만** 그렇게 본다: 산문 속 숫자를 오인하지 않는다.
-    if [ "$n" -eq 1 ]; then
-        case "$last" in *[!0-9]*) ;; *) printf '%s' "$SCOPE_NONE"; return 0 ;; esac
-    fi
-    # 실재하는 경로를 짚었으면 그것만 인정한다.
+    # 모르는 토큰이 하나라도 있으면 이 호출이 무엇을 봤는지 코드가 알 수 없다.
+    # **기본값을 ALL 로 두지 않는다.** "해석하지 않겠다"는 안전한 쪽으로 두겠다는 뜻이지
+    # 최대로 믿겠다는 뜻이 아니다. 과소 인정은 눈에 보이고 되돌릴 수 있지만(경로를 짚거나
+    # 강도만 주고 다시 돌리면 된다), 과대 인정은 조용하고 감사 기록도 남지 않는다.
+    [ "$unknown" -eq 1 ] && { printf '%s' "$SCOPE_NONE"; return 0; }
     [ -n "$paths" ] && { printf '%s' "$paths"; return 0; }
-    # 남은 것은 자유 서술뿐이다. 코드가 좁힐 근거가 없으므로 기본 범위로 둔다.
+    # 강도뿐이거나 인자가 없다 = 스킬 기본 범위(워킹트리 전체 diff)를 본 것이다.
     printf '%s' "$SCOPE_ALL"
     return 0
+}
+
+# 경로 제한(sp)이 있으면 pathspec 으로 붙여 git 을 부른다. 빈 배열 확장은 set -u 아래서
+# 위험하므로 개수를 세고 분기한다. quotePath=false 는 비-ASCII 경로가 C-quote 되어
+# push 시점 경로와 영영 어긋나는 것을 막는다(그러면 그 파일은 절대 covered 로 안 잡힌다).
+_git_names() {
+    # sp 는 호출자(_snapshot_covered)가 선언하는 pathspec 배열이다. 선언되지 않은 채로
+    # 불리면 set -u 아래서 ${#sp[@]} 가 함수를 조용히 끝내고, 빈 출력은 "변경 파일 없음"과
+    # 구별되지 않아 커버리지가 통째로 비게 된다(shellcheck 도 못 잡는다). 그래서 방어한다.
+    local n=0
+    [ "${sp+set}" = "set" ] && n="${#sp[@]}"
+    if [ "$n" -gt 0 ]; then git -c core.quotePath=false "$@" -- "${sp[@]}" 2>/dev/null
+    else git -c core.quotePath=false "$@" 2>/dev/null; fi
 }
 
 # 리뷰가 실제로 본 파일 내용을 blob 해시로 붙잡는다 (record 시점 = 스킬이 막 끝난 시점).
@@ -384,15 +395,9 @@ SCOPE
     # quotePath=false: 위 _range_signature 와 같은 이유다. 여기서 따옴표 붙은 경로를 적으면
     # push 시점 경로와 영원히 어긋나 그 파일은 절대 covered 로 잡히지 않는다.
     files="$( {
-        if [ "${#sp[@]}" -gt 0 ]; then
-            [ -n "$range" ] && git -c core.quotePath=false diff --name-only "$range" -- "${sp[@]}" 2>/dev/null
-            git -c core.quotePath=false diff --name-only HEAD -- "${sp[@]}" 2>/dev/null
-            git -c core.quotePath=false ls-files --others --exclude-standard -- "${sp[@]}" 2>/dev/null
-        else
-            [ -n "$range" ] && git -c core.quotePath=false diff --name-only "$range" 2>/dev/null
-            git -c core.quotePath=false diff --name-only HEAD 2>/dev/null
-            git -c core.quotePath=false ls-files --others --exclude-standard 2>/dev/null
-        fi
+        [ -n "$range" ] && _git_names diff --name-only "$range"
+        _git_names diff --name-only HEAD
+        _git_names ls-files --others --exclude-standard
     } | sort -u | grep -v '^$' )"
     [ -z "$files" ] && return 0
 
@@ -658,6 +663,9 @@ _emit_block() {
         echo "생략을 사후에 보고하지 말고 실행하세요. 과하다고 판단되면 실행하는 대신"
         echo "**push 전에** 사용자에게 물으세요."
         echo "부족분 확인: mangolove review status"
+        echo "리뷰를 돌렸는데도 이 목록이 남으면, 그 호출이 이 트리를 보지 않았다는 뜻입니다."
+        echo "  (원격 PR, 다른 worktree, 이 트리에 없는 경로를 인자로 준 경우)"
+        echo "  강도만 주거나(/code-review high) 이 트리의 경로를 짚어 다시 돌리세요."
         echo "부득이한 1회 우회(감사됨): touch .mangolove/.review-skip 후 다시 push"
         echo "(MANGOLOVE_SKIP_REVIEW=1 은 mangolove 실행 전에 export 돼 있어야 합니다."
         echo " 명령 앞에 붙인 값은 훅에 닿지 않습니다.)"

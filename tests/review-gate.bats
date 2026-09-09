@@ -656,12 +656,63 @@ OLD
     [ "$status" -eq 0 ]
 }
 
-@test "범위: 자유 서술은 해석하지 않는다 (산문 속 숫자를 PR 로 오인하지 않는다)" {
-    # 코드가 좁힐 근거가 없으면 기본 범위로 둔다. 산문 해석은 다시 모델 판단이 된다.
+@test "범위: 무언가를 가리키는데 이 트리에서 못 찾으면 커버하지 않는다" {
+    # 기본값을 ALL 로 두면 열거 밖의 인자 모양마다 조용한 과대 인정이 생긴다.
+    # "해석하지 않겠다"는 안전한 쪽으로 두겠다는 뜻이지 최대로 믿겠다는 뜻이 아니다.
     _commit_external_api
     _run_all_reviews "리뷰 200 줄 정도 워킹트리 변경분 봐줘"
     _gate "git push"
+    [ "$status" -eq 2 ]
+}
+
+@test "범위: 강도뿐인 호출만 기본 범위를 커버한다 (산문은 아니다)" {
+    # 모르는 낱말을 수식어로 넘기면 두 가지가 샌다: 부정문의 경로를 긍정으로 읽고,
+    # 브랜치 이름(main)을 준 호출이 전체를 커버한다. 닫힌 목록만 인정한다.
+    _commit_external_api
+    _run_all_reviews "medium"
+    _gate "git push"
     [ "$status" -eq 0 ]
+}
+
+@test "위험: 부정문 안의 경로를 커버 대상으로 읽지 않는다" {
+    # "lib 는 빼고" 를 "lib 를 봤다" 로 읽으면, 리뷰가 명시적으로 제외한 코드가 통과한다.
+    mkdir -p "$REPO_DIR/lib"
+    printf 'const a = await axios.get("https://api.example.com/a")\n' > "$REPO_DIR/lib/a.js"
+    _run_all_reviews "review everything except lib"
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm neg
+    _gate "git push"
+    [ "$status" -eq 2 ]
+}
+
+@test "위험: 브랜치 이름을 리뷰한 호출이 이 워킹트리를 커버하지 않는다" {
+    # /code-review main 은 다른 브랜치를 본다. 평범한 낱말이라 형태로는 구별되지 않으므로
+    # 닫힌 강도 목록에 없으면 모르는 토큰으로 취급한다.
+    _commit_external_api
+    _run_all_reviews "main"
+    _gate "git push"
+    [ "$status" -eq 2 ]
+    SESSION=s3
+    _run_all_reviews "my-feature-branch"
+    run bash -c "printf '%s' '$(SESSION=s3; _json_cmd "git push")' | bash '$GATE' pretooluse"
+    [ "$status" -eq 2 ]
+}
+
+@test "범위: 열거에 없던 인자 모양도 조용히 통과하지 않는다" {
+    # 옛 규칙(PR 낱말 + 순수숫자)을 그대로 빠져나가던 반례다.
+    _commit_external_api
+    _run_all_reviews "크스-1952 관련 PR 검토해줘"
+    _gate "git push"
+    [ "$status" -eq 2 ]
+}
+
+@test "범위: 짚은 경로 중 하나라도 이 트리에 없으면 커버하지 않는다" {
+    printf 'const a = await axios.get("https://api.example.com/a")\n' > "$REPO_DIR/a.js"
+    _run_all_reviews "high a.js nosuch.js"
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm partial
+    _gate "git push"
+    [ "$status" -eq 2 ]
 }
 
 # ── 코드 리뷰가 실증한 fail-open 들 (전부 조용한 통과였다) ─────

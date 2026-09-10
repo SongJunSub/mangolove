@@ -1161,7 +1161,7 @@ git push origin main" "$PWD")"'
         printf "%s" "$(_push_targets "cat > d.md <<MD
 배포는 git push 로 한다
 MD" "$PWD")"'
-    [ "$output" = "!	END" ]            # 파서 완료 표시만 남고 push 는 없다
+    [ -z "$output" ]
 }
 
 @test "heredoc: 본문을 실행하는 소비자는 벗기지 않는다 (데이터 싱크만 벗긴다)" {
@@ -1639,7 +1639,52 @@ MD" "$PWD")"'
     ! grep -q "	other.js\$" "$REPO_DIR/.git/mangolove/.review-covered"
 }
 
-@test "해석: 파서가 끝까지 돌았다는 표시를 낸다 (파서가 죽으면 조용히 통과하지 않고 감사한다)" {
+@test "해석: 입력 끝 표시까지 읽었을 때만 완료 표시를 낸다 (앞 단계가 죽으면 감사로 간다)" {
     run bash -c "source '$GATE'; _push_targets 'git status' /cwd"
-    [ "$output" = "!	END" ]
+    [ -z "$output" ]
+    run bash -c "source '$GATE'; _push_targets \"git status
+\$PARSER_END\" /cwd"
+    [ "$output" = $'!\tEND' ]
+}
+
+# ── simplify 재리뷰가 재현한 결함 ─────────────────────────────────
+
+@test "대상 레포: 하위 디렉토리로 cd 해서 올려도 레포 루트 기준으로 판정한다" {
+    mkdir -p "$REPO_DIR/sub"
+    echo keep > "$REPO_DIR/sub/keep.txt"
+    printf 'const a = await axios.get("https://api.example.com/a")\n' > "$REPO_DIR/a.js"
+    _run_all_reviews
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm reviewed
+    local i
+    for i in $(seq 1 11); do echo "export const V$i = $i" > "$REPO_DIR/n$i.js"; done
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm more
+    _gate "cd sub && git push"
+    [ "$status" -eq 2 ]
+}
+
+@test "해석: 파이프라인으로 묶인 복합 명령 안의 cd 는 뒤따르는 push 의 디렉토리를 바꾸지 않는다" {
+    _commit_external_api
+    _gate "{ cd $TEST_DIR && ls; } 2>&1 | tail -3; git push origin main"
+    [ "$status" -eq 2 ]
+    _gate "for d in a b; do cd $TEST_DIR && ls; done 2>&1 | tail -3; git push origin main"
+    [ "$status" -eq 2 ]
+}
+
+@test "해석: 옵션이나 래퍼가 붙은 셸 안의 push 도 판정한다" {
+    _commit_external_api
+    _gate 'bash --login -c "git push origin main"'
+    [ "$status" -eq 2 ]
+    _gate 'bash --noprofile --norc -c "git push origin main"'
+    [ "$status" -eq 2 ]
+    _gate "timeout 60 bash -c \"git push origin \$(git branch --show-current)\""
+    [ "$status" -eq 2 ]
+}
+
+@test "해석: 명령치환 속 heredoc 으로 넘긴 커밋 메시지의 git push 글자는 명령이 아니다" {
+    _commit_external_api
+    _gate 'git commit -m "$(cat <<EOF\nfix: 게이트 수정\n\n배포는 git push origin main 으로 한다\nEOF\n)"'
+    [ "$status" -eq 0 ]
+    ! grep -q '"kind":"fail-open"' "$MANGOLOVE_DIR/efficacy/proj.jsonl" 2>/dev/null
 }

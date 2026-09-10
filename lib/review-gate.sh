@@ -322,34 +322,41 @@ EOF
 # `W=<경로>; git -C "$W" push` 는 **다른 레포**를 올린다. cwd 로 판정하면 엉뚱한 레포의 범위와
 # 원장을 본다(2026-09-10: crs 세션에서 crs-admin-web push 가 crs 기준으로 판정됐다).
 #
-# 명령 전체를 awk 하나로 한 번만 읽는다. 따옴표와 $( ) 밖의 && || ; | & ( ) 개행에서 단순 명령으로
-# 가르고(따옴표를 무시하고 가르면 `git commit -m "wip; git push"` 의 메시지가 push 가 된다), 단순
-# 명령마다 디렉토리 이동과 변수를 따라가 push 인자까지 푼다. 레포, dry-run/삭제 여부, refspec 을
-# 서로 다른 토크나이저로 따로 읽으면 규칙이 갈라진다(한쪽만 변수를 풀어 조용히 샜다).
+# 명령 전체를 awk 하나로 한 번만 읽는다. 따옴표와 $( ) 밖의 연산자에서 단순 명령으로 가르고(따옴표를
+# 무시하고 가르면 `git commit -m "wip; git push"` 의 메시지가 push 가 된다), 단순 명령마다 디렉토리
+# 이동과 변수를 따라가 push 인자까지 푼다. 레포, dry-run/삭제 여부, refspec 을 서로 다른 토크나이저로
+# 따로 읽으면 규칙이 갈라진다(한쪽만 변수를 풀어 조용히 샜다).
 #
-# 출력: 판정할 push 마다 "<디렉토리>\t<rev>". 디렉토리나 rev 를 풀 수 없으면 그 자리에 "?"
-# (호출자가 막지 않고 감사만 남긴다: 추정한 대상으로 막으면 그게 곧 오탐이다).
+# 출력: 판정할 push 마다 "<디렉토리>\t<rev>". 디렉토리를 풀 수 없으면 "?\t?"(호출자가 막지 않고
+# 감사만 남긴다: 추정한 대상으로 막으면 그게 곧 오탐이다). 입력 끝의 PARSER_END 줄까지 읽었으면
+# 마지막에 "!\tEND" 를 낸다(앞 단계 어디서 죽어도 표시가 없어 호출자가 감사로 돌린다).
 # 따라가는 것: cd/pushd, git -C(누적), NAME=값(export 포함), for NAME in 값들, ~, $HOME, $PWD,
-#              sh/bash -c "<명령>", $( <명령> ). dry-run(-n)과 삭제(-d, :dst)는 내지 않는다.
-# 서브셸 ( ), 파이프, 백그라운드, $( ), sh -c 안의 cd 는 밖으로 새지 않게 따라간다. 흉내내지 않는 것은
-# 명령치환의 결과값이다: refspec 이 명령치환이면 현재 브랜치(HEAD)로 본다(흔한 "$(git branch --show-current)").
-# git 낱말을 못 찾았는데 문자열이 push 모양이면(eval "git push" 등) "?" 로 낸다.
+#   sh/bash -c(옵션과 래퍼가 붙어도), eval, $( ). 서브셸 ( ), 파이프라인, 백그라운드, $( ), sh -c
+#   안의 cd 는 밖으로 새지 않게 한다. dry-run(-n)과 삭제(-d, :dst)는 내지 않는다.
+# 흉내내지 않는 것: 명령치환의 결과값. refspec 이 명령치환이면 현재 브랜치(HEAD)로 본다(흔한
+#   "$(git branch --show-current)". 옛 게이트도 같은 추정을 했다).
 # LC_ALL=C: 바이트 단위로 돈다. UTF-8 로케일의 awk 는 잘못된 바이트열에서 멈춘다.
+PARSER_END="#MANGOLOVE_PARSER_END"
 _push_targets() {
     _strip_heredocs "$1" "$HEREDOC_DATA_SINKS" \
-        | LC_ALL=C awk -v cwd="$2" -v home="$HOME" -v push_re="$GIT_PUSH_RE" '
-        BEGIN { U = "\001?"; S = "\034"; DIR = cwd; DEPTH = 0 }
+        | LC_ALL=C awk -v cwd="$2" -v home="$HOME" -v push_re="$GIT_PUSH_RE" \
+              -v sink="$HEREDOC_DATA_SINKS" -v endmark="$PARSER_END" '
+        BEGIN { U = "\001?"; S = "\034"; DIR = cwd; DEPTH = 0; SEEN = 0; ACTS = 0 }
+        $0 == endmark { SEEN = 1; next }
         { if (sub(/\\$/, "")) buf = buf $0 " "; else buf = buf $0 "\n" }
-        END { process(buf); print "!\tEND" }                  # 끝까지 돌았다는 표시(호출자가 확인한다)
+        END { process(buf); if (SEEN) print "!\tEND" }
 
         # 따옴표와 $( ) 밖의 연산자에서 단순 명령으로 가르고, 가르는 즉시 순서대로 해석한다.
-        # 서브셸 ( ), 파이프의 양쪽, 백그라운드 & 는 자식 셸에서 돌므로 그 안의 cd 는 밖으로 새지 않는다:
-        # 새게 두면 `(cd /tmp && ls); git push` 의 push 를 /tmp 에서 판정해 조용히 통과시킨다.
+        # 파이프라인(원소가 둘 이상), 백그라운드 &, 서브셸 ( ) 은 자식 셸에서 돌므로 그 안의 cd 는 밖으로
+        # 새지 않는다. 파이프라인의 원소는 { }, for, if 같은 복합 명령일 수 있어서, 복합 명령 깊이마다
+        # 파이프라인 시작 디렉토리를 기억했다가 파이프라인이 끝날 때 되돌린다
+        # (`{ cd /tmp && ls; } 2>&1 | tail; git push` 의 push 를 /tmp 에서 판정해 조용히 통과시켰다).
         # 리다이렉션의 & 와 | 는 연산자가 아니다(2>&1, &>, >|).
-        function process(s,    i, c, nx, q, dp, cur, stk, sp, prevpipe) {
+        function process(s,    n, i, c, nx, q, dp, cur, stk, sp, depth, pst, pip) {
             if (++DEPTH > 8) { DEPTH--; return }
-            cur = ""; q = ""; dp = 0; sp = 0; prevpipe = 0
-            for (i = 1; i <= length(s); i++) {
+            ACTS++
+            n = length(s); cur = ""; q = ""; dp = 0; sp = 0; depth = 0; pst[0] = DIR; pip[0] = 0
+            for (i = 1; i <= n; i++) {
                 c = substr(s, i, 1); nx = substr(s, i + 1, 1)
                 if (q == "\047") { cur = cur c; if (c == "\047") q = ""; continue }
                 if (c == "\\") { cur = cur c nx; i++; continue }
@@ -358,26 +365,36 @@ _push_targets() {
                 if (c == ")" && dp > 0) { dp--; cur = cur c; continue }
                 if (q != "" || dp > 0 || !index(";|&()\n", c)) { cur = cur c; continue }
                 if ((c == "&" || c == "|") && (substr(s, i - 1, 1) ~ /[<>]/ || (c == "&" && nx == ">"))) { cur = cur c; continue }
-                if (c == "|" && nx != "|") { run(cur, 1); cur = ""; prevpipe = 1; if (nx == "&") i++; continue }
-                if (c == "&" && nx != "&") { run(cur, 1); cur = ""; prevpipe = 0; continue }
-                if (c == "|" || c == "&") i++
-                run(cur, prevpipe); cur = ""; prevpipe = 0
+                depth = run(cur, depth, pst, pip); cur = ""
+                if (c == "|" && nx != "|") { pip[depth] = 1; if (nx == "&") i++; continue }
+                if (c == "&" && nx != "&") pip[depth] = 1
+                else if (c == "|" || c == "&") i++
+                endpipe(depth, pst, pip)
                 if (c == "(") stk[++sp] = DIR
-                else if (c == ")" && sp > 0) DIR = stk[sp--]
+                else if (c == ")" && sp > 0) { DIR = stk[sp--]; pst[depth] = DIR }
             }
-            run(cur, prevpipe)
+            depth = run(cur, depth, pst, pip)
+            endpipe(depth, pst, pip)
             DEPTH--
         }
-        function run(cmd, insub,    saved) {
-            if (cmd !~ /[^ \t]/) return
-            saved = DIR
+        # 단순 명령 하나를 해석하고, 복합 명령 키워드로 깊이를 조정해 돌려준다.
+        function run(cmd, depth, pst, pip,    w) {
+            if (cmd !~ /[^ \t\n]/) return depth
+            w = cmd; sub(/^[ \t\n]+/, "", w); sub(/[ \t\n].*/, "", w)
+            if (w ~ /^(\}|fi|done|esac)$/ && depth > 0) { endpipe(depth, pst, pip); depth-- }
+            if (w ~ /^(\{|if|for|while|until|case|select)$/) { depth++; pst[depth] = DIR; pip[depth] = 0 }
             simple(cmd)
-            if (insub) DIR = saved
+            return depth
+        }
+        # 파이프라인이 끝났다. 원소가 둘 이상이었거나 백그라운드였으면 그 안의 cd 는 자식 셸의 것이다.
+        function endpipe(depth, pst, pip) {
+            if (pip[depth]) DIR = pst[depth]
+            pip[depth] = 0; pst[depth] = DIR
         }
         # 셸 낱말 분리. 작은따옴표 안의 $ 는 확장하지 않도록 \002 로 표시해 둔다.
-        function words(s, W,    n, i, c, tok, q, has, dp) {
-            n = 0; tok = ""; q = ""; has = 0; dp = 0
-            for (i = 1; i <= length(s); i++) {
+        function words(s, W,    n, len, i, c, tok, q, has, dp) {
+            n = 0; tok = ""; q = ""; has = 0; dp = 0; len = length(s)
+            for (i = 1; i <= len; i++) {
                 c = substr(s, i, 1)
                 if (q == "\047") { if (c == "\047") q = ""; else tok = tok (c == "$" ? "\002" : c); continue }
                 if (c == "\\" && q == "") { tok = tok substr(s, i + 1, 1); i++; continue }
@@ -392,12 +409,29 @@ _push_targets() {
             return n
         }
         # 낱말 안의 $( ... ) 명령도 본다(out=$(git push 2>&1)). 명령치환은 자식 셸이라 cd 가 새지 않는다.
-        function subst(w,    i, dp, st, saved) {
-            dp = 0
-            for (i = 1; i <= length(w); i++) {
+        # 그 안의 heredoc 본문은 벗긴다: "$(cat <<EOF ... EOF)" 로 넘긴 커밋 메시지나 PR 본문의
+        # "git push" 글자가 명령으로 읽혀 커밋 명령이 막히거나 감사가 수십 건 쌓였다.
+        function subst(w,    len, i, dp, st, saved) {
+            dp = 0; len = length(w)
+            for (i = 1; i <= len; i++) {
                 if (substr(w, i, 2) == "$(") { if (dp++ == 0) st = i + 2; i++; continue }
-                if (substr(w, i, 1) == ")" && dp > 0 && --dp == 0) { saved = DIR; process(substr(w, st, i - st)); DIR = saved }
+                if (substr(w, i, 1) == ")" && dp > 0 && --dp == 0) {
+                    saved = DIR; process(dehere(substr(w, st, i - st))); DIR = saved
+                }
             }
+        }
+        # 데이터 싱크(cat, tee, python 등)가 받는 heredoc 본문을 뺀다(_strip_heredocs 와 같은 판단의 줄 단위판).
+        function dehere(s,    L, n, k, out, mk, dash, t, m) {
+            n = split(s, L, "\n"); out = ""; mk = ""
+            for (k = 1; k <= n; k++) {
+                if (mk != "") { t = L[k]; if (dash) sub(/^\t+/, "", t); if (t == mk) mk = ""; continue }
+                if (L[k] ~ sink && match(L[k], /<<-?[ \t]*("[^"]+"|\047[^\047]+\047|[A-Za-z_][A-Za-z0-9_]*)/)) {
+                    m = substr(L[k], RSTART + 2, RLENGTH - 2); dash = (m ~ /^-/)
+                    sub(/^-?[ \t]*/, "", m); gsub(/["\047]/, "", m); mk = m
+                }
+                out = out L[k] "\n"
+            }
+            return out
         }
         # 낱말 하나를 확장한다. 값이 여럿이면 S 로 잇고, 풀 수 없으면 U.
         function expand(w,    pre, rest, name, vals, r, nv, nr, V, R, k, j, out) {
@@ -433,11 +467,13 @@ _push_targets() {
             return out
         }
         function emit(d, rev,    n, D, k) {
+            ACTS++
             if (d == U || rev == U) { print "?\t?"; return }
             n = split(d, D, S)
             for (k = 1; k <= n; k++) print D[k] "\t" rev
         }
-        function simple(s,    W, n, i, k, e, v, name, arg, g, d, sc, hasc, saved) {
+        function simple(s,    W, n, i, k, e, v, name, arg, g, d, sc, acts) {
+            acts = ACTS
             n = words(s, W)
             for (k = 1; k <= n; k++) if (index(W[k], "$(")) subst(W[k])
             i = 1
@@ -465,20 +501,13 @@ _push_targets() {
                 return
             }
             if (W[i] == "popd") { DIR = U; return }
-            # sh -c "<명령>" 은 옵션이 붙어도(-lc, -e -o pipefail -c) 같은 모양이다. 자식 셸이라 cd 가 새지 않는다.
-            if (W[i] ~ /(^|\/)(ba|z|da|k)?sh$/) {
-                hasc = 0
-                for (k = i + 1; k <= n; k++) {
-                    if (W[k] == "-o" || W[k] == "+o") { k++; continue }
-                    if (W[k] ~ /^[-+][A-Za-z]+$/) { if (W[k] ~ /c/) hasc = 1; continue }
-                    break
-                }
-                if (hasc && k <= n) { saved = DIR; process(W[k]); DIR = saved }
-                return
-            }
             if (W[i] == "eval") { arg = ""; for (k = i + 1; k <= n; k++) arg = arg " " W[k]; process(arg); return }
+            # 셸과 git 은 아무 위치에서나 찾는다(timeout 60 bash -c ..., nohup git push ...).
+            for (g = i; g <= n; g++) if (W[g] ~ /(^|\/)(ba|z|da|k)?sh$/ && shellcmd(W, g, n)) return
             for (g = i; g <= n; g++) if (W[g] == "git" || W[g] ~ /\/git$/) break
-            if (g > n) { if (s ~ push_re && !index(s, "$(")) emit(U, U); return }
+            # git 을 찾았는데 서브커맨드가 push 가 아니면 push 가 아니다(커밋 메시지 속 "git push" 글자).
+            # git 도 셸도 못 찾았는데 문자열이 push 모양이면 판정 불가로 감사한다(조용히 통과하지 않는다).
+            if (g > n) { if (ACTS == acts && s ~ push_re) emit(U, U); return }
             d = DIR; sc = 0
             for (k = g + 1; k <= n; k++) {
                 if (W[k] == "-C") { k++; d = resolve(d, expand(W[k])); continue }
@@ -488,6 +517,20 @@ _push_targets() {
                 sc = k; break
             }
             if (sc && W[sc] == "push") pushargs(d, W, sc + 1, n)
+        }
+        # W[g] 가 셸이고 뒤에 c 가 든 옵션이 오면(-c, -lc, --login -c, -e -o pipefail -c, --rcfile f -c)
+        # 그 명령 문자열을 해석하고 1 을 돌려준다. 자식 셸이라 cd 가 새지 않는다.
+        function shellcmd(W, g, n,    k, hasc, saved) {
+            hasc = 0
+            for (k = g + 1; k <= n; k++) {
+                if (W[k] ~ /^([-+][oO]|--rcfile|--init-file)$/) { k++; continue }
+                if (W[k] ~ /^--/) continue
+                if (W[k] ~ /^[-+][A-Za-z]+$/) { if (W[k] ~ /c/) hasc = 1; continue }
+                break
+            }
+            if (!hasc || k > n) return 0
+            saved = DIR; process(W[k]); DIR = saved
+            return 1
         }
         # push 인자: 첫 비-옵션은 원격, 나머지가 refspec. `+src:dst` 의 src 만 본다.
         function pushargs(d, W, from, n,    k, t, seen, any, e, m, V, j, src) {
@@ -502,7 +545,7 @@ _push_targets() {
                 if (!seen) { seen = 1; continue }
                 any = 1
                 e = expand(t)
-                if (e == U) { emit(d, "HEAD"); continue }        # "$(git branch --show-current)" 등: 현재 브랜치로 본다
+                if (e == U) { emit(d, "HEAD"); continue }
                 m = split(e, V, S)
                 for (j = 1; j <= m; j++) {
                     src = V[j]; sub(/^\+/, "", src); sub(/:.*/, "", src)
@@ -538,25 +581,27 @@ _json_unescape() {
     }'
 }
 
-# args 를 셸처럼 토큰으로 쪼갠다. 한 줄에 "<원형>\t<정리형>" 을 낸다. 인용부호는 묶음으로
-# 인정하고 제거한다. 단순 공백 분리로는 `/code-review "a b.js"` 가 세 토막으로 갈라져 경로
-# 지정이 무시된다(그 결과는 위 _json_unescape 주석 참조). eval 하지 않는다: args 는 외부
-# 입력이고, 여기서 필요한 것은 실행이 아니라 분해뿐이다.
-#
-# 정리형은 산문에 붙은 것을 뗀 값이다: 앞의 여는 괄호, 뒤의 구두점, 경로에 붙은 한글 조사
-# ("/.../CRS-1031의", "(Foo.java", "#1891)"). 원형만 보면 실재하는 경로를 짚었는데도 조사
-# 한 글자 때문에 못 알아본다. 둘 다 내는 이유: 순수 숫자 판정은 원형으로 해야 "(1)" 같은
-# 목록 번호를 PR 번호로 오인하지 않는다. ~/ 는 두 값 모두 $HOME 으로 편다.
+# args 를 셸처럼 토큰으로 쪼갠다. 한 줄에 원형, 정리형, 경로형을 \034 로 이어 낸다(탭으로 이으면
+# read 가 연속된 공백 구분자를 하나로 접어, 정리형이 빈 한글 낱말에서 경로형이 정리형 자리로 밀린다). 인용부호는 묶음으로
+# 인정하고 제거한다. 단순 공백 분리로는 `/code-review "a b.js"` 가 세 토막으로 갈라져 경로 지정이
+# 무시된다(그 결과는 위 _json_unescape 주석 참조). eval 하지 않는다: args 는 외부 입력이고, 여기서
+# 필요한 것은 실행이 아니라 분해뿐이다.
+#   원형:   손대지 않은 값. 순수 숫자와 URL 판정용("(1)" 같은 목록 번호를 PR 번호로 읽지 않는다).
+#   정리형: 앞의 여는 괄호와 따옴표, 뒤의 구두점과 한글 조사를 뗀 값. ref 와 PR 번호 판정용
+#           ("origin/develop의", "#1891)").
+#   경로형: 앞의 여는 괄호와 따옴표만 떼고 ~/ 를 $HOME 으로 편 값. 뒤는 _path_hit 이 실재를 확인하며
+#           한 글자씩 뗀다(한꺼번에 떼면 한글 경로 이름까지 먹혀 부모 디렉토리로 넓어진다).
 # LC_ALL=C: 조사는 바이트 단위로 떼야 한다. UTF-8 로케일의 awk 는 반쯤 뗀 글자에서 멈춘다.
 _arg_tokens() {
     printf '%s' "$1" | LC_ALL=C awk -v home="$HOME" '
-        function out(t,    c) {
+        function out(t,    c, p) {
             if (t == "") return
-            if (substr(t, 1, 2) == "~/") t = home substr(t, 2)
-            c = t
-            while (c ~ /^[([{<"\047]/) c = substr(c, 2)
+            p = t
+            while (p ~ /^[([{<"\047]/) p = substr(p, 2)
+            if (substr(p, 1, 2) == "~/") p = home substr(p, 2)
+            c = p
             while (c ~ /[])}>,.;:"\047!?]$/ || c ~ /[^ -~]$/) c = substr(c, 1, length(c) - 1)
-            print t "\t" c
+            print t "\034" c "\034" p
         }
         {
             n = length($0); tok = ""; inq = ""
@@ -604,9 +649,15 @@ COVERAGE_MODE=""      # all | none | paths
 COVERAGE_PATHS=()     # paths 일 때만 채운다. 이 트리 루트 기준 경로("." 은 전체)
 COVERAGE_TREES=()     # 인자가 짚은 **다른** git 작업 트리: "<루트><탭><그 루트 기준 경로>"
 ML_TOP=""             # 이 트리의 루트(물리 경로). 호출자가 구해 두면 다시 묻지 않는다
+
+# 원격 PR 을 본 호출: 어떤 트리도 커버하지 않는다. 다른 트리 기록도 버린다(남기면 원격 리뷰가
+# do_record 의 트리 루프를 타고 다른 트리에 커버리지로 기록된다).
+_coverage_remote() { COVERAGE_MODE="none"; COVERAGE_TREES=(); }
+
 _coverage_scope() {
-    local args root raw clean abs out t pre elsewhere=0 here=0 saw_pr=0 saw_num=0 prev="" refs=""
-    COVERAGE_MODE=""; COVERAGE_PATHS=(); COVERAGE_TREES=(); REF_CUR="-"
+    local args root raw clean path abs out t pre d leaf nested h name up
+    local cache="" elsewhere=0 here=0 saw_pr=0 saw_num=0 prev="" refs=""
+    COVERAGE_MODE=""; COVERAGE_PATHS=(); COVERAGE_TREES=(); REF_CUR=""; REF_UP=""; REF_FROM="-"
     args="$(_json_unescape "${1:-}")"
     [ -z "${args//[[:space:]]/}" ] && { COVERAGE_MODE="all"; return 0; }
     root="${ML_TOP:-$(git rev-parse --show-toplevel 2>/dev/null)}"
@@ -625,18 +676,17 @@ _coverage_scope() {
     # 아무 것도 인정하지 않았는데, 실측이 뒤집었다: 실사용 args 35종 중 33종(94%)이 커버리지 0 이
     # 됐다. 남는 한계: "lib 는 빼고" 같은 부정문의 경로와 "이 워크트리 말고" 같은 부정문의 지시어는
     # 인정 쪽으로 읽힌다. 산문의 의미를 해석하지 않는 대가다.
-    while IFS=$'\t' read -r raw clean; do
+    while IFS=$'\034' read -r raw clean path; do
         [ -n "$raw" ] || continue
         case "$raw" in
             --|--fix|--comment|--post|--no-post) continue ;;
-            --*=*) COVERAGE_MODE="none"; COVERAGE_TREES=(); return 0 ;;   # --pr=1952
-            --*) continue ;;                                                # 산문 속 --cached)
+            --*=*) _coverage_remote; return 0 ;;          # --pr=1952
+            --*) continue ;;                               # 산문 속 --cached)
         esac
         # 확정 신호는 경로 검사보다 먼저 본다. 뒤집으면 이름이 겹치는 로컬 경로가 원격 참조를 가린다
-        # (브랜치에 1952/ 를 심어 두면 /code-review 1952 가 그걸 봤다고 기록된다). 순수 숫자는 원형으로
-        # 본다: "(1)" 같은 목록 번호를 PR 번호로 읽지 않는다.
-        case "$raw" in *://*) COVERAGE_MODE="none"; COVERAGE_TREES=(); return 0 ;; esac
-        if [[ "$raw" =~ ^[0-9]+$ ]]; then COVERAGE_MODE="none"; COVERAGE_TREES=(); return 0; fi
+        # (브랜치에 1952/ 를 심어 두면 /code-review 1952 가 그걸 봤다고 기록된다).
+        case "$raw" in *://*) _coverage_remote; return 0 ;; esac
+        if [[ "$raw" =~ ^[0-9]+$ ]]; then _coverage_remote; return 0; fi
         # 이 트리를 가리키는 지시어("이 워크트리", "현재 브랜치", "this worktree")는 이 트리를 본 근거다.
         # 다른 트리를 맥락으로 곁들인 산문("프론트는 <다른 워크트리> 에 있음")이 그 경로 하나 때문에
         # 통째로 미커버가 되지 않게 한다(HUB2-390). 닫힌 목록만 본다.
@@ -647,26 +697,32 @@ _coverage_scope() {
                 esac ;;
         esac
         prev="$raw"
-        _path_hit "$raw"
-        # 한글만으로 된 낱말은 정리형이 비어 버린다. 그래도 실재하는 경로("회의록")면 경로로 본다: 여기서
-        # 버리면 디렉토리 하나를 본 리뷰가 트리 전체를 커버한다. 경로도 아니면 끝낸다(빈 정리형은 ref
-        # 목록의 빈 줄과 맞아 "다른 브랜치"로 읽히므로 아래 판정에 태우지 않는다).
-        [ -n "$clean" ] || [ -n "$HIT" ] || continue
+        _path_hit "$path"
+
+        # 한글만으로 된 낱말은 정리형이 비어 버린다. 빈 정리형은 ref 목록의 빈 줄과 맞아 "다른 브랜치"로
+        # 읽히므로 ref, PR 판정에 태우지 않는다. 그래도 실재하는 경로("회의록")면 아래에서 경로로 본다.
         if [ -n "$clean" ]; then
             case "$clean" in
-                *'#'[0-9]*) case "${clean##*#}" in *[!0-9]*) ;; *) COVERAGE_MODE="none"; COVERAGE_TREES=(); return 0 ;; esac ;;
+                *'#'[0-9]*) case "${clean##*#}" in *[!0-9]*) ;; *) _coverage_remote; return 0 ;; esac ;;
             esac
             # 경로로 풀리지 않는 /pull/ /merge_requests/ 는 원격 링크다(스킴이 없어도).
             if [ -z "$HIT" ]; then
-                case "$clean" in */pull/*|*/merge_requests/*) COVERAGE_MODE="none"; COVERAGE_TREES=(); return 0 ;; esac
+                case "$clean" in */pull/*|*/merge_requests/*) _coverage_remote; return 0 ;; esac
             fi
             case "$clean" in PR|pr|Pr|MR|mr|Mr) saw_pr=1 ;; esac
             case "$clean" in *[0-9]*) [ -n "$HIT" ] || saw_num=1 ;; esac
 
             # ref 도 경로보다 먼저 본다(같은 이름의 디렉토리로 브랜치 리뷰를 경로 리뷰로 바꾸지 못하게).
-            # 목록은 첫 필요 시점에 **한 번만** 뜬다. HEAD 는 for-each-ref 에 없으므로 직접 넣는다.
-            [ -n "$refs" ] || refs="HEAD
-$(git for-each-ref --format='%(refname:short)' refs/heads refs/tags refs/remotes 2>/dev/null)"
+            # 목록은 첫 필요 시점에 **한 번만** 뜨고, 현재 브랜치와 upstream 도 그 호출에서 함께 받는다.
+            # HEAD 는 for-each-ref 에 없으므로 직접 넣는다.
+            if [ -z "$refs" ]; then
+                refs="HEAD"
+                while IFS=$'\t' read -r h name up; do
+                    refs="${refs}"$'\n'"${name}"
+                    if [ "$h" = "*" ]; then REF_CUR="$name"; REF_UP="$up"; fi
+                done < <(git for-each-ref --format='%(HEAD)%09%(refname:short)%09%(upstream:short)' \
+                             refs/heads refs/tags refs/remotes 2>/dev/null)
+            fi
             case $'\n'"$refs"$'\n' in
                 *$'\n'"$clean"$'\n'*) _ref_is_base "$clean" || elsewhere=1; continue ;;
             esac
@@ -674,14 +730,39 @@ $(git for-each-ref --format='%(refname:short)' refs/heads refs/tags refs/remotes
 
         [ -n "$HIT" ] || continue
         case "$HIT" in /*) abs="$HIT" ;; *) abs="$PWD/$HIT" ;; esac
-        # 경로가 어느 트리에 속하는지는 **git 에게 묻는다**. 문자열 접두사로 가르면 루트 아래 중첩된 작업
-        # 트리(.claude/worktrees/<ID>)를 이 트리 경로로 읽어 그 트리에 기록을 안 남기고, ../ 가 섞인 경로를
-        # 레포 안으로 읽어 git 이 "outside repository" 로 죽으면서 기록 전체가 사라졌다.
-        # --show-toplevel 은 물리 경로를, --show-prefix 는 그 루트 기준 위치를 준다.
-        out="$(git -C "$(_dir_of "$abs")" rev-parse --show-toplevel --show-prefix 2>/dev/null)" || continue
-        t="${out%%$'\n'*}"; pre="${out#*$'\n'}"
-        [ "$pre" = "$out" ] && pre=""
-        [ -d "$abs" ] || pre="${pre}${abs##*/}"
+        if [ -d "$abs" ]; then d="$abs"; leaf=""; else d="${abs%/*}"; d="${d:-/}"; leaf="${abs##*/}"; fi
+        # 이 트리 안의 평범한 경로는 문자열로 끝낸다: 루트 아래이고 ../ 가 없고, 올라가며 중첩된 작업
+        # 트리(.git)나 심볼릭 링크를 만나지 않을 때만. 그 밖(다른 트리, 심볼릭 표기, ../, 중첩 worktree)은
+        # git 에게 묻는다. 문자열 접두사만 믿으면 .claude/worktrees/<ID> 를 이 트리 경로로 읽어 그 트리에
+        # 기록을 안 남기고, ../ 가 섞인 경로에서 git 이 "outside repository" 로 죽어 기록 전체가 사라졌다.
+        case "$abs" in
+            */../*|*/..|*/./*|*/.) ;;
+            "$root"|"$root"/*)
+                nested=0; t="$d"
+                while [ "${#t}" -gt "${#root}" ]; do
+                    if [ -e "$t/.git" ] || [ -L "$t" ]; then nested=1; break; fi
+                    t="${t%/*}"
+                done
+                if [ "$nested" = 0 ]; then
+                    pre="${abs#"$root"}"; pre="${pre#/}"
+                    COVERAGE_PATHS+=("${pre:-.}")
+                    continue
+                fi ;;
+        esac
+        # --show-toplevel 은 물리 경로를, --show-prefix 는 그 루트 기준 위치를 준다. 같은 디렉토리는 한 번만 묻는다.
+        t=""; pre=""
+        case "$cache" in
+            *$'\n'"$d"$'\t'*)
+                out="${cache#*$'\n'"$d"$'\t'}"; out="${out%%$'\n'*}"
+                t="${out%%$'\t'*}"; pre="${out#*$'\t'}" ;;
+            *)
+                if out="$(git -C "$d" rev-parse --show-toplevel --show-prefix 2>/dev/null)"; then
+                    t="${out%%$'\n'*}"; pre="${out#*$'\n'}"; [ "$pre" = "$out" ] && pre=""
+                fi
+                cache="${cache}"$'\n'"${d}"$'\t'"${t}"$'\t'"${pre}" ;;
+        esac
+        [ -n "$t" ] || continue
+        pre="${pre}${leaf}"
         if [ "$t" = "$root" ]; then
             COVERAGE_PATHS+=("${pre:-.}")
         else
@@ -702,18 +783,15 @@ $(git for-each-ref --format='%(refname:short)' refs/heads refs/tags refs/remotes
     return 0
 }
 
-# 산문에 붙은 것을 떼어 낸 실재하는 경로를 HIT 에 둔다(없으면 빈 값). 앞의 여는 괄호와 따옴표를 떼고,
-# 뒤에서 구두점과 한글 조사를 **한 글자씩** 떼며 실재하는지 본다. 바이트 부류로 한꺼번에 떼면 한글
-# 경로 이름까지 먹혀 부모 디렉토리로 넓어진다("docs/회의록을" 이 docs/ 가 됐다). 그래서 떼다가 / 로
-# 끝나면 포기한다: 짚은 것보다 넓게 인정하지 않는다. 명령치환 없이 전역으로 돌려준다(fork 없음).
+# 산문에 붙은 것을 떼어 낸 실재하는 경로를 HIT 에 둔다(없으면 빈 값). 입력은 _arg_tokens 의 경로형이다
+# (앞 괄호를 떼고 ~/ 를 편 값). 뒤에서 구두점과 한글 조사를 **한 글자씩** 떼며 실재하는지 본다.
+# 바이트 부류로 한꺼번에 떼면 한글 경로 이름까지 먹혀 부모 디렉토리로 넓어진다("docs/회의록을" 이
+# docs/ 가 됐다). 그래서 떼다가 / 로 끝나면 포기한다: 짚은 것보다 넓게 인정하지 않는다.
+# 명령치환 없이 전역으로 돌려준다(fork 없음).
 HIT=""
 _path_hit() {
     local t="$1" n=0
     HIT=""
-    case "$t" in \~/*) t="$HOME/${t#\~/}" ;; esac
-    while :; do
-        case "$t" in [\(\[\{\<\"\']*) t="${t#?}" ;; *) break ;; esac
-    done
     while [ -n "$t" ] && [ "$n" -le 16 ]; do
         if [ -e "$t" ]; then HIT="$t"; [ "$HIT" = "/" ] || HIT="${HIT%/}"; return 0; fi
         case "$t" in */) return 0 ;; esac
@@ -722,28 +800,21 @@ _path_hit() {
     return 0
 }
 
-# 경로의 디렉토리 부분(디렉토리면 자신).
-_dir_of() {
-    local d
-    if [ -d "$1" ]; then printf '%s' "$1"; return 0; fi
-    d="${1%/*}"
-    printf '%s' "${d:-/}"
-}
-
 # ref 낱말이 이 트리의 기준인가: HEAD, 현재 브랜치, upstream, 이 브랜치를 딴 지점, HEAD 의 조상.
 # "origin/develop 대비 변경" 의 origin/develop 은 다른 대상이 아니라 비교 기준이다. 이런 낱말을
 # 다른 브랜치 리뷰로 읽으면 가장 흔한 산문이 전부 미커버가 된다. 갈라진 형제 브랜치를 짚은
 # 호출(/code-review other-feature)은 여전히 다른 대상이다.
+# 현재 브랜치와 upstream 은 _coverage_scope 가 ref 목록을 뜰 때 함께 받아 둔다(REF_CUR, REF_UP).
 # 첫 push 의 -u 뒤에는 upstream 이 자기 원격 브랜치로 바뀌고, 기준 브랜치가 앞서 나가면 조상도 아니게
-# 된다. 딴 지점은 브랜치 reflog 의 첫 줄에 남아 있다("branch: Created from origin/develop").
-# 현재 브랜치, upstream, 딴 지점은 한 _coverage_scope 안에서 변하지 않으므로 처음 한 번만 구한다.
-REF_CUR="-"; REF_UP=""; REF_FROM=""
+# 된다. 딴 지점은 브랜치 reflog 의 첫 줄에 남아 있다("branch: Created from origin/develop"). reflog 는
+# 문자열 비교가 모두 빗나갔을 때 한 번만 읽는다.
+REF_CUR=""; REF_UP=""; REF_FROM="-"
 _ref_is_base() {
     local r="$1"
     [ "$r" = HEAD ] && return 0
-    if [ "$REF_CUR" = "-" ]; then
-        REF_CUR="$(git symbolic-ref --quiet --short HEAD 2>/dev/null)"
-        REF_UP="$(git rev-parse --abbrev-ref '@{upstream}' 2>/dev/null)"
+    if [ -n "$REF_CUR" ] && [ "$r" = "$REF_CUR" ]; then return 0; fi
+    if [ -n "$REF_UP" ] && { [ "$r" = "$REF_UP" ] || [ "$r" = "${REF_UP#*/}" ]; }; then return 0; fi
+    if [ "$REF_FROM" = "-" ]; then
         REF_FROM=""
         if [ -n "$REF_CUR" ]; then
             REF_FROM="$(git reflog show --format=%gs "refs/heads/$REF_CUR" 2>/dev/null | tail -1)"
@@ -755,10 +826,7 @@ _ref_is_base() {
             esac
         fi
     fi
-    # 문자열 비교를 먼저 한다. git 을 부르는 조상 판정은 그다음이다.
-    if [ "$r" = "$REF_CUR" ] || [ "$r" = "$REF_UP" ] || [ "$r" = "$REF_FROM" ]; then return 0; fi
-    if [ -n "$REF_UP" ] && [ "$r" = "${REF_UP#*/}" ]; then return 0; fi
-    if [ -n "$REF_FROM" ] && [ "$r" = "${REF_FROM#*/}" ]; then return 0; fi
+    if [ -n "$REF_FROM" ] && { [ "$r" = "$REF_FROM" ] || [ "$r" = "${REF_FROM#*/}" ]; }; then return 0; fi
     git merge-base --is-ancestor "$r" HEAD 2>/dev/null
 }
 
@@ -1198,7 +1266,7 @@ _judge_rev() {
 # gh pr create 는 보지 않는다. 내용을 올리지 않고(비대화형에서 push 를 대신하지 않는다), 이미 올라간
 # 브랜치는 원격 추적 ref 가 갱신돼 범위가 늘 비므로 막을 수 있는 대상이 없다.
 do_pretooluse() {
-    local input raw dir rev gd top rc key seen=$'\n' bypassed=$'\n' blocked=0 parsed=0
+    local input raw dir rev gd top rc key hit seen=$'\n' bypassed=$'\n' repos=$'\n' blocked=0 parsed=0 unknown=0
     # read -d '' 는 builtin 이라 cat 의 포크를 없앤다. NUL 이 없으면 1 을 반환하나
     # 그때도 읽은 내용은 input 에 담긴다.
     IFS= read -r -d '' input || true
@@ -1211,21 +1279,27 @@ do_pretooluse() {
     while IFS=$'\t' read -r dir rev; do
         [ -n "$dir" ] || continue
         if [ "$dir" = "!" ]; then parsed=1; continue; fi
-        if [ "$dir" = "?" ] || [ "$rev" = "?" ] || [ ! -d "$dir" ]; then
-            _record_fail_open "push 대상 레포나 커밋을 명령에서 정할 수 없음"
-            continue
-        fi
-        # 레포 식별은 git 한 번으로 한다: git-dir 은 상태 경로, toplevel 은 같은 레포를 묶는 키다.
-        gd=""; top=""
-        { read -r gd; read -r top; } < <(git -C "$dir" rev-parse --absolute-git-dir --show-toplevel 2>/dev/null)
-        [ -n "$top" ] || continue                       # 비-git 디렉토리는 판정 대상이 아니다
+        if [ "$dir" = "?" ] || [ ! -d "$dir" ]; then unknown=1; continue; fi
+        # 레포 식별은 디렉토리마다 git 한 번: git-dir 은 상태 경로, toplevel 은 판정 위치이자 레포 키다.
+        case "$repos" in
+            *$'\n'"$dir"$'\t'*) hit="${repos#*$'\n'"$dir"$'\t'}"; hit="${hit%%$'\n'*}"
+                                gd="${hit%%$'\t'*}"; top="${hit#*$'\t'}" ;;
+            *) gd=""; top=""
+               { read -r gd; read -r top; } < <(git -C "$dir" rev-parse --absolute-git-dir --show-toplevel 2>/dev/null)
+               repos="${repos}${dir}"$'\t'"${gd}"$'\t'"${top}"$'\n' ;;
+        esac
+        # 비-git 디렉토리에서는 진짜 push 가 실패한다. 판정이 여기 닿았다면 파서가 디렉토리를 잘못 풀었다는
+        # 뜻이므로 조용히 넘기지 않고 감사한다.
+        if [ -z "$top" ]; then unknown=1; continue; fi
         # 같은 명령에서 같은 레포, 같은 커밋은 한 번만 본다(PreToolUse 는 실행 전이라 둘이 같은 상태다).
         key="${top}"$'\t'"${rev}"
         case "$seen" in *$'\n'"$key"$'\n'*) continue ;; esac
         seen="${seen}${key}"$'\n'
         # 이 레포의 1회 우회를 이미 썼으면 그 레포의 나머지 push 도 그 우회에 든다.
         case "$bypassed" in *$'\n'"$top"$'\n'*) continue ;; esac
-        ( cd "$dir" 2>/dev/null || exit 0
+        # 판정은 레포 루트에서 한다. 범위의 경로는 루트 기준이라, 하위 디렉토리(cd sub && git push)에서
+        # 판정하면 경로 제한이 한 건도 안 맞아 미검토 변경이 조용히 통과했다.
+        ( cd "$top" 2>/dev/null || exit 0
           _ml_init_state "$gd"
           _bypassed && exit 3
           _judge_rev "$rev" ); rc=$?
@@ -1233,11 +1307,14 @@ do_pretooluse() {
             1) blocked=1 ;;
             3) bypassed="${bypassed}${top}"$'\n' ;;
         esac
-    done < <(_push_targets "$(_json_unescape "$raw" nl)" "$PWD")
-    # 파서가 끝까지 돌지 못하면(awk 문법 오류 등) 판정할 push 가 하나도 안 나와 전부 조용히 통과한다.
-    # 실제로 그랬다(awk 예약어 sub 를 인자 이름으로 써서 게이트 전체가 꺼졌다). 감사로 남긴다.
-    [ "$parsed" = 1 ] || _record_fail_open "push 명령 파서가 끝까지 돌지 못함"
+    done < <(_push_targets "$(_json_unescape "${raw}\\n${PARSER_END}" nl)" "$PWD")
 
+    # 파서가 끝까지 돌지 못하면(awk 문법 오류 등) 판정할 push 가 하나도 안 나와 전부 조용히 통과한다.
+    # 실제로 그랬다(awk 예약어 sub 를 인자 이름으로 써서 게이트 전체가 꺼졌다). 완료 표시는 JSON 풀기부터
+    # 모든 단계를 지나야 나오므로, 어느 단계가 죽어도 감사로 남는다. 판정 불가는 명령당 한 번만 적는다.
+    if [ "$parsed" = 0 ] || [ "$unknown" = 1 ]; then
+        _record_fail_open "push 대상 레포나 커밋을 명령에서 정할 수 없음"
+    fi
     [ "$blocked" -eq 1 ] && exit 2
     exit 0
 }
@@ -1317,7 +1394,9 @@ do_skip() {
 
 # ── status: 사람용 진단. 인자가 없으면 게이트가 실제로 볼 push 범위를 그대로 보여준다.
 do_status() {
-    local ref="${1:-}"
+    local ref="${1:-}" top
+    # 판정은 레포 루트에서 한다(범위의 경로가 루트 기준이다: do_pretooluse 주석).
+    if top="$(git rev-parse --show-toplevel 2>/dev/null)"; then cd "$top" || exit 1; fi
     _ml_init_state
     # _range_signature 는 A...B 만 이해한다. sha 나 --working 을 넘기면 서명이 비어
     # 모든 스킬이 충족으로 보이는 **거짓 PASS** 가 난다. 아예 받지 않는다.

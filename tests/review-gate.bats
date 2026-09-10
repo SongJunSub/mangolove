@@ -16,19 +16,23 @@ setup() {
     setup_test_env
     GATE="$MANGOLOVE_DIR/lib/review-gate.sh"
     REPO_DIR="$TEST_DIR/proj"
-    mkdir -p "$REPO_DIR"
-    git -C "$REPO_DIR" init -q -b main
-    git -C "$REPO_DIR" config user.email t@example.com
-    git -C "$REPO_DIR" config user.name t
-    echo seed > "$REPO_DIR/seed.txt"
-    git -C "$REPO_DIR" add -A
-    git -C "$REPO_DIR" commit -qm seed
-    # upstream 을 흉내낸다(네트워크도 클론도 없이). --set-upstream-to 는 실제 remote 의
-    # fetch refspec 을 요구하므로 원격 추적 ref 와 branch.* 설정을 직접 심는다.
-    git -C "$REPO_DIR" remote add origin "$TEST_DIR/fake-remote.git"
-    git -C "$REPO_DIR" update-ref refs/remotes/origin/main HEAD
-    git -C "$REPO_DIR" config branch.main.remote origin
-    git -C "$REPO_DIR" config branch.main.merge refs/heads/main
+    _init_repo_with_upstream "$REPO_DIR" "$TEST_DIR/fake-remote.git"
+}
+
+# seed 커밋 하나와 upstream(origin/main)을 가진 레포를 심는다(네트워크도 클론도 없이).
+# --set-upstream-to 는 실제 remote 의 fetch refspec 을 요구하므로 원격 추적 ref 와 branch.* 설정을 직접 심는다.
+_init_repo_with_upstream() {
+    mkdir -p "$1"
+    git -C "$1" init -q -b main
+    git -C "$1" config user.email t@example.com
+    git -C "$1" config user.name t
+    echo seed > "$1/seed.txt"
+    git -C "$1" add -A
+    git -C "$1" commit -qm seed
+    git -C "$1" remote add origin "$2"
+    git -C "$1" update-ref refs/remotes/origin/main HEAD
+    git -C "$1" config branch.main.remote origin
+    git -C "$1" config branch.main.merge refs/heads/main
 }
 
 teardown() {
@@ -39,7 +43,7 @@ teardown() {
 _json_cmd() {
     local c="${1//\"/\\\"}"
     printf '{"tool_name":"Bash","session_id":"%s","cwd":"%s","tool_input":{"command":"%s"}}' \
-        "${SESSION:-s1}" "$REPO_DIR" "$c"
+        "${SESSION:-s1}" "${CWD:-$REPO_DIR}" "$c"
 }
 
 # PostToolUse(Skill) JSON: 실행된 스킬 이름 + cwd
@@ -48,27 +52,30 @@ _json_cmd() {
 _json_skill() {
     if [ -n "${2:-}" ]; then
         printf '{"tool_name":"Skill","session_id":"%s","cwd":"%s","tool_input":{"skill":"%s","args":"%s"}}' \
-            "${SESSION:-s1}" "$REPO_DIR" "$1" "$2"
+            "${SESSION:-s1}" "${CWD:-$REPO_DIR}" "$1" "$2"
     else
         printf '{"tool_name":"Skill","session_id":"%s","cwd":"%s","tool_input":{"skill":"%s"}}' \
-            "${SESSION:-s1}" "$REPO_DIR" "$1"
+            "${SESSION:-s1}" "${CWD:-$REPO_DIR}" "$1"
     fi
 }
 
 # 훅 문서가 적고 있는 대체 필드명. 런타임이 어느 쪽을 보내도 원장이 채워져야 한다.
 _json_skill_alt() {
     printf '{"tool_name":"Skill","session_id":"%s","cwd":"%s","tool_input":{"skill_name":"%s"}}' \
-        "${SESSION:-s1}" "$REPO_DIR" "$1"
+        "${SESSION:-s1}" "${CWD:-$REPO_DIR}" "$1"
 }
 
 _gate() { run bash -c "printf '%s' '$(_json_cmd "$1")' | bash '$GATE' pretooluse"; }
 
 # 외부 API 신호 = Medium 승격. 커밋까지 해야 push 범위에 들어간다.
-_commit_external_api() {
-    printf 'const r = await axios.get("https://api.example.com/%s")\n' "${1:-v1}" \
-        > "$REPO_DIR/client${1:-}.js"
-    git -C "$REPO_DIR" add -A
-    git -C "$REPO_DIR" commit -qm "api ${1:-v1}"
+_commit_external_api() { _commit_external_api_in "$REPO_DIR" "$@"; }
+
+# 외부 API 신호(Medium)를 지정한 레포에 커밋한다. $2 가 있으면 파일 이름과 경로에 붙인다.
+_commit_external_api_in() {
+    printf 'const r = await axios.get("https://api.example.com/%s")\n' "${2:-v1}" \
+        > "$1/client${2:-}.js"
+    git -C "$1" add -A
+    git -C "$1" commit -qm "api ${2:-v1}"
 }
 
 # 이 세션에서 Medium 필수 리뷰 3종을 모두 돌린 것으로 기록한다(외부 API 신호가 있으면
@@ -77,6 +84,31 @@ _run_all_reviews() {
     printf '%s' "$(_json_skill simplify "${1:-}")"        | bash "$GATE" record
     printf '%s' "$(_json_skill code-review "${1:-}")"     | bash "$GATE" record
     printf '%s' "$(_json_skill security-review "${1:-}")" | bash "$GATE" record
+}
+
+# 브랜치 하나에 파일 N개짜리 커밋을 만든다. 끝나면 main 으로 돌아온다. $1 브랜치, $2 시작점, $3 파일 수
+_branch_commit() {
+    local i tag="$1-$RANDOM"
+    git -C "$REPO_DIR" checkout -q -B "$1" "$2"
+    for i in $(seq 1 "$3"); do echo "export const F$i = $i" > "$REPO_DIR/work-$tag-$i.js"; done
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm "work $1"
+    git -C "$REPO_DIR" checkout -q main
+}
+
+# 갈라진 형제 브랜치(현재 브랜치의 조상도 upstream 도 아니다).
+_make_sibling() { _branch_commit "$1" main 1; }
+
+# 파일 11개(= Medium)짜리 남의 작업을 원격 추적 ref 로 올린다. $1 원격 브랜치 이름, $2 시작점(기본 main)
+_remote_foreign_work() {
+    _branch_commit "tmp-$1" "${2:-main}" 11
+    git -C "$REPO_DIR" update-ref "refs/remotes/origin/$1" "tmp-$1"
+}
+
+# 세션 cwd 가 아닌 두 번째 레포. REPO_DIR 과 같은 절차로 심는다.
+_other_repo() {
+    OTHER="$TEST_DIR/other"
+    _init_repo_with_upstream "$OTHER" "$TEST_DIR/other-remote.git"
 }
 
 # ── 정책 표 (required_skills): strict.md 의 트랙별 리뷰 표와 단일 출처를 공유한다 ──
@@ -260,13 +292,25 @@ _run_all_reviews() {
     [ "$status" -eq 2 ]
 }
 
-@test "위험: 다른 세션의 원장은 오늘의 push 를 통과시키지 않는다" {
+@test "세션: 다른 세션이 스킬을 돌려도 이 세션이 돌린 리뷰가 지워지지 않는다" {
+    # 원장을 세션으로 무효화하던 시절, 같은 worktree 의 다른 세션이 아무 스킬이나 부르면
+    # 리뷰 기록이 통째로 지워져 리뷰를 다 돌린 push 가 "미실행"으로 막혔다.
     _commit_external_api
-    SESSION=s1
-    _run_all_reviews
-    run bash -c "printf '%s' '$(SESSION=s1; _json_cmd "git push")' | bash '$GATE' pretooluse"
+    SESSION=s1 _run_all_reviews
+    printf '%s' "$(SESSION=s2 _json_skill linear-ticket)" | bash "$GATE" record
+    run bash -c "printf '%s' '$(SESSION=s1 _json_cmd "git push")' | bash '$GATE' pretooluse"
     [ "$status" -eq 0 ]
-    run bash -c "printf '%s' '$(SESSION=s2; _json_cmd "git push")' | bash '$GATE' pretooluse"
+    run bash -c "printf '%s' '$(SESSION=s2 _json_cmd "git push")' | bash '$GATE' pretooluse"
+    [ "$status" -eq 0 ]
+}
+
+@test "세션: 세션이 바뀌어도 리뷰가 본 뒤 바뀐 내용은 막힌다 (내용 주소가 기준)" {
+    printf 'const a = await axios.get("https://api.example.com/a")\n' > "$REPO_DIR/a.js"
+    SESSION=s1 _run_all_reviews
+    printf 'const a = await axios.post("https://api.example.com/a", {})\nconst e = eval(x)\n' > "$REPO_DIR/a.js"
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm sneak
+    run bash -c "printf '%s' '$(SESSION=s2 _json_cmd "git push")' | bash '$GATE' pretooluse"
     [ "$status" -eq 2 ]
 }
 
@@ -291,10 +335,12 @@ _run_all_reviews() {
     [ "$status" -eq 2 ]
 }
 
-@test "gate: gh pr create 도 같은 경계로 본다" {
+@test "gate: gh pr create 는 내용을 올리지 않으므로 게이트 대상이 아니다" {
+    # 올라간 브랜치는 원격 추적 ref 가 갱신돼 범위가 늘 비고, 안 올라간 브랜치로는 PR 을 만들 수
+    # 없다(비대화형 gh 는 push 를 대신하지 않는다). 막을 수 있는 대상이 없으니 걸지 않는다.
     _commit_external_api
     _gate "gh pr create --fill"
-    [ "$status" -eq 2 ]
+    [ "$status" -eq 0 ]
 }
 
 @test "gate: 여러 줄이어도 push 가 없으면 통과한다 (오탐 방지)" {
@@ -620,9 +666,10 @@ OLD
     [ "$status" -eq 2 ]
 }
 
-@test "범위: 레포 밖 경로(다른 worktree)를 리뷰하면 커버하지 않는다" {
+@test "범위: 레포 밖 경로(다른 worktree)만 리뷰하면 이 트리를 커버하지 않는다" {
     _commit_external_api
     local other="$TEST_DIR/otherworktree"; mkdir -p "$other"
+    git -C "$other" init -q -b main
     _run_all_reviews "high $other"
     _gate "git push"
     [ "$status" -eq 2 ]
@@ -695,15 +742,28 @@ OLD
     ! grep -q "	outside.js\$" "$REPO_DIR/.git/mangolove/.review-covered"
 }
 
-@test "위험: 브랜치 이름을 리뷰한 호출이 이 워킹트리를 커버하지 않는다" {
-    # /code-review main 은 다른 브랜치를 본다. 평범한 낱말이라 형태로는 구별되지 않으므로
-    # 닫힌 강도 목록에 없으면 모르는 토큰으로 취급한다.
+@test "위험: 갈라진 다른 브랜치를 리뷰한 호출이 이 워킹트리를 커버하지 않는다" {
+    # /code-review other-feature 는 다른 브랜치를 본다. 이 트리의 기준(HEAD, 현재 브랜치,
+    # upstream, 딴 지점, 조상)이 아닌 ref 는 다른 대상 신호다.
+    _make_sibling other-feature
     _commit_external_api
-    _run_all_reviews "main"
+    _run_all_reviews "other-feature"
     _gate "git push"
     [ "$status" -eq 2 ]
     # 로컬에 없는 브랜치 이름은 산문 낱말과 형태가 같아 구별되지 않는다(알려진 한계).
-    # 실재하는 브랜치는 위에서 잡힌다.
+}
+
+@test "범위: 비교 기준 ref(upstream, 현재 브랜치)만 적은 산문은 이 트리를 본 것이다" {
+    # "origin/main 대비 변경" 의 origin/main 은 비교 기준이지 다른 리뷰 대상이 아니다.
+    # 이걸 다른 브랜치 리뷰로 읽으면 가장 흔한 산문이 전부 미커버가 된다.
+    _commit_external_api
+    _run_all_reviews "origin/main 대비 변경 전체"
+    _gate "git push"
+    [ "$status" -eq 0 ]
+    rm -f "$REPO_DIR/.git/mangolove/.review-ledger" "$REPO_DIR/.git/mangolove/.review-covered"
+    _run_all_reviews "main"
+    _gate "git push"
+    [ "$status" -eq 0 ]
 }
 
 @test "범위: PR 낱말과 티켓번호가 섞인 산문도 원격 리뷰로 본다" {
@@ -830,17 +890,18 @@ OLD
 }
 
 @test "보안: 브랜치 이름과 같은 디렉토리가 있어도 브랜치 리뷰로 본다" {
-    mkdir -p "$REPO_DIR/main"
-    echo decoy > "$REPO_DIR/main/decoy.js"
+    _make_sibling feature-x
+    mkdir -p "$REPO_DIR/feature-x"
+    echo decoy > "$REPO_DIR/feature-x/decoy.js"
     printf 'const a = await axios.get("https://api.example.com/a")\n' > "$REPO_DIR/real.js"
-    _run_all_reviews "main"
+    _run_all_reviews "feature-x"
     git -C "$REPO_DIR" add -A
     git -C "$REPO_DIR" commit -qm branchname
     _gate "git push"
     [ "$status" -eq 2 ]
     # 차단만으로는 부족하다(real.js 때문에 어차피 막힌다). decoy 가 covered 면 안 된다.
     [ ! -s "$REPO_DIR/.git/mangolove/.review-covered" ] || \
-        ! grep -q "main/decoy.js" "$REPO_DIR/.git/mangolove/.review-covered"
+        ! grep -q "feature-x/decoy.js" "$REPO_DIR/.git/mangolove/.review-covered"
 }
 
 @test "보안: __all__ 이라는 이름의 파일이 sentinel 과 충돌하지 않는다" {
@@ -1086,21 +1147,21 @@ _block_kinds() { grep -o '"kind":"[a-z]*"' "$MANGOLOVE_DIR/efficacy/proj.jsonl" 
     # 먼저 막아주므로, 그걸로 시험하면 따옴표 추적이 없어도 통과한다(이빨 없는 테스트였다).
     # 파서를 직접 부른다: 페이로드에 따옴표를 넣으면 bats 헬퍼의 인용이 먼저 깨진다.
     run bash -c 'source "'"$GATE"'"
-        printf "%s" "$(_gated_push_line "python3 -c \"s = 12 <<EOF\"
-git push origin main")"'
-    [ -n "$output" ]
+        printf "%s" "$(_push_targets "python3 -c \"s = 12 <<EOF\"
+git push origin main" "$PWD")"'
+    [[ "$output" == *"	main"* ]]
     run bash -c 'source "'"$GATE"'"
-        printf "%s" "$(_gated_push_line "cat report.txt   # see '"'"'<<EOF'"'"' below
-git push origin main")"'
-    [ -n "$output" ]
+        printf "%s" "$(_push_targets "cat report.txt   # see '"'"'<<EOF'"'"' below
+git push origin main" "$PWD")"'
+    [[ "$output" == *"	main"* ]]
 }
 
 @test "heredoc: 진짜 데이터 싱크의 본문은 여전히 벗긴다 (원래 오탐)" {
     run bash -c 'source "'"$GATE"'"
-        printf "%s" "$(_gated_push_line "cat > d.md <<MD
+        printf "%s" "$(_push_targets "cat > d.md <<MD
 배포는 git push 로 한다
-MD")"'
-    [ -z "$output" ]
+MD" "$PWD")"'
+    [ "$output" = "!	END" ]            # 파서 완료 표시만 남고 push 는 없다
 }
 
 @test "heredoc: 본문을 실행하는 소비자는 벗기지 않는다 (데이터 싱크만 벗긴다)" {
@@ -1114,10 +1175,7 @@ MD")"'
     # 하위에서 돌면 전부 _absent 로 기록돼 해소 불가능한 차단 루프가 됐다.
     mkdir -p "$REPO_DIR/sub"
     printf 'const a = await axios.get("https://api.example.com/a")\n' > "$REPO_DIR/sub/api.js"
-    local s
-    for s in simplify code-review security-review; do
-        (cd "$REPO_DIR/sub" && printf '{"tool_name":"Skill","session_id":"s1","cwd":"%s","tool_input":{"skill":"%s"}}' "$PWD" "$s" | bash "$GATE" record)
-    done
+    CWD="$REPO_DIR/sub" _run_all_reviews
     grep -q "	sub/api.js\$" "$REPO_DIR/.git/mangolove/.review-covered"
     git -C "$REPO_DIR" add -A
     git -C "$REPO_DIR" commit -qm sub
@@ -1235,16 +1293,353 @@ MD")"'
     [ ! -f "$REPO_DIR/.mangolove/.review-skip" ]
 }
 
-@test "보안: gh pr create 는 git 훅을 거치지 않으므로 그 자리에서 소진된다" {
-    # 하위 게이트가 구조적으로 없다. 미루면 마커가 살아남아 다음 push 까지 통과시킨다.
+@test "우회: gh pr create 는 1회 우회 마커를 소비하지 않는다 (다음 push 가 소비한다)" {
     _commit_external_api
-    mkdir -p "$REPO_DIR/.githooks"
-    printf '#!/usr/bin/env bash\nexit 0\n' > "$REPO_DIR/.githooks/pre-push"
-    chmod +x "$REPO_DIR/.githooks/pre-push"
-    git -C "$REPO_DIR" config core.hooksPath .githooks
     mkdir -p "$REPO_DIR/.mangolove"
     printf '근거\n' > "$REPO_DIR/.mangolove/.review-skip"
     _gate "gh pr create --fill"
     [ "$status" -eq 0 ]
+    [ -f "$REPO_DIR/.mangolove/.review-skip" ]
+    _gate "git push"
+    [ "$status" -eq 0 ]
     [ ! -f "$REPO_DIR/.mangolove/.review-skip" ]
+}
+
+# ── 판정 범위의 기준 (2026-09-10 실사례: 리뷰를 다 돌렸는데 막혔다) ─────────
+#
+# 기준을 origin/main 으로 추정하면 develop, 통합 브랜치에서 딴 작업에 남의 커밋이 섞인다.
+# 그 파일들은 어떤 리뷰로도 덮을 수 없어 차단이 영영 풀리지 않았다.
+
+@test "기준: develop 에서 딴 브랜치는 main 에 없는 develop 커밋을 범위에 넣지 않는다 (CRS-1031)" {
+    _remote_foreign_work develop
+    git -C "$REPO_DIR" checkout -q -b CRS-1031 refs/remotes/origin/develop
+    echo fix > "$REPO_DIR/fix.txt"
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm fix
+    # 명시 refspec(첫 push)과 인자 없는 push 둘 다
+    _gate "git push -u origin CRS-1031"
+    [ "$status" -eq 0 ]
+    _gate "git push"
+    [ "$status" -eq 0 ]
+}
+
+@test "기준: develop 에서 딴 브랜치라도 자기 변경은 여전히 리뷰를 요구한다 (안전 유지)" {
+    _remote_foreign_work develop
+    git -C "$REPO_DIR" checkout -q -b CRS-1 refs/remotes/origin/develop
+    _commit_external_api
+    _gate "git push -u origin CRS-1"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"보지 않은 파일 1개"* ]]      # 남의 커밋 11개가 섞이지 않았다
+    _run_all_reviews
+    _gate "git push -u origin CRS-1"
+    [ "$status" -eq 0 ]
+}
+
+@test "기준: 통합 브랜치에서 딴 하위 티켓은 통합 브랜치의 다른 티켓 커밋을 넣지 않는다 (HUB2-390)" {
+    _remote_foreign_work HUB2-312
+    git -C "$REPO_DIR" checkout -q -b HUB2-390 refs/remotes/origin/HUB2-312
+    echo small > "$REPO_DIR/small.txt"
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm small
+    _gate "git push -u origin HUB2-390"
+    [ "$status" -eq 0 ]
+}
+
+@test "기준: rebase 뒤 force push 에 그사이 develop 에 들어온 남의 커밋이 딸려 오지 않는다" {
+    git -C "$REPO_DIR" update-ref refs/remotes/origin/develop main
+    git -C "$REPO_DIR" checkout -q -b feat refs/remotes/origin/develop
+    echo mine > "$REPO_DIR/mine.txt"
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm mine
+    git -C "$REPO_DIR" update-ref refs/remotes/origin/feat HEAD          # 한 번 올렸다
+    git -C "$REPO_DIR" checkout -q main
+    _remote_foreign_work develop refs/remotes/origin/develop              # develop 이 앞서 나갔다
+    git -C "$REPO_DIR" checkout -q feat
+    git -C "$REPO_DIR" rebase -q refs/remotes/origin/develop
+    _gate "git push --force-with-lease origin feat"
+    [ "$status" -eq 0 ]
+}
+
+@test "기준: 원격 브랜치를 머지해 온 파일은 빠지고, 머지 뒤 새로 쓴 코드는 남는다" {
+    _remote_foreign_work other
+    git -C "$REPO_DIR" checkout -q -b feat
+    echo mine > "$REPO_DIR/mine.txt"
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm mine
+    git -C "$REPO_DIR" merge -q --no-ff -m "merge other" refs/remotes/origin/other
+    _gate "git push -u origin feat"
+    [ "$status" -eq 0 ]
+    # 머지 뒤에 검토되지 않은 Medium 코드를 얹으면 여전히 막힌다
+    _commit_external_api
+    _gate "git push -u origin feat"
+    [ "$status" -eq 2 ]
+}
+
+@test "기준: -u 로 upstream 이 자기 브랜치로 바뀌어도 딴 지점 이름은 비교 기준으로 본다" {
+    _remote_foreign_work develop
+    git -C "$REPO_DIR" checkout -q -b feat refs/remotes/origin/develop
+    git -C "$REPO_DIR" config branch.feat.remote origin
+    git -C "$REPO_DIR" config branch.feat.merge refs/heads/feat
+    git -C "$REPO_DIR" update-ref refs/remotes/origin/feat HEAD
+    git -C "$REPO_DIR" checkout -q main
+    _remote_foreign_work develop refs/remotes/origin/develop              # develop 이 앞서 나갔다
+    git -C "$REPO_DIR" checkout -q feat
+    _commit_external_api
+    _run_all_reviews "origin/develop 대비 변경"
+    _gate "git push"
+    [ "$status" -eq 0 ]
+}
+
+# ── push 가 도는 레포 (cwd 가 아니라 명령이 가리키는 곳) ─────────────
+
+@test "대상 레포: git -C 로 다른 레포를 올리면 cwd 가 아니라 그 레포를 판정한다" {
+    _other_repo
+    _commit_external_api                           # cwd 레포: 미검토 Medium (이번에 안 올린다)
+    _commit_external_api_in "$OTHER"
+    CWD="$OTHER" _run_all_reviews
+    _gate "git -C $OTHER push -u origin main"
+    [ "$status" -eq 0 ]                            # 옛 동작: cwd 레포를 보고 막았다
+}
+
+@test "대상 레포: cwd 가 깨끗해도 git -C 로 올리는 레포가 미검토면 막는다" {
+    _other_repo
+    _commit_external_api_in "$OTHER"
+    _gate "git -C $OTHER push -u origin main"
+    [ "$status" -eq 2 ]                            # 옛 동작: 깨끗한 cwd 를 보고 통과시켰다
+}
+
+@test "대상 레포: 변수에 담은 경로로 cd 해서 올려도 그 레포를 판정한다" {
+    _other_repo
+    _commit_external_api_in "$OTHER"
+    _gate "W=$OTHER; cd \"\$W\" && git push -u origin main 2>&1 | tail -8"
+    [ "$status" -eq 2 ]
+}
+
+@test "대상 레포: 따옴표로 묶은 변수 경로를 여러 줄 명령에서도 푼다" {
+    _other_repo
+    _commit_external_api_in "$OTHER"
+    _gate "W=$OTHER\ngit -C \"\$W\" push -u origin main"
+    [ "$status" -eq 2 ]
+}
+
+@test "대상 레포: for 루프로 두 레포를 올리면 둘 다 판정한다" {
+    _other_repo
+    _commit_external_api_in "$OTHER"               # other 만 미검토
+    _gate "for R in $REPO_DIR $OTHER; do git -C \"\$R\" push; done"
+    [ "$status" -eq 2 ]
+}
+
+@test "대상 레포: 한 명령의 push 가 여럿이면 두 번째 것도 판정한다" {
+    _other_repo
+    _commit_external_api_in "$OTHER"
+    _gate "git push origin main && git -C $OTHER push origin main"
+    [ "$status" -eq 2 ]
+}
+
+@test "대상 레포: 명령에서 풀 수 없는 디렉토리는 추정해서 막지 않고 감사만 남긴다" {
+    _commit_external_api
+    _gate 'git -C "$(git rev-parse --show-toplevel)" push'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"fail-open"* ]]
+    grep -q '"kind":"fail-open"' "$MANGOLOVE_DIR/efficacy/proj.jsonl"
+}
+
+@test "대상 레포: 따옴표 없는 명령치환 경로도 서브커맨드를 잘못 읽지 않는다" {
+    _commit_external_api
+    _gate 'git -C $(git rev-parse --show-toplevel) push'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"fail-open"* ]]
+}
+
+@test "refspec: 리다이렉션(2>&1)을 refspec 으로 오인해 통과시키지 않는다" {
+    _commit_external_api
+    _gate "git push -u origin main 2>&1 | tail -8"
+    [ "$status" -eq 2 ]
+}
+
+@test "gate: 커밋 메시지 속 git push 글자를 push 로 오인하지 않는다" {
+    _commit_external_api
+    _gate 'git commit -m "fix git push flow"'
+    [ "$status" -eq 0 ]
+}
+
+# ── 두 트리를 한 번에 리뷰한 호출 (2026-09-10 CRS-1031 실제 인자 모양) ──────
+
+@test "두 트리: 한 리뷰 호출이 두 작업 트리를 짚으면 두 레포 push 가 모두 통과한다" {
+    _other_repo
+    _commit_external_api
+    _commit_external_api_in "$OTHER"
+    # 실제 호출 모양: 기준 ref, 괄호 설명, 조사가 붙은 경로가 섞인 산문
+    _run_all_reviews "medium 두 워크트리의 origin/main 대비 변경(미추적 파일 포함): (1) $REPO_DIR (crs) 및 (2) ${OTHER}의 변경"
+    _gate "git push -u origin main"
+    [ "$status" -eq 0 ]
+    _gate "W=$OTHER; git -C \"\$W\" push -u origin main"
+    [ "$status" -eq 0 ]
+}
+
+@test "두 트리: 다른 트리만 짚은 호출은 cwd 트리를 커버하지 않는다" {
+    _other_repo
+    _commit_external_api
+    _commit_external_api_in "$OTHER"
+    _run_all_reviews "medium ${OTHER} 의 변경만"
+    _gate "git push -u origin main"
+    [ "$status" -eq 2 ]
+    _gate "git -C $OTHER push -u origin main"
+    [ "$status" -eq 0 ]
+}
+
+@test "범위: 산문에 섞인 --cached) 같은 낱말은 대상 신호가 아니다 (CRS-968)" {
+    printf 'const a = await axios.get("https://api.example.com/a")\n' > "$REPO_DIR/a.js"
+    _run_all_reviews "두 레포의 스테이징된 변경: $REPO_DIR (git diff --cached) 확인"
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm staged
+    _gate "git push"
+    [ "$status" -eq 0 ]
+}
+
+@test "범위: 레포 밖이라도 코드가 아닌 경로(스크래치 파일)는 다른 대상이 아니다" {
+    _commit_external_api
+    local note="$TEST_DIR/scratch-note.md"; echo memo > "$note"
+    _run_all_reviews "high 결과는 $note 에 적는다"
+    _gate "git push"
+    [ "$status" -eq 0 ]
+}
+
+@test "범위: '이 워크트리' 지시어와 함께 다른 트리를 맥락으로 적은 호출은 이 트리를 본 것이다 (HUB2-390)" {
+    _other_repo
+    _commit_external_api
+    _commit_external_api_in "$OTHER"
+    _run_all_reviews "이 워크트리(main)의 origin/main...HEAD 전체. 프론트는 ${OTHER} 에 있음."
+    _gate "git push"
+    [ "$status" -eq 0 ]
+    # 맥락으로 적은 다른 트리는 리뷰된 것으로 기록하지 않는다(한 번도 안 본 레포가 통과하면 안 된다)
+    _gate "git -C $OTHER push -u origin main"
+    [ "$status" -eq 2 ]
+}
+
+@test "범위: 한글 낱말의 빈 정리형이 ref 목록의 빈 줄과 맞지 않는다" {
+    local fresh="$TEST_DIR/fresh"; mkdir -p "$fresh"
+    git -C "$fresh" init -q -b main
+    run bash -c "cd '$fresh' && source '$GATE' && _coverage_scope '변경 전체 검토' && echo \"\$COVERAGE_MODE\""
+    [ "$output" = "all" ]
+}
+
+# ── 명령 해석과 경로 판정 (simplify 리뷰가 재현한 결함) ─────────────
+
+@test "해석: 커밋 메시지 안의 ; 뒤 git push 글자를 push 로 오인하지 않는다" {
+    _commit_external_api
+    _gate 'git commit -m "wip; git push origin main"'
+    [ "$status" -eq 0 ]
+}
+
+@test "해석: 서브셸, sh -c, 명령치환, eval 안의 push 도 그 레포에서 판정한다" {
+    _other_repo
+    _commit_external_api_in "$OTHER"
+    _gate "(cd $OTHER && git push)"
+    [ "$status" -eq 2 ]
+    _gate "bash -c \"cd $OTHER && git push origin main\""
+    [ "$status" -eq 2 ]
+    _gate "cd $OTHER; out=\$(git push 2>&1)"
+    [ "$status" -eq 2 ]
+    _gate "cd $OTHER; eval git push"
+    [ "$status" -eq 2 ]
+}
+
+@test "해석: 변수에 담은 브랜치 이름도 풀어 판정한다 (감사로 새지 않는다)" {
+    _commit_external_api
+    _gate 'B=main; git push origin "$B"'
+    [ "$status" -eq 2 ]
+}
+
+@test "해석: 줄 이음으로 나눈 push 의 refspec 을 잇는다" {
+    git -C "$REPO_DIR" checkout -q -b topic
+    _commit_external_api
+    git -C "$REPO_DIR" checkout -q main
+    _gate 'git push \\\n  origin topic'
+    [ "$status" -eq 2 ]
+}
+
+@test "범위: 한글 경로에 붙은 조사를 떼도 부모 디렉토리로 넓히지 않는다" {
+    mkdir -p "$REPO_DIR/docs/회의록"
+    printf 'const a = await axios.get("https://api.example.com/a")\n' > "$REPO_DIR/docs/회의록/a.js"
+    printf 'const o = await axios.get("https://api.example.com/o")\n' > "$REPO_DIR/docs/other.js"
+    _run_all_reviews "high docs/회의록을 봐줘"
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm docs
+    _gate "git push"
+    [ "$status" -eq 2 ]
+    grep -q "	docs/회의록/a.js\$" "$REPO_DIR/.git/mangolove/.review-covered"
+    ! grep -q "	docs/other.js\$" "$REPO_DIR/.git/mangolove/.review-covered"
+}
+
+@test "record: 리뷰 정책에 없는 스킬은 기록하지 않는다 (매 호출의 범위 계산과 해시를 아낀다)" {
+    echo changed > "$REPO_DIR/seed.txt"
+    printf '%s' "$(_json_skill linear-ticket)" | bash "$GATE" record
+    [ ! -f "$REPO_DIR/.git/mangolove/.review-ledger" ]
+    [ ! -f "$REPO_DIR/.git/mangolove/.review-covered" ]
+}
+
+# ── code-review 가 재현한 결함 ─────────────────────────────────────
+
+@test "해석: 서브셸, 파이프 안의 cd 는 뒤따르는 push 의 디렉토리를 바꾸지 않는다" {
+    _commit_external_api
+    _gate "(cd $TEST_DIR && ls); git push"
+    [ "$status" -eq 2 ]
+    _gate "cd $TEST_DIR | cat; git push"
+    [ "$status" -eq 2 ]
+    _gate "cd $TEST_DIR 2>&1; cd $REPO_DIR; git push"
+    [ "$status" -eq 2 ]
+}
+
+@test "해석: 명령치환으로 준 브랜치 이름은 현재 브랜치로 보고 판정한다 (감사로 새지 않는다)" {
+    _commit_external_api
+    _gate 'git push -u origin "$(git branch --show-current)"'
+    [ "$status" -eq 2 ]
+}
+
+@test "해석: bash -lc, bash -e -o pipefail -c 로 감싼 push 도 판정한다" {
+    _commit_external_api
+    _gate 'bash -lc "git push origin main"'
+    [ "$status" -eq 2 ]
+    _gate 'bash -e -o pipefail -c "git push origin main"'
+    [ "$status" -eq 2 ]
+}
+
+@test "두 트리: ../ 로 짚은 옆 레포도 그 레포에 기록되고 이 트리 기록이 깨지지 않는다" {
+    _other_repo
+    _commit_external_api
+    _commit_external_api_in "$OTHER"
+    _run_all_reviews "high $REPO_DIR 와 ../other 의 변경"
+    _gate "git push -u origin main"
+    [ "$status" -eq 0 ]
+    _gate "git -C $OTHER push -u origin main"
+    [ "$status" -eq 0 ]
+}
+
+@test "두 트리: 루트 아래 중첩된 작업 트리를 짚으면 그 작업 트리에 기록한다 (.claude/worktrees/<ID>)" {
+    local wt="$REPO_DIR/.claude/worktrees/WT"
+    mkdir -p "$REPO_DIR/.claude/worktrees"
+    git -C "$REPO_DIR" worktree add -q -b WT "$wt" main
+    _commit_external_api_in "$wt"
+    _run_all_reviews "high $wt 의 변경"
+    _gate "git -C $wt push -u origin WT"
+    [ "$status" -eq 0 ]
+}
+
+@test "범위: 한글로만 된 디렉토리 이름을 짚으면 그 디렉토리만 커버한다" {
+    mkdir -p "$REPO_DIR/회의록"
+    printf 'const a = await axios.get("https://api.example.com/a")\n' > "$REPO_DIR/회의록/a.js"
+    printf 'const o = await axios.get("https://api.example.com/o")\n' > "$REPO_DIR/other.js"
+    _run_all_reviews "high 회의록"
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm meeting
+    _gate "git push"
+    [ "$status" -eq 2 ]
+    grep -q "	회의록/a.js\$" "$REPO_DIR/.git/mangolove/.review-covered"
+    ! grep -q "	other.js\$" "$REPO_DIR/.git/mangolove/.review-covered"
+}
+
+@test "해석: 파서가 끝까지 돌았다는 표시를 낸다 (파서가 죽으면 조용히 통과하지 않고 감사한다)" {
+    run bash -c "source '$GATE'; _push_targets 'git status' /cwd"
+    [ "$output" = "!	END" ]
 }

@@ -24,10 +24,10 @@
 #
 # 2와 3은 경계를 옮겨야만 닫힌다. 그래서 커버리지와 경계 이동을 함께 한다.
 #
-# 범위는 세 점(<upstream>...HEAD)이다. merge base 가 두 가지를 공짜로 해결한다:
-#   - 이미 upstream 에 있는 브랜치를 머지해도 그 내용은 범위에서 자동으로 빠진다
-#     (머지 커밋 특별처리 코드가 필요 없다)
-#   - upstream 에 없는(= 어디서도 검토되지 않은) 브랜치를 머지하면 그 내용은 범위에 남는다
+# 범위는 "이 push 로 원격에 처음 가는 커밋이 더하는 변경"이다(_push_scope). 기준 브랜치를
+# 추정하지 않고 git 에게 묻는다. 그래서 두 가지가 특별처리 없이 해결된다:
+#   - 이미 원격에 있는 브랜치를 머지해도 그 내용은 범위에서 빠진다
+#   - 원격에 없는(= 어디서도 공유되지 않은) 브랜치를 머지하면 그 내용은 범위에 남는다
 #     (미검토 코드가 머지로 숨지 못한다)
 # 그리고 범위는 커밋 개수와 무관하므로, 작은 커밋으로 쪼개 누적 우회하는 길이 막힌다.
 #
@@ -36,7 +36,7 @@
 #       실제로 실행된 스킬만 원장에 남는다. 모델의 자기보고가 아니라 도구 호출 사실이다.
 #       동시에 그 시점 작업 내용을 blob 해시로 스냅샷한다(아래 "커버리지").
 #   PreToolUse(matcher=Bash)   → review-gate.sh pretooluse
-#       git push (또는 gh pr create) 일 때만 발화. 범위에서 리뷰가 이미 본 내용을 뺀
+#       git push 일 때만 발화(명령이 가리키는 레포마다). 범위에서 리뷰가 이미 본 내용을 뺀
 #       잔여를 impact-score.sh 로 점수화해, 필수 리뷰가 원장에 있는지 대조하고
 #       없으면 push 를 차단(exit 2)한다.
 #
@@ -94,12 +94,10 @@ STATE_DIR=""
 _ml_tracked() { git ls-files --error-unmatch -- "$1" >/dev/null 2>&1; }
 
 LEDGER_REL=".mangolove/.review-ledger"
-# 원장이 어느 세션의 것인지 기록한다. 어제 돌린 리뷰가 오늘의 첫 push 를 통과시키면 안 된다.
-# HEAD 로는 무효화하지 **않는다**: push 경계에서는 HEAD 가 커밋마다 움직이므로 HEAD 기준
-# 무효화는 사실상 항상 원장을 지워 모든 push 를 막는다. 리뷰의 유효 범위는 HEAD 가 아니라
-# 아래 커버리지 파일(내용 주소)이 정한다.
-LEDGER_BASE_REL=".mangolove/.review-ledger.base"
-# 리뷰가 본 내용: "<스킬>\t<blob 해시>\t<경로>" 줄들. 세션 스코프.
+# 원장과 커버리지는 세션이나 HEAD 로 무효화하지 않는다. 세션으로 무효화하던 시절, 같은 worktree 에서
+# 다른 세션이 스킬을 부르면 이 세션이 돌린 리뷰가 통째로 지워져 리뷰를 다 돌린 push 가 막혔다.
+# 커버리지는 내용 주소(blob 해시)라, 리뷰가 본 내용과 올리는 내용이 같으면 누가 언제 돌렸든 리뷰된 것이다.
+# 리뷰가 본 내용: "<스킬>\t<blob 해시>\t<경로>" 줄들. 내용 주소 기준이라 세션과 무관하다.
 COVERED_REL=".mangolove/.review-covered"
 NOSCOPE_REL=".mangolove/.review-noscope"
 # 우회를 방금 썼다는 표시(찍힌 시각). 게이트 둘이 직렬로 걸리는데(에이전트 경로,
@@ -120,13 +118,13 @@ SKIP_HANDOFF_SECONDS=20
 # 대신 추적된 사본은 신뢰하지 않는다(_ml_tracked).
 SKIP_REL=".mangolove/.review-skip"
 
-# cwd 가 정해진 뒤 상태 경로를 확정한다. git-dir 을 못 구하면(비-git) 워킹트리 기본값을
-# 그대로 쓰는데, 그 경우는 어차피 게이트가 fail-open 한다.
+# cwd 가 정해진 뒤 상태 경로를 확정한다. 호출자가 git-dir 을 이미 구했으면 넘겨 git 호출을 아낀다.
+# git-dir 을 못 구하면(비-git) 워킹트리 기본값을 그대로 쓰는데, 그 경우는 어차피 게이트가 fail-open 한다.
 _ml_init_state() {
-    STATE_DIR="$(_ml_state_dir)"
+    STATE_DIR="${1:+$1/mangolove}"
+    [ -n "$STATE_DIR" ] || STATE_DIR="$(_ml_state_dir)"
     [ -n "$STATE_DIR" ] || return 0
     LEDGER_REL="$STATE_DIR/.review-ledger"
-    LEDGER_BASE_REL="$STATE_DIR/.review-ledger.base"
     COVERED_REL="$STATE_DIR/.review-covered"
     NOSCOPE_REL="$STATE_DIR/.review-noscope"
     USED_REL="$STATE_DIR/.review-skip.used"
@@ -191,18 +189,9 @@ _cd_to_hook_cwd() {
     if [ -n "$c" ] && [ -d "$c" ]; then cd "$c" 2>/dev/null || true; fi
 }
 
-# tool_input.command 는 JSON 문자열이라 개행이 역슬래시+n 두 글자로 온다. 그대로 정규식에
-# 태우면 둘째 줄 git 앞 글자가 'n'(영숫자)이라 단어 경계에 걸리지 않고, 멀티라인 명령이
-# 통째로 게이트를 빠져나간다(실측: 이 머신의 실제 커밋 호출 411건 중 84건, 20%).
-# 실제 개행으로 되돌린 뒤 grep 이 줄 단위로 보게 한다.
-_unescape_cmd() { printf '%s' "$1" | awk '{gsub(/\\n/,"\n"); gsub(/\\t/," "); print}'; }
-
-# git 을 단어 경계로 잡고 옵션 토큰을 건너뛴 뒤 push 서브커맨드만 매칭한다
-# (git log --grep=push 같은 비-push 는 통과). gh pr create 도 같은 경계다: 그 시점에
-# 작업이 공유된다.
+# 문자열이 push 모양인가(git 을 단어 경계로 잡고 옵션 토큰을 건너뛴 뒤 push 서브커맨드).
+# 구조 파서가 git 낱말을 찾지 못한 명령에서만 쓰는 하한이다(_push_targets).
 GIT_PUSH_RE='(^|[^[:alnum:]_])git([[:space:]]+-[^[:space:]]+([[:space:]]+[^-][^[:space:]]*)?)*[[:space:]]+push([[:space:]]|$)'
-GH_PR_RE='(^|[^[:alnum:]_])gh[[:space:]]+pr[[:space:]]+create([[:space:]]|$)'
-
 # heredoc 본문을 매칭 대상에서 뺀다. 게이트는 셸을 파싱하지 않고 명령 **문자열**을 보므로,
 # `python3 - <<PY ... PY` 로 넘긴 스크립트 본문에 "git push" 라는 글자가 있으면 그것을
 # 명령으로 오인해 무관한 작업을 막는다(실제로 다른 레포 작업 중에 반복해서 걸렸다).
@@ -255,37 +244,8 @@ _strip_heredocs() {
         }'
 }
 
-# 명령을 셸 구분자에서 쪼개 **명령 하나당 한 줄**로 만든다.
-# 줄 단위로만 보면 `git push --dry-run && git push origin main` 이 한 줄이라, 앞의
-# dry-run 만 보고 뒤의 진짜 push 를 통째로 놓친다. 쪼갠 뒤 세그먼트마다 판정한다.
-# (같은 이유로 `git push origin main && echo -n done` 의 -n 도 다른 세그먼트라 안 섞인다.)
-_split_segments() { printf '%s\n' "$1" | awk '{gsub(/&&|\|\||;|\|/, "\n"); print}'; }
-
-# --dry-run 은 아무 것도 공유하지 않으므로 게이트 대상이 아니다 (-n 은 push 의 dry-run 별칭).
-_is_dry_run() {
-    printf '%s' "$1" | grep -qE '(^|[[:space:]])(--dry-run|-[a-zA-Z]*n[a-zA-Z]*)([[:space:]]|$)'
-}
-
-# 원격 브랜치 삭제는 내용을 공유하지 않는다 (-d 는 --delete 의 짧은 형태).
-_is_delete() {
-    printf '%s' "$1" | grep -qE '(^|[[:space:]])(--delete|-[a-zA-Z]*d[a-zA-Z]*)([[:space:]]|$)'
-}
-
-# 게이트 대상이 되는 push 세그먼트 하나를 출력한다(없으면 빈 출력).
-_gated_push_line() {
-    _split_segments "$(_strip_heredocs "$1" "$HEREDOC_DATA_SINKS")" | grep -E "$GIT_PUSH_RE|$GH_PR_RE" | while IFS= read -r seg; do
-        case "$seg" in
-            *push*)
-                if _is_dry_run "$seg" || _is_delete "$seg"; then continue; fi
-                ;;
-        esac
-        printf '%s\n' "$seg"
-    done | head -1
-}
-
-# 판정 범위: upstream 대비 이 브랜치의 순변경. upstream 이 없으면 기본 브랜치로 폴백한다.
-# 빈 출력 = 범위를 정할 수 없음 → 호출자는 fail-open 한다(게이트가 작업을 인질로 잡지 않는다).
-# 이 레포의 기본 비교 기준(원격 트렁크). 빈 출력 = 정할 수 없음.
+# 원격 트렁크(origin/HEAD, 없으면 origin/main|master). 빈 출력 = 정할 수 없음.
+# 판정 범위의 기준으로 쓰지 않는다(아래 _push_scope). 원격과 공통 조상이 없는 이력의 폴백이다.
 _default_base() {
     local def c
     def="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)"
@@ -297,70 +257,280 @@ _default_base() {
     printf '%s' "$def"
 }
 
-_push_range() {
-    local up def src dst base
-    src="${1:-}"
-
-    if [ -n "$src" ]; then
-        # 명시된 refspec 이 있으면 그것이 실제로 올라가는 것이다.
-        # `git push origin topic:main` 을 HEAD 로 가정하면 엉뚱한(대개 빈) 범위를 본다.
-        dst="${src#*:}"; [ "$dst" = "$src" ] && dst=""
-        src="${src%%:*}"; src="${src#+}"
-        git rev-parse --verify --quiet "${src}^{commit}" >/dev/null 2>&1 || return 0
-        base=""
-        if [ -n "$dst" ]; then
-            dst="${dst#refs/heads/}"
-            git rev-parse --verify --quiet "origin/${dst}" >/dev/null 2>&1 && base="origin/${dst}"
-        fi
-        [ -z "$base" ] && base="$(_default_base)"
-        [ -n "$base" ] && printf '%s...%s' "$base" "$src"
-        return 0
+# ── 판정 범위: 이 push 로 원격에 처음 가는 커밋이 더하는 변경 ──────────────
+# 기준 브랜치를 추정하지 않는다. 추정하던 시절의 오탐이 전부 여기서 나왔다.
+#   - origin/HEAD(대개 main) 기준: develop 이나 통합 브랜치(HUB2-312)에서 딴 작업은 그 기준
+#     브랜치에만 있는 **남의 커밋**까지 범위에 들어온다. 그 파일들은 이 트리의 어떤 리뷰도 볼
+#     수 없어서(리뷰는 자기 변경만 본다) 리뷰를 몇 번 다시 돌려도 풀리지 않는 차단이 된다.
+#     2026-09-10 하루에 CRS-1030/1031(develop 에만 있는 17개), HUB2-380/390(HUB2-312 에만 있는
+#     65~75개)이 전부 이것으로 막혔다.
+#   - upstream 기준: 첫 push 의 -u 뒤에는 upstream 이 자기 원격 브랜치로 바뀌고, 명시
+#     refspec(git push origin X)은 upstream 을 보지 않는다. rebase 뒤에는 옛 원격 브랜치와의
+#     merge base 가 옛 분기점이라 그사이 develop 에 들어온 남의 커밋이 다시 범위에 들어온다.
+#
+# 대신 git 에게 묻는다. `<rev> --not --remotes` 는 어떤 원격 추적 ref 에도 없는 커밋, 즉 이
+# push 로 처음 공유되는 커밋이다. 그 경계(원격이 이미 가진 부모)가 기준이다.
+#   - 경계가 하나: <경계>...<rev> 가 곧 새 커밋들의 순변경이다.
+#   - 경계가 여럿(원격 브랜치를 머지): **모든** 경계와 내용이 다른 파일만 새 것이다. 원격
+#     브랜치에서 통째로 가져온 파일은 그 경계와 같아 빠지고, 충돌 해결로 새로 쓴 파일은 남는다.
+#   - 새 커밋이 없음: 공유할 내용이 없다(<rev>...<rev>, 빈 범위).
+#   - 원격과 공통 조상이 없음: 트렁크 기준으로 폴백한다. 원격 추적 ref 가 아예 없으면 정할
+#     근거가 없으므로 빈 값(호출자가 fail-open 하고 감사를 남긴다).
+# 원격에 없는 브랜치를 머지하면 그 커밋도 원격에 없으므로 범위에 남는다(미검토 코드가 머지로
+# 숨지 못한다). 원격에 있다는 것은 그 push 가 이미 이 게이트를 지났다는 뜻이다.
+#
+# 결과는 전역으로 돌려준다(_coverage_scope 와 같은 이유: 경로 배열을 문자열에 싣지 않는다).
+SCOPE_RANGE=""        # "<기준>...<rev>". 빈 값 = 정할 수 없음
+SCOPE_PATHS=()        # 비면 범위 전체. 경계가 여럿일 때만 새 파일로 좁힌다
+_push_scope() {
+    local rev="${1:-HEAD}" exclude="${2:-}" out line b
+    local bounds=() excl=()
+    SCOPE_RANGE=""; SCOPE_PATHS=()
+    [ -n "$(git for-each-ref --count=1 --format=x refs/remotes 2>/dev/null)" ] || return 0
+    # pre-push 가 준 원격 sha 는 fetch 전이라 추적 ref 에 없을 수 있어 따로 뺀다.
+    # ^ 는 --not 앞에 둔다: --not 뒤에서는 뜻이 뒤집혀 오히려 포함된다.
+    if [ -n "$exclude" ] && git cat-file -e "${exclude}^{commit}" 2>/dev/null; then
+        excl=("^$exclude")
     fi
+    # rev 가 없으면 rev-list 가 실패한다(따로 검증하지 않는다).
+    out="$(git rev-list --boundary "$rev" ${excl[@]+"${excl[@]}"} --not --remotes -- 2>/dev/null)" || return 0
+    if [ -z "$out" ]; then SCOPE_RANGE="${rev}...${rev}"; return 0; fi
+    while IFS= read -r line; do
+        case "$line" in -*) bounds+=("${line#-}") ;; esac
+    done <<EOF
+$out
+EOF
 
-    up="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null)"
-    if [ -n "$up" ] && git rev-parse --verify --quiet "$up" >/dev/null 2>&1; then
-        printf '%s...HEAD' "$up"; return 0
-    fi
-    def="$(_default_base)"
-    [ -n "$def" ] && printf '%s...HEAD' "$def"
+    case "${#bounds[@]}" in
+        0)  b="$(_default_base)"
+            [ -n "$b" ] && SCOPE_RANGE="${b}...${rev}"
+            return 0 ;;
+        1)  SCOPE_RANGE="${bounds[0]}...${rev}"
+            return 0 ;;
+    esac
+    # 경계가 여럿: 모든 경계와 내용이 다른 파일만 새 것이다. git 결합 diff 가 정확히 그 집합을 준다.
+    while IFS= read -r line; do
+        [ -n "$line" ] && SCOPE_PATHS+=("$line")
+    done < <(git -c core.quotePath=false diff --name-only "$rev" "${bounds[@]}" 2>/dev/null)
+    if [ "${#SCOPE_PATHS[@]}" -eq 0 ]; then SCOPE_RANGE="${rev}...${rev}"; return 0; fi
+    SCOPE_RANGE="${bounds[0]}...${rev}"
     return 0
 }
 
-# push 세그먼트에서 refspec 을 뽑는다: 옵션을 건너뛰고 (원격, refspec) 중 두 번째 비-옵션.
-# 못 찾으면 빈 출력 → 호출자는 현재 브랜치 기준으로 본다.
-_push_source_ref() {
-    printf '%s' "$1" | awk '
-        { for (i = 1; i <= NF; i++) if ($i == "push") { start = i + 1; break } }
-        start {
-            n = 0
-            for (i = start; i <= NF; i++) {
-                if ($i ~ /^-/) continue
-                n++
-                if (n == 2) { print $i; exit }
+# ── push 가 도는 레포와 올라가는 커밋 ────────────────────────────────
+# 훅의 cwd 는 세션이 서 있는 곳일 뿐이다. `git -C <다른 레포> push`, `cd <다른 레포> && git push`,
+# `W=<경로>; git -C "$W" push` 는 **다른 레포**를 올린다. cwd 로 판정하면 엉뚱한 레포의 범위와
+# 원장을 본다(2026-09-10: crs 세션에서 crs-admin-web push 가 crs 기준으로 판정됐다).
+#
+# 명령 전체를 awk 하나로 한 번만 읽는다. 따옴표와 $( ) 밖의 && || ; | & ( ) 개행에서 단순 명령으로
+# 가르고(따옴표를 무시하고 가르면 `git commit -m "wip; git push"` 의 메시지가 push 가 된다), 단순
+# 명령마다 디렉토리 이동과 변수를 따라가 push 인자까지 푼다. 레포, dry-run/삭제 여부, refspec 을
+# 서로 다른 토크나이저로 따로 읽으면 규칙이 갈라진다(한쪽만 변수를 풀어 조용히 샜다).
+#
+# 출력: 판정할 push 마다 "<디렉토리>\t<rev>". 디렉토리나 rev 를 풀 수 없으면 그 자리에 "?"
+# (호출자가 막지 않고 감사만 남긴다: 추정한 대상으로 막으면 그게 곧 오탐이다).
+# 따라가는 것: cd/pushd, git -C(누적), NAME=값(export 포함), for NAME in 값들, ~, $HOME, $PWD,
+#              sh/bash -c "<명령>", $( <명령> ). dry-run(-n)과 삭제(-d, :dst)는 내지 않는다.
+# 서브셸 ( ), 파이프, 백그라운드, $( ), sh -c 안의 cd 는 밖으로 새지 않게 따라간다. 흉내내지 않는 것은
+# 명령치환의 결과값이다: refspec 이 명령치환이면 현재 브랜치(HEAD)로 본다(흔한 "$(git branch --show-current)").
+# git 낱말을 못 찾았는데 문자열이 push 모양이면(eval "git push" 등) "?" 로 낸다.
+# LC_ALL=C: 바이트 단위로 돈다. UTF-8 로케일의 awk 는 잘못된 바이트열에서 멈춘다.
+_push_targets() {
+    _strip_heredocs "$1" "$HEREDOC_DATA_SINKS" \
+        | LC_ALL=C awk -v cwd="$2" -v home="$HOME" -v push_re="$GIT_PUSH_RE" '
+        BEGIN { U = "\001?"; S = "\034"; DIR = cwd; DEPTH = 0 }
+        { if (sub(/\\$/, "")) buf = buf $0 " "; else buf = buf $0 "\n" }
+        END { process(buf); print "!\tEND" }                  # 끝까지 돌았다는 표시(호출자가 확인한다)
+
+        # 따옴표와 $( ) 밖의 연산자에서 단순 명령으로 가르고, 가르는 즉시 순서대로 해석한다.
+        # 서브셸 ( ), 파이프의 양쪽, 백그라운드 & 는 자식 셸에서 돌므로 그 안의 cd 는 밖으로 새지 않는다:
+        # 새게 두면 `(cd /tmp && ls); git push` 의 push 를 /tmp 에서 판정해 조용히 통과시킨다.
+        # 리다이렉션의 & 와 | 는 연산자가 아니다(2>&1, &>, >|).
+        function process(s,    i, c, nx, q, dp, cur, stk, sp, prevpipe) {
+            if (++DEPTH > 8) { DEPTH--; return }
+            cur = ""; q = ""; dp = 0; sp = 0; prevpipe = 0
+            for (i = 1; i <= length(s); i++) {
+                c = substr(s, i, 1); nx = substr(s, i + 1, 1)
+                if (q == "\047") { cur = cur c; if (c == "\047") q = ""; continue }
+                if (c == "\\") { cur = cur c nx; i++; continue }
+                if (c == "\047" || c == "\"") { if (q == "") q = c; else if (q == c) q = ""; cur = cur c; continue }
+                if (c == "$" && nx == "(") { dp++; cur = cur "$("; i++; continue }
+                if (c == ")" && dp > 0) { dp--; cur = cur c; continue }
+                if (q != "" || dp > 0 || !index(";|&()\n", c)) { cur = cur c; continue }
+                if ((c == "&" || c == "|") && (substr(s, i - 1, 1) ~ /[<>]/ || (c == "&" && nx == ">"))) { cur = cur c; continue }
+                if (c == "|" && nx != "|") { run(cur, 1); cur = ""; prevpipe = 1; if (nx == "&") i++; continue }
+                if (c == "&" && nx != "&") { run(cur, 1); cur = ""; prevpipe = 0; continue }
+                if (c == "|" || c == "&") i++
+                run(cur, prevpipe); cur = ""; prevpipe = 0
+                if (c == "(") stk[++sp] = DIR
+                else if (c == ")" && sp > 0) DIR = stk[sp--]
             }
+            run(cur, prevpipe)
+            DEPTH--
+        }
+        function run(cmd, insub,    saved) {
+            if (cmd !~ /[^ \t]/) return
+            saved = DIR
+            simple(cmd)
+            if (insub) DIR = saved
+        }
+        # 셸 낱말 분리. 작은따옴표 안의 $ 는 확장하지 않도록 \002 로 표시해 둔다.
+        function words(s, W,    n, i, c, tok, q, has, dp) {
+            n = 0; tok = ""; q = ""; has = 0; dp = 0
+            for (i = 1; i <= length(s); i++) {
+                c = substr(s, i, 1)
+                if (q == "\047") { if (c == "\047") q = ""; else tok = tok (c == "$" ? "\002" : c); continue }
+                if (c == "\\" && q == "") { tok = tok substr(s, i + 1, 1); i++; continue }
+                if (c == "$" && substr(s, i + 1, 1) == "(") { dp++; tok = tok "$("; i++; continue }
+                if (dp > 0 && c == ")") { dp--; tok = tok c; continue }
+                if (q == "\"") { if (c == "\"") q = ""; else tok = tok c; continue }
+                if (c == "\047" || c == "\"") { q = c; has = 1; continue }
+                if ((c == " " || c == "\t") && dp == 0) { if (tok != "" || has) { W[++n] = tok; tok = ""; has = 0 }; continue }
+                tok = tok c
+            }
+            if (tok != "" || has) W[++n] = tok
+            return n
+        }
+        # 낱말 안의 $( ... ) 명령도 본다(out=$(git push 2>&1)). 명령치환은 자식 셸이라 cd 가 새지 않는다.
+        function subst(w,    i, dp, st, saved) {
+            dp = 0
+            for (i = 1; i <= length(w); i++) {
+                if (substr(w, i, 2) == "$(") { if (dp++ == 0) st = i + 2; i++; continue }
+                if (substr(w, i, 1) == ")" && dp > 0 && --dp == 0) { saved = DIR; process(substr(w, st, i - st)); DIR = saved }
+            }
+        }
+        # 낱말 하나를 확장한다. 값이 여럿이면 S 로 잇고, 풀 수 없으면 U.
+        function expand(w,    pre, rest, name, vals, r, nv, nr, V, R, k, j, out) {
+            if (w == U || w ~ /`/ || w ~ /\$\(/) return U
+            if (w == "~" || substr(w, 1, 2) == "~/") w = home substr(w, 2)
+            if (!match(w, /\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*/)) {
+                if (w ~ /\$/) return U
+                gsub(/\002/, "$", w)
+                return w
+            }
+            pre = substr(w, 1, RSTART - 1); rest = substr(w, RSTART + RLENGTH)
+            name = substr(w, RSTART, RLENGTH); gsub(/[${}]/, "", name)
+            if (name == "HOME") vals = home
+            else if (name == "PWD") vals = DIR
+            else if (name in VAR) vals = VAR[name]
+            else return U
+            if (vals == U || pre ~ /\$/) return U
+            r = expand(rest)
+            if (r == U) return U
+            nv = split(vals, V, S); nr = split(r, R, S)
+            if (nr == 0) { nr = 1; R[1] = "" }
+            out = ""
+            for (k = 1; k <= nv; k++) for (j = 1; j <= nr; j++) out = out (out == "" ? "" : S) pre V[k] R[j]
+            gsub(/\002/, "$", out)
+            return out
+        }
+        # base(여럿일 수 있다) 기준으로 p(여럿일 수 있다)를 푼다.
+        function resolve(base, p,    nb, np, B, P, k, j, out) {
+            if (base == U || p == U || p == "") return U
+            nb = split(base, B, S); np = split(p, P, S); out = ""
+            for (k = 1; k <= nb; k++) for (j = 1; j <= np; j++)
+                out = out (out == "" ? "" : S) (substr(P[j], 1, 1) == "/" ? P[j] : B[k] "/" P[j])
+            return out
+        }
+        function emit(d, rev,    n, D, k) {
+            if (d == U || rev == U) { print "?\t?"; return }
+            n = split(d, D, S)
+            for (k = 1; k <= n; k++) print D[k] "\t" rev
+        }
+        function simple(s,    W, n, i, k, e, v, name, arg, g, d, sc, hasc, saved) {
+            n = words(s, W)
+            for (k = 1; k <= n; k++) if (index(W[k], "$(")) subst(W[k])
+            i = 1
+            while (i <= n && W[i] ~ /^(if|then|else|elif|do|while|until|time|!|\{|\})$/) i++
+            if (i > n) return
+            if (W[i] == "for" && i + 2 <= n && W[i + 2] == "in") {
+                v = ""
+                for (k = i + 3; k <= n; k++) { e = expand(W[k]); if (e == U) { v = U; break }; v = v (v == "" ? "" : S) e }
+                VAR[W[i + 1]] = v
+                return
+            }
+            if (W[i] ~ /^(export|local|declare|readonly|typeset|env)$/) i++
+            while (i <= n && W[i] ~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
+                name = W[i]; sub(/=.*/, "", name)
+                VAR[name] = expand(substr(W[i], length(name) + 2))
+                i++
+            }
+            if (i > n) return
+            if (W[i] == "cd" || W[i] == "pushd") {
+                arg = ""
+                for (k = i + 1; k <= n; k++) { if (W[k] == "--" || W[k] ~ /^-[LPe@]+$/) continue; arg = W[k]; break }
+                if (arg == "") DIR = home
+                else if (arg == "-") DIR = U
+                else DIR = resolve(DIR, expand(arg))
+                return
+            }
+            if (W[i] == "popd") { DIR = U; return }
+            # sh -c "<명령>" 은 옵션이 붙어도(-lc, -e -o pipefail -c) 같은 모양이다. 자식 셸이라 cd 가 새지 않는다.
+            if (W[i] ~ /(^|\/)(ba|z|da|k)?sh$/) {
+                hasc = 0
+                for (k = i + 1; k <= n; k++) {
+                    if (W[k] == "-o" || W[k] == "+o") { k++; continue }
+                    if (W[k] ~ /^[-+][A-Za-z]+$/) { if (W[k] ~ /c/) hasc = 1; continue }
+                    break
+                }
+                if (hasc && k <= n) { saved = DIR; process(W[k]); DIR = saved }
+                return
+            }
+            if (W[i] == "eval") { arg = ""; for (k = i + 1; k <= n; k++) arg = arg " " W[k]; process(arg); return }
+            for (g = i; g <= n; g++) if (W[g] == "git" || W[g] ~ /\/git$/) break
+            if (g > n) { if (s ~ push_re && !index(s, "$(")) emit(U, U); return }
+            d = DIR; sc = 0
+            for (k = g + 1; k <= n; k++) {
+                if (W[k] == "-C") { k++; d = resolve(d, expand(W[k])); continue }
+                if (W[k] == "-c" || W[k] == "--namespace" || W[k] == "--super-prefix") { k++; continue }
+                if (W[k] ~ /^--(git-dir|work-tree)/) { d = U; if (W[k] !~ /=/) k++; continue }
+                if (W[k] ~ /^-/) continue
+                sc = k; break
+            }
+            if (sc && W[sc] == "push") pushargs(d, W, sc + 1, n)
+        }
+        # push 인자: 첫 비-옵션은 원격, 나머지가 refspec. `+src:dst` 의 src 만 본다.
+        function pushargs(d, W, from, n,    k, t, seen, any, e, m, V, j, src) {
+            seen = 0; any = 0
+            for (k = from; k <= n; k++) {
+                t = W[k]
+                if (t ~ /^([0-9]*|&)?[<>]/) { if (t ~ /^([0-9]*|&)?[<>]+&?$/) k++; continue }
+                if (t == "--dry-run" || t ~ /^-[A-Za-z]*n[A-Za-z]*$/) return
+                if (t == "--delete" || t ~ /^-[A-Za-z]*d[A-Za-z]*$/) return
+                if (t == "-o" || t == "--push-option" || t == "--repo" || t == "--receive-pack" || t == "--exec") { k++; continue }
+                if (t ~ /^-/) continue
+                if (!seen) { seen = 1; continue }
+                any = 1
+                e = expand(t)
+                if (e == U) { emit(d, "HEAD"); continue }        # "$(git branch --show-current)" 등: 현재 브랜치로 본다
+                m = split(e, V, S)
+                for (j = 1; j <= m; j++) {
+                    src = V[j]; sub(/^\+/, "", src); sub(/:.*/, "", src)
+                    if (src != "") emit(d, src)
+                }
+            }
+            if (!any) emit(d, "HEAD")
         }'
 }
 
-# JSON 문자열 이스케이프를 되돌린다. args 에는 사람이 친 인용부호와 경로가 그대로 들어오는데
-# 훅에는 \" \\ \n 형태로 escape 되어 도착한다. 되돌리지 않으면 `/code-review "a b.js"` 의
-# 토큰이 실제 파일명과 영영 달라 경로 지정이 무시되고, 그러면 **전체가 covered 된다**(조용한 통과).
-# command 에는 _unescape_cmd 가 같은 일을 한다. args 에만 빠져 있었다.
+# JSON 문자열 이스케이프를 되돌린다. args 와 command 는 훅에 \" \\ \n 형태로 escape 되어 도착한다.
+#   args:    되돌리지 않으면 `/code-review "a b.js"` 의 토큰이 실제 파일명과 영영 달라 경로
+#            지정이 무시되고, 그러면 **전체가 covered 된다**(조용한 통과).
+#   command: 되돌리지 않으면 git -C "$W" push 의 경로가 \"...\" 로 깨져 대상 레포를 못 찾는다.
+# \n 의 목적지는 호출자가 고른다(두 번째 인자 nl). args 는 **공백**이어야 한 줄 토큰 흐름이 되고,
+# command 는 **실제 개행**이어야 멀티라인 명령을 줄 단위로 나눌 수 있다. 둘째 줄 git 앞에
+# 역슬래시+n 두 글자가 남으면 'n' 이 단어 경계를 지워, 멀티라인 명령이 통째로 게이트를
+# 빠져나갔다(실측: 이 머신의 실제 커밋 호출 411건 중 84건, 20%).
 # 한 번의 좌->우 스캔으로 처리한다: \\n 을 개행으로 오해하지 않으려면 순차 치환이 아니어야 한다.
-#
-# _unescape_cmd 와 합치지 않는다. 같은 JSON 이스케이프를 풀지만 \n 의 목적지가 반대다:
-# 저쪽은 **실제 개행**으로 되돌려야 멀티라인 명령을 줄 단위로 grep 할 수 있고(합치면 그
-# 84/411 회귀가 되돌아온다), 이쪽은 **공백**으로 만들어야 args 가 한 줄 토큰 흐름이 된다.
-# 저쪽은 \" 와 \\ 를 건드리지 않는데, 이쪽에서 그러면 인용부호가 파일명과 어긋나 조용히
-# 전체를 covered 시킨다. 목적지가 갈리는 만큼 각자 두고, 합치려면 매핑을 인자로 받는
-# 하위 프리미티브를 따로 만들어야 한다.
 _json_unescape() {
-    printf '%s' "$1" | awk '{
+    printf '%s' "$1" | LC_ALL=C awk -v nl="${2:-}" '{
         out = ""; n = length($0)
         for (i = 1; i <= n; i++) {
             c = substr($0, i, 1)
             if (c == "\\" && i < n) {
                 i++; d = substr($0, i, 1)
-                if (d == "n" || d == "t" || d == "r") out = out " "
+                if (d == "n") out = out (nl == "nl" ? "\n" : " ")
+                else if (d == "t" || d == "r") out = out " "
                 else out = out d
             } else out = out c
         }
@@ -368,25 +538,40 @@ _json_unescape() {
     }'
 }
 
-# args 를 셸처럼 토큰으로 쪼갠다(한 줄에 하나). 인용부호는 묶음으로 인정하고 제거한다.
-# 단순 공백 분리로는 `/code-review "a b.js"` 가 세 토막으로 갈라져 경로 지정이 무시된다
-# (그 결과는 위 _json_unescape 주석 참조). eval 하지 않는다: args 는 외부 입력이고,
-# 여기서 필요한 것은 실행이 아니라 분해뿐이다.
-_tokenize_args() {
-    printf '%s' "$1" | awk '{
-        n = length($0); tok = ""; inq = ""
-        for (i = 1; i <= n; i++) {
-            c = substr($0, i, 1)
-            if (inq != "") {
-                if (c == inq) inq = ""; else tok = tok c
-            } else if (c == "\"" || c == "'"'"'") {
-                inq = c
-            } else if (c == " " || c == "\t") {
-                if (tok != "") { print tok; tok = "" }
-            } else tok = tok c
+# args 를 셸처럼 토큰으로 쪼갠다. 한 줄에 "<원형>\t<정리형>" 을 낸다. 인용부호는 묶음으로
+# 인정하고 제거한다. 단순 공백 분리로는 `/code-review "a b.js"` 가 세 토막으로 갈라져 경로
+# 지정이 무시된다(그 결과는 위 _json_unescape 주석 참조). eval 하지 않는다: args 는 외부
+# 입력이고, 여기서 필요한 것은 실행이 아니라 분해뿐이다.
+#
+# 정리형은 산문에 붙은 것을 뗀 값이다: 앞의 여는 괄호, 뒤의 구두점, 경로에 붙은 한글 조사
+# ("/.../CRS-1031의", "(Foo.java", "#1891)"). 원형만 보면 실재하는 경로를 짚었는데도 조사
+# 한 글자 때문에 못 알아본다. 둘 다 내는 이유: 순수 숫자 판정은 원형으로 해야 "(1)" 같은
+# 목록 번호를 PR 번호로 오인하지 않는다. ~/ 는 두 값 모두 $HOME 으로 편다.
+# LC_ALL=C: 조사는 바이트 단위로 떼야 한다. UTF-8 로케일의 awk 는 반쯤 뗀 글자에서 멈춘다.
+_arg_tokens() {
+    printf '%s' "$1" | LC_ALL=C awk -v home="$HOME" '
+        function out(t,    c) {
+            if (t == "") return
+            if (substr(t, 1, 2) == "~/") t = home substr(t, 2)
+            c = t
+            while (c ~ /^[([{<"\047]/) c = substr(c, 2)
+            while (c ~ /[])}>,.;:"\047!?]$/ || c ~ /[^ -~]$/) c = substr(c, 1, length(c) - 1)
+            print t "\t" c
         }
-        if (tok != "") print tok
-    }'
+        {
+            n = length($0); tok = ""; inq = ""
+            for (i = 1; i <= n; i++) {
+                ch = substr($0, i, 1)
+                if (inq != "") {
+                    if (ch == inq) inq = ""; else tok = tok ch
+                } else if (ch == "\"" || ch == "\047") {
+                    inq = ch
+                } else if (ch == " " || ch == "\t") {
+                    out(tok); tok = ""
+                } else tok = tok ch
+            }
+            out(tok)
+        }'
 }
 
 # ── 커버리지 범위: 이 스킬이 무엇을 봤는가 ─────────────────────
@@ -416,97 +601,165 @@ _tokenize_args() {
 # 인정하려던 호출이 **범위 전체를 인정**한다(실증됨). 경로는 배열로 담아 그 부류를 구조적으로
 # 없앤다. (이 파일의 _analyze 도 같은 이유로 전역을 쓴다: 명령치환으로 부르지 않는다.)
 COVERAGE_MODE=""      # all | none | paths
-COVERAGE_PATHS=()     # paths 일 때만 채운다
+COVERAGE_PATHS=()     # paths 일 때만 채운다. 이 트리 루트 기준 경로("." 은 전체)
+COVERAGE_TREES=()     # 인자가 짚은 **다른** git 작업 트리: "<루트><탭><그 루트 기준 경로>"
+ML_TOP=""             # 이 트리의 루트(물리 경로). 호출자가 구해 두면 다시 묻지 않는다
 _coverage_scope() {
-    local args root="" refs="" tok saw_pr=0 saw_num=0
-    COVERAGE_MODE=""; COVERAGE_PATHS=()
+    local args root raw clean abs out t pre elsewhere=0 here=0 saw_pr=0 saw_num=0 prev="" refs=""
+    COVERAGE_MODE=""; COVERAGE_PATHS=(); COVERAGE_TREES=(); REF_CUR="-"
     args="$(_json_unescape "${1:-}")"
     [ -z "${args//[[:space:]]/}" ] && { COVERAGE_MODE="all"; return 0; }
-    # root/refs 는 첫 실토큰에서 늦게 잡는다. --fix 처럼 플래그뿐인 호출은 둘 다 쓰지 않는데
-    # 미리 뜨면 fork 2회를 그냥 버린다.
-    # ref 목록은 **한 번만** 뜬다. 토큰마다 git rev-parse 를 부르면 파일 목록을 넘긴 호출에서
-    # fork 가 파일 수만큼 난다. HEAD 는 for-each-ref 에 없으므로 직접 넣는다.
+    root="${ML_TOP:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+    [ -n "$root" ] || root="$PWD"
 
-    # **인자 전체가 알아볼 수 있는 것이어야** 범위를 인정한다. 하나라도 모르는 토큰이 있으면
-    # 아무 것도 인정하지 않는다. 모르는 토큰을 "수식어겠지" 하고 무시했더니 두 가지가 샜다:
-    #   - "review everything except lib" 의 lib 를 **커버 대상으로** 읽었다(부정을 긍정으로).
-    #   - /code-review main 처럼 **다른 브랜치**를 리뷰한 호출이 전체를 커버했다.
-    while IFS= read -r tok; do
-        [ -n "$tok" ] || continue
-        # 플래그는 **닫힌 목록만** 건너뛴다. 전부 건너뛰면 --pr=1952 처럼 원격 대상을 담은
-        # 옵션이 유일하게 "모르는 토큰" 판정을 빠져나가, 이 트리를 보지 않은 리뷰가 전체를
-        # 커버한다(실증됨). 스킬이 실제로 갖는 비-범위 플래그만 적는다.
-        case "$tok" in
+    # 신호를 세 층으로 가른다. 한 호출이 **여러 대상**을 함께 보는 일이 흔하기 때문이다
+    # ("두 워크트리의 origin/develop 대비 변경: <이 트리> 및 <다른 트리>").
+    #   확정(원격 PR 을 봤다): PR 번호, URL, #번호, 값을 품은 --옵션 → 즉시 미커버.
+    #   다른 대상: 이 트리의 기준이 아닌 ref, 다른 git 작업 트리 안의 경로, PR 낱말+숫자.
+    #   이 트리: 이 레포 안의 실재하는 경로, 또는 이 트리를 가리키는 지시어.
+    # 이 트리 신호가 있으면 다른 대상 신호는 그 인정을 지우지 못한다. 옛 규칙은 다른 대상이 하나라도
+    # 보이면 통째로 미커버로 봐서, 두 레포를 한 번에 리뷰한 호출이 **어느 쪽에서도** 인정받지 못했다
+    # (2026-09-10 CRS-1031). 다른 트리 경로는 그 트리 몫으로 COVERAGE_TREES 에 모은다.
+    #
+    # 모르는 낱말(강도, 산문)은 범위를 좁히지도 넓히지도 않는다. 한때 모르는 토큰이 하나라도 있으면
+    # 아무 것도 인정하지 않았는데, 실측이 뒤집었다: 실사용 args 35종 중 33종(94%)이 커버리지 0 이
+    # 됐다. 남는 한계: "lib 는 빼고" 같은 부정문의 경로와 "이 워크트리 말고" 같은 부정문의 지시어는
+    # 인정 쪽으로 읽힌다. 산문의 의미를 해석하지 않는 대가다.
+    while IFS=$'\t' read -r raw clean; do
+        [ -n "$raw" ] || continue
+        case "$raw" in
             --|--fix|--comment|--post|--no-post) continue ;;
-            --*) COVERAGE_MODE="none"; return 0 ;;   # 대상을 품을 수 있다(--pr=1952)
+            --*=*) COVERAGE_MODE="none"; COVERAGE_TREES=(); return 0 ;;   # --pr=1952
+            --*) continue ;;                                                # 산문 속 --cached)
         esac
+        # 확정 신호는 경로 검사보다 먼저 본다. 뒤집으면 이름이 겹치는 로컬 경로가 원격 참조를 가린다
+        # (브랜치에 1952/ 를 심어 두면 /code-review 1952 가 그걸 봤다고 기록된다). 순수 숫자는 원형으로
+        # 본다: "(1)" 같은 목록 번호를 PR 번호로 읽지 않는다.
+        case "$raw" in *://*) COVERAGE_MODE="none"; COVERAGE_TREES=(); return 0 ;; esac
+        if [[ "$raw" =~ ^[0-9]+$ ]]; then COVERAGE_MODE="none"; COVERAGE_TREES=(); return 0; fi
+        # 이 트리를 가리키는 지시어("이 워크트리", "현재 브랜치", "this worktree")는 이 트리를 본 근거다.
+        # 다른 트리를 맥락으로 곁들인 산문("프론트는 <다른 워크트리> 에 있음")이 그 경로 하나 때문에
+        # 통째로 미커버가 되지 않게 한다(HUB2-390). 닫힌 목록만 본다.
+        case "$prev" in
+            이|이번|현재|지금|해당|[Tt]his|[Cc]urrent)
+                case "$raw" in
+                    워크트리*|워킹트리*|작업트리*|트리*|브랜치*|레포*|저장소*|[Ww]orktree*|[Ww]orking*|[Tt]ree*|[Bb]ranch*|[Rr]epo*) here=1 ;;
+                esac ;;
+        esac
+        prev="$raw"
+        _path_hit "$raw"
+        # 한글만으로 된 낱말은 정리형이 비어 버린다. 그래도 실재하는 경로("회의록")면 경로로 본다: 여기서
+        # 버리면 디렉토리 하나를 본 리뷰가 트리 전체를 커버한다. 경로도 아니면 끝낸다(빈 정리형은 ref
+        # 목록의 빈 줄과 맞아 "다른 브랜치"로 읽히므로 아래 판정에 태우지 않는다).
+        [ -n "$clean" ] || [ -n "$HIT" ] || continue
+        if [ -n "$clean" ]; then
+            case "$clean" in
+                *'#'[0-9]*) case "${clean##*#}" in *[!0-9]*) ;; *) COVERAGE_MODE="none"; COVERAGE_TREES=(); return 0 ;; esac ;;
+            esac
+            # 경로로 풀리지 않는 /pull/ /merge_requests/ 는 원격 링크다(스킴이 없어도).
+            if [ -z "$HIT" ]; then
+                case "$clean" in */pull/*|*/merge_requests/*) COVERAGE_MODE="none"; COVERAGE_TREES=(); return 0 ;; esac
+            fi
+            case "$clean" in PR|pr|Pr|MR|mr|Mr) saw_pr=1 ;; esac
+            case "$clean" in *[0-9]*) [ -n "$HIT" ] || saw_num=1 ;; esac
 
-        # 원격 참조 판정을 **경로 검사보다 먼저** 한다. 순서를 뒤집으면 이름이 겹치는 로컬
-        # 경로가 원격 참조를 가린다: 공격자가 브랜치에 1952/ 나 main/ 디렉토리를 심어 두면
-        # `/code-review 1952`(원격 PR 리뷰)가 그 디렉토리를 봤다고 기록된다(실증됨).
-        if [ -z "$root" ]; then
-            root="$(git rev-parse --show-toplevel 2>/dev/null)"; [ -n "$root" ] || root="$PWD"
-            # HEAD 는 for-each-ref 에 없으므로 직접 넣는다.
-            refs="HEAD
+            # ref 도 경로보다 먼저 본다(같은 이름의 디렉토리로 브랜치 리뷰를 경로 리뷰로 바꾸지 못하게).
+            # 목록은 첫 필요 시점에 **한 번만** 뜬다. HEAD 는 for-each-ref 에 없으므로 직접 넣는다.
+            [ -n "$refs" ] || refs="HEAD
 $(git for-each-ref --format='%(refname:short)' refs/heads refs/tags refs/remotes 2>/dev/null)"
+            case $'\n'"$refs"$'\n' in
+                *$'\n'"$clean"$'\n'*) _ref_is_base "$clean" || elsewhere=1; continue ;;
+            esac
         fi
 
-        case "$tok" in *://*) COVERAGE_MODE="none"; return 0 ;; esac
-        if [[ "$tok" =~ ^[0-9]+$ ]]; then COVERAGE_MODE="none"; return 0; fi   # PR 번호
-        case "$tok" in                                                          # crs#1891, #423
-            *'#'[0-9]*) case "${tok##*#}" in *[!0-9]*) ;; *) COVERAGE_MODE="none"; return 0 ;; esac ;;
-        esac
-        # 경로로 풀리지 않는 /pull/ /merge_requests/ 는 원격 링크다(스킴이 없어도).
-        # 실재하는 docs/pull/x 는 아래 경로 검사에서 먼저 잡히므로 여기 오지 않는다.
-        if [ ! -e "$tok" ]; then
-            case "$tok" in */pull/*|*/merge_requests/*) COVERAGE_MODE="none"; return 0 ;; esac
+        [ -n "$HIT" ] || continue
+        case "$HIT" in /*) abs="$HIT" ;; *) abs="$PWD/$HIT" ;; esac
+        # 경로가 어느 트리에 속하는지는 **git 에게 묻는다**. 문자열 접두사로 가르면 루트 아래 중첩된 작업
+        # 트리(.claude/worktrees/<ID>)를 이 트리 경로로 읽어 그 트리에 기록을 안 남기고, ../ 가 섞인 경로를
+        # 레포 안으로 읽어 git 이 "outside repository" 로 죽으면서 기록 전체가 사라졌다.
+        # --show-toplevel 은 물리 경로를, --show-prefix 는 그 루트 기준 위치를 준다.
+        out="$(git -C "$(_dir_of "$abs")" rev-parse --show-toplevel --show-prefix 2>/dev/null)" || continue
+        t="${out%%$'\n'*}"; pre="${out#*$'\n'}"
+        [ "$pre" = "$out" ] && pre=""
+        [ -d "$abs" ] || pre="${pre}${abs##*/}"
+        if [ "$t" = "$root" ]; then
+            COVERAGE_PATHS+=("${pre:-.}")
+        else
+            elsewhere=1                       # 레포 밖이라도 git 트리가 아닌 곳(스크래치 파일)은 신호가 아니다
+            COVERAGE_TREES+=("${t}"$'\t'"${pre:-.}")
         fi
-        # PR/MR 낱말과 숫자를 품은 토큰이 함께 있으면 원격 리뷰다("크스-1952 관련 PR 검토").
-        case "$tok" in PR|pr|Pr|MR|mr|Mr) saw_pr=1 ;; esac
-        case "$tok" in *[0-9]*) [ -e "$tok" ] || saw_num=1 ;; esac
-        if [ "$saw_pr" = 1 ] && [ "$saw_num" = 1 ]; then COVERAGE_MODE="none"; return 0; fi
-        case $'
-'"$refs"$'
-' in *$'
-'"$tok"$'
-'*) COVERAGE_MODE="none"; return 0 ;; esac
+    done < <(_arg_tokens "$args")
 
-        # 이 레포 안의 실재하는 경로. 절대경로는 레포 안일 때만 인정한다: 다른 worktree 도
-        # 디스크에는 있으므로 존재만 보면 남의 코드를 본 리뷰가 통과한다.
-        # (macOS 의 /tmp -> /private/tmp 처럼 show-toplevel 과 PWD 가 갈릴 수 있어 둘 다 본다.)
-        case "$tok" in
-            /*) case "$tok" in
-                    "$root"|"$root"/*|"$PWD"|"$PWD"/*)
-                        if [ -e "$tok" ]; then COVERAGE_PATHS+=("$tok"); continue; fi ;;
-                    # 레포 밖 절대경로 = 남의 코드를 봤다. 산문 낱말과 달리 형태로 확정된다.
-                    *) COVERAGE_MODE="none"; return 0 ;;
-                esac
-                continue ;;
-            *)  if [ -e "$tok" ]; then COVERAGE_PATHS+=("$tok"); continue; fi ;;
-        esac
-
-        # 그 밖의 토큰(강도 지정, 산문 낱말)은 범위를 좁히지도 넓히지도 않는다. 무시한다.
-        #
-        # 한때 "모르는 토큰이 하나라도 있으면 아무 것도 인정하지 않는다"로 두었다. 그 결정은
-        # 데이터 없이 내린 것이었고, 실측이 뒤집었다: 실사용 args 35종 중 33종(94%)이
-        # 커버리지 0 이 됐다. 에이전트는 리뷰 스킬을 한국어 서술로 부른다
-        # ("modules/.../X.sql 의 직전 커밋 변경분만"). 실재하는 경로를 짚었는데도 `의`,
-        # `직전` 같은 낱말 때문에 통째로 무효가 되어, 게이트가 충족 불가능해지고 모든 차단이
-        # 사용자 호출로 끝났다.
-        #
-        # 대신 **명확히 다른 대상을 가리키는 신호**(PR 번호, URL, git ref, 레포 밖 절대경로,
-        # 값을 품은 --옵션)만 위에서 전체를 무효화한다. 그것들은 형태로 확정되지 알아맞히는
-        # 것이 아니다. 남는 한계: "lib 는 빼고" 같은 부정문의 경로는 여전히 커버 대상으로
-        # 읽힌다. 산문의 의미를 해석하지 않는 한 못 막는다. 그 과대 인정은 **짚은 경로 하나**로
-        # 제한되고, 범위의 나머지는 여전히 미검토로 남는다.
-    done <<TOKENS
-$(_tokenize_args "$args")
-TOKENS
-
+    # PR 낱말과 숫자 낱말의 공존("크스-1952 관련 PR 검토")은 산문 추정이라 다른 대상 신호로만 쓴다.
+    [ "$saw_pr" = 1 ] && [ "$saw_num" = 1 ] && elsewhere=1
+    # 이 트리를 가리키는 지시어가 있으면 다른 트리 경로는 맥락이다. 그 트리에 리뷰 기록을 남기지 않는다:
+    # 남기면 맥락으로 적은 프론트 레포가 통째로 리뷰된 것으로 기록돼, 한 번도 안 본 레포의 push 가 통과한다.
+    if [ "$here" = 1 ]; then COVERAGE_TREES=(); fi
     if [ "${#COVERAGE_PATHS[@]}" -gt 0 ]; then COVERAGE_MODE="paths"; return 0; fi
-    # 강도뿐이거나 인자가 없다 = 스킬 기본 범위(워킹트리 전체 diff)를 본 것이다.
+    if [ "$elsewhere" = 1 ] && [ "$here" = 0 ]; then COVERAGE_MODE="none"; return 0; fi
+    # 강도뿐이거나 산문뿐이다 = 스킬 기본 범위(워킹트리 전체 diff)를 본 것이다.
     COVERAGE_MODE="all"
     return 0
+}
+
+# 산문에 붙은 것을 떼어 낸 실재하는 경로를 HIT 에 둔다(없으면 빈 값). 앞의 여는 괄호와 따옴표를 떼고,
+# 뒤에서 구두점과 한글 조사를 **한 글자씩** 떼며 실재하는지 본다. 바이트 부류로 한꺼번에 떼면 한글
+# 경로 이름까지 먹혀 부모 디렉토리로 넓어진다("docs/회의록을" 이 docs/ 가 됐다). 그래서 떼다가 / 로
+# 끝나면 포기한다: 짚은 것보다 넓게 인정하지 않는다. 명령치환 없이 전역으로 돌려준다(fork 없음).
+HIT=""
+_path_hit() {
+    local t="$1" n=0
+    HIT=""
+    case "$t" in \~/*) t="$HOME/${t#\~/}" ;; esac
+    while :; do
+        case "$t" in [\(\[\{\<\"\']*) t="${t#?}" ;; *) break ;; esac
+    done
+    while [ -n "$t" ] && [ "$n" -le 16 ]; do
+        if [ -e "$t" ]; then HIT="$t"; [ "$HIT" = "/" ] || HIT="${HIT%/}"; return 0; fi
+        case "$t" in */) return 0 ;; esac
+        t="${t%?}"; n=$((n + 1))
+    done
+    return 0
+}
+
+# 경로의 디렉토리 부분(디렉토리면 자신).
+_dir_of() {
+    local d
+    if [ -d "$1" ]; then printf '%s' "$1"; return 0; fi
+    d="${1%/*}"
+    printf '%s' "${d:-/}"
+}
+
+# ref 낱말이 이 트리의 기준인가: HEAD, 현재 브랜치, upstream, 이 브랜치를 딴 지점, HEAD 의 조상.
+# "origin/develop 대비 변경" 의 origin/develop 은 다른 대상이 아니라 비교 기준이다. 이런 낱말을
+# 다른 브랜치 리뷰로 읽으면 가장 흔한 산문이 전부 미커버가 된다. 갈라진 형제 브랜치를 짚은
+# 호출(/code-review other-feature)은 여전히 다른 대상이다.
+# 첫 push 의 -u 뒤에는 upstream 이 자기 원격 브랜치로 바뀌고, 기준 브랜치가 앞서 나가면 조상도 아니게
+# 된다. 딴 지점은 브랜치 reflog 의 첫 줄에 남아 있다("branch: Created from origin/develop").
+# 현재 브랜치, upstream, 딴 지점은 한 _coverage_scope 안에서 변하지 않으므로 처음 한 번만 구한다.
+REF_CUR="-"; REF_UP=""; REF_FROM=""
+_ref_is_base() {
+    local r="$1"
+    [ "$r" = HEAD ] && return 0
+    if [ "$REF_CUR" = "-" ]; then
+        REF_CUR="$(git symbolic-ref --quiet --short HEAD 2>/dev/null)"
+        REF_UP="$(git rev-parse --abbrev-ref '@{upstream}' 2>/dev/null)"
+        REF_FROM=""
+        if [ -n "$REF_CUR" ]; then
+            REF_FROM="$(git reflog show --format=%gs "refs/heads/$REF_CUR" 2>/dev/null | tail -1)"
+            case "$REF_FROM" in
+                "branch: Created from "*)
+                    REF_FROM="${REF_FROM#branch: Created from }"
+                    REF_FROM="${REF_FROM#refs/remotes/}"; REF_FROM="${REF_FROM#refs/heads/}" ;;
+                *) REF_FROM="" ;;
+            esac
+        fi
+    fi
+    # 문자열 비교를 먼저 한다. git 을 부르는 조상 판정은 그다음이다.
+    if [ "$r" = "$REF_CUR" ] || [ "$r" = "$REF_UP" ] || [ "$r" = "$REF_FROM" ]; then return 0; fi
+    if [ -n "$REF_UP" ] && [ "$r" = "${REF_UP#*/}" ]; then return 0; fi
+    if [ -n "$REF_FROM" ] && [ "$r" = "${REF_FROM#*/}" ]; then return 0; fi
+    git merge-base --is-ancestor "$r" HEAD 2>/dev/null
 }
 
 # 경로 제한(sp)이 있으면 pathspec 으로 붙여 git 을 부른다. 빈 배열 확장은 set -u 아래서
@@ -533,10 +786,9 @@ _git_names() {
 # **스킬 이름을 함께 적는다.** 내용만 적으면 스킬 하나만 돌려도 그 내용이 통째로 covered 가
 # 되어, /simplify 만 돌리고 /code-review 를 건너뛴 push 가 통과한다(실제로 그랬다).
 _snapshot_covered() {
-    local skill="$1" args="${2:-}" range files present hashes f
+    local skill="$1" range files present hashes f
     local sp=()
-    # 명령치환으로 부르지 않는다: 서브셸이면 전역이 안 남는다(위 COVERAGE_MODE 주석).
-    _coverage_scope "$args"
+    # 범위(COVERAGE_MODE/COVERAGE_PATHS)는 호출자가 정한다(do_record 가 인자를 한 번만 해석한다).
     # 이 스킬이 이 트리를 보지 않았다면 아무 것도 인정하지 않는다.
     if [ "$COVERAGE_MODE" = "none" ]; then
         _ensure_regular_file "$NOSCOPE_REL" || return 0
@@ -567,12 +819,14 @@ _snapshot_covered() {
     # git 이 주는 경로는 **레포 루트 기준**인데 [ -f ] 와 hash-object 는 cwd 기준이라,
     # 하위 디렉토리에서 세션이 돌면 모든 파일이 _absent 로 기록되고 커버리지가 영원히
     # 맞지 않는다(해소 불가능한 차단 루프). 루트를 앞에 붙여 맞춘다.
-    local top; top="$(git rev-parse --show-toplevel 2>/dev/null)"; [ -n "$top" ] || top="$PWD"
-    range="$(_push_range)"
+    local top="${ML_TOP:-$PWD}"
+    # 판정과 같은 범위 정의를 쓴다. 기록 범위가 판정 범위보다 좁으면 그 차이는 영영 미검토다.
+    _push_scope HEAD
+    range="$SCOPE_RANGE"
     # quotePath=false: 위 _range_signature 와 같은 이유다. 여기서 따옴표 붙은 경로를 적으면
     # push 시점 경로와 영원히 어긋나 그 파일은 절대 covered 로 잡히지 않는다.
     files="$( {
-        [ -n "$range" ] && _git_names diff --name-only "$range"
+        [ "${range%%...*}" != "${range##*...}" ] && _git_names diff --name-only "$range"
         _git_names diff --name-only HEAD
         _git_names ls-files --others --exclude-standard
     } | sort -u | grep -v '^$' )"
@@ -622,7 +876,9 @@ _range_signature() {
     # core.quotePath=false 가 필수다. 기본값이면 git 이 비-ASCII 경로를 "\355\225\234..." 로
     # C-quote 해서 내보내고, 그 문자열을 pathspec 으로 넘기면 아무 파일도 매칭되지 않는다.
     # 그러면 잔여가 0건이 되어 **미검토 한글 파일이 조용히 통과한다**(실측으로 확인된 우회).
-    git -c core.quotePath=false diff --raw --abbrev=40 "$1" 2>/dev/null | awk -F'\t' '
+    local sp=()
+    [ "${#SCOPE_PATHS[@]}" -gt 0 ] && sp=(-- "${SCOPE_PATHS[@]}")
+    git -c core.quotePath=false diff --raw --abbrev=40 "$1" ${sp[@]+"${sp[@]}"} 2>/dev/null | awk -F'\t' '
         {
             split($1, a, " ")
             sha = a[4]
@@ -650,25 +906,6 @@ _normalize_skill() { printf '%s' "${1##*:}"; }
 # JSON 1줄에서 스칼라 필드 하나 (문자열/불리언 공용).
 _json_field() { printf '%s' "$1" | sed -E "s/.*\"$2\":\"?([^,\"}]+)\"?.*/\1/"; }
 
-_head_sha() { git rev-parse HEAD 2>/dev/null || echo "_no-head"; }
-
-# 원장의 유효 범위를 한 줄로 적는다: "<session_id>\t<head_sha>".
-# 세션이 바뀌었으면 어제 돌린 리뷰가 오늘의 첫 push 를 통과시키면 안 된다.
-# head_sha 는 진단용으로만 남긴다: 무효화 판단에는 쓰지 않는다(위 LEDGER_REL 주석 참조).
-# session 인자가 비면 세션 비교를 건너뛴다(터미널 pre-push, status 처럼 세션이 없는 경로).
-_ledger_stamp() { printf '%s\t%s' "${1:-}" "$(_head_sha)"; }
-
-_drop_stale_ledger() {
-    local session="${1:-}"
-    [ -f "$LEDGER_REL" ] || [ -f "$COVERED_REL" ] || [ -f "$NOSCOPE_REL" ] || return 0
-    [ -z "$session" ] && return 0
-    local base="" b_session
-    [ -f "$LEDGER_BASE_REL" ] && base="$(cat "$LEDGER_BASE_REL" 2>/dev/null)"
-    b_session="${base%%	*}"
-    [ "$b_session" = "$session" ] && return 0
-    rm -f "$LEDGER_REL" "$LEDGER_BASE_REL" "$COVERED_REL" "$NOSCOPE_REL" "$USED_REL" 2>/dev/null || true
-}
-
 # ── 정책 단일 출처 ──────────────────────────────────────────────
 # 트랙별 필수 리뷰. strict.md 의 표와 이 함수가 어긋나면 tests/review-gate.bats 가 RED.
 #   Trivial / Small : 없음 (셀프 리뷰는 산문 규율로 충분: 게이트를 걸지 않는다)
@@ -691,38 +928,71 @@ required_skills() {
     printf '%s' "$out"
 }
 
-# ── record: 실행된 스킬을 원장에 append (PostToolUse). 절대 실패로 turn 을 막지 않는다.
+# ── record: 리뷰 스킬 실행을 원장에 append (PostToolUse). 절대 실패로 turn 을 막지 않는다.
 do_record() {
-    local input skill session
+    local input skill args gd t line roots
     # read -d '' 는 builtin 이라 cat 의 포크를 없앤다. NUL 이 없으면 1 을 반환하나
     # 그때도 읽은 내용은 input 에 담긴다.
     IFS= read -r -d '' input || true
-    _cd_to_hook_cwd "$input"
-    _ml_init_state
     # 필드 이름은 런타임에서 실측했다: Skill 도구의 tool_input 은 {"skill":"simplify"} 다.
     # 훅 문서는 skill_name 이라고 적고 있어 양쪽을 다 받는다: 한쪽만 읽고 맞췄다가는
     # 원장이 영영 비어 Medium 이상 push 가 전부 막힌다(경계면 교차검증).
     # 두 패턴은 서로 오탐하지 않는다: "skill" 뒤에 곧바로 콜론이 와야 매칭된다.
-    session="$(_json_str "$input" session_id)"
     skill="$(_json_str "$input" skill)"
     [ -z "$skill" ] && skill="$(_json_str "$input" skill_name)"
     [ -z "$skill" ] && exit 0
     skill="$(_normalize_skill "$skill")"
-    mkdir -p "$(dirname "$LEDGER_REL")" 2>/dev/null || exit 0
+    # 정책에 없는 스킬은 기록하지 않는다. 판정은 필수 리뷰 스킬의 원장과 커버리지만 읽으므로, 나머지
+    # 기록은 Skill 호출마다 범위 계산과 파일 해시를 돌고 버려졌다(호출당 170~250ms).
+    case " $(required_skills Large true true true) " in *" $skill "*) ;; *) exit 0 ;; esac
+
+    _cd_to_hook_cwd "$input"
+    args="$(_json_str "$input" args)"
+    # 레포 식별은 git 한 번으로 한다: git-dir 은 상태 경로, toplevel 은 경로 판정의 기준이다.
+    gd=""; ML_TOP=""
+    { read -r gd; read -r ML_TOP; } < <(git rev-parse --absolute-git-dir --show-toplevel 2>/dev/null)
+    _ml_init_state "$gd"
+    # 인자는 여기서 **한 번만** 해석한다. 트리마다 다시 해석하면 같은 낱말이 트리마다 다른 역할이
+    # 된다(이 트리에서는 맥락이던 경로가 다른 트리에서는 대상이 되고, 상대경로가 엉뚱한 트리에 붙는다).
+    _coverage_scope "$args"
+    _record_skill "$skill"
+
+    # 한 호출이 여러 작업 트리를 리뷰하는 일이 흔하다("crs 와 crs-admin-web 워크트리의 변경"). 훅은
+    # 세션 cwd 한 곳에서만 뜨므로, 인자가 짚은 다른 트리에도 그 트리 몫의 경로로 기록한다. 안 남기면
+    # 리뷰를 돌렸는데도 그 레포의 push 가 "리뷰 미실행"으로 막힌다.
+    [ "${#COVERAGE_TREES[@]}" -gt 0 ] || exit 0
+    roots="$(printf '%s\n' "${COVERAGE_TREES[@]}" | cut -f1 | sort -u)"
+    while IFS= read -r t; do
+        [ -n "$t" ] || continue
+        ( cd "$t" 2>/dev/null || exit 0
+          COVERAGE_MODE="paths"; COVERAGE_PATHS=()
+          for line in "${COVERAGE_TREES[@]}"; do
+              [ "${line%%$'\t'*}" = "$t" ] && COVERAGE_PATHS+=("${line#*$'\t'}")
+          done
+          ML_TOP="$t"
+          _ml_init_state
+          _record_skill "$skill" )
+    done <<EOF
+$roots
+EOF
+    exit 0
+}
+
+# 현재 디렉토리의 트리에 스킬 실행을 기록한다(원장 + 커버리지). 상태 경로와 범위
+# (COVERAGE_MODE/COVERAGE_PATHS)는 호출자가 정해 둔다.
+_record_skill() {
+    local skill="$1"
+    mkdir -p "$(dirname "$LEDGER_REL")" 2>/dev/null || return 0
     mkdir -p ".mangolove" 2>/dev/null || true
-    _ensure_regular_file "$LEDGER_REL" || exit 0
-    _ensure_regular_file "$LEDGER_BASE_REL" || exit 0
-    _ensure_regular_file "$COVERED_REL" || exit 0
-    _ensure_regular_file "$COVERED_REL.tmp" || exit 0
+    _ensure_regular_file "$LEDGER_REL" || return 0
+    _ensure_regular_file "$COVERED_REL" || return 0
+    _ensure_regular_file "$COVERED_REL.tmp" || return 0
     _ml_seed_gitignore
-    _drop_stale_ledger "$session"
-    [ -f "$LEDGER_REL" ] || _ledger_stamp "$session" > "$LEDGER_BASE_REL" 2>/dev/null || true
     # 같은 스킬을 여러 번 호출해도 한 줄만 남긴다: 원장은 집합이지 호출 로그가 아니다.
     grep -qxF "$skill" "$LEDGER_REL" 2>/dev/null || printf '%s\n' "$skill" >> "$LEDGER_REL" 2>/dev/null || true
     # 이 스킬이 무엇을 봤는지 내용 주소로 붙잡는다. 원장(무엇을 돌렸나)만으로는
     # "리뷰 한 번 돌리고 그 뒤로 계속 쓰기" 를 구분할 수 없다.
-    _snapshot_covered "$skill" "$(_json_str "$input" args)"
-    exit 0
+    _snapshot_covered "$skill"
 }
 
 # ── 변경을 분석해 전역에 채운다. **명령치환으로 호출하지 않는다**: 서브셸이면 전역이 안 남는다.
@@ -740,23 +1010,22 @@ REVIEW_TRACK=""; REVIEW_JSON=""; REVIEW_REQUIRED=""; REVIEW_MISSING=""; REVIEW_R
 # 차단 사유. 효능 원장에서 둘을 갈라 봐야 "엄격해진 기본값이 오탐 차단을 늘리고 있는가"를
 # 논쟁이 아니라 데이터로 답할 수 있다. 그게 안 보이면 safe-by-default 가 조용히
 # ignored-by-default 로 바뀌는 것(우회 파일의 상습 사용)을 알아채지 못한다.
-#   missing = 그 스킬이 이 세션에서 아예 안 돌았다
+#   missing = 그 스킬이 이 작업 트리에서 돈 기록이 없다
 #   scope   = 돌긴 했는데 그 호출이 이 트리를 보지 않았다(원격 PR, 다른 worktree 등)
 #   stale   = 보긴 했는데 그 뒤에 코드를 더 썼다 (가장 흔하다. 이걸 scope 와 섞으면
 #             "커버리지 판정이 엄격한가"를 그 수치로 판단할 수 없다)
 REVIEW_BLOCK_KIND=""
 _analyze() {
-    local ref="${1:-}" session="${2:-}" json tr s missing="" detail="" p
+    local ref="${1:-}" json tr s missing="" detail="" p sp=()
     local sig total paths=() key rj rt rreq cache_key="" cache_rt="" cache_rreq=""
     REVIEW_BLOCK_KIND=""
-    _drop_stale_ledger "$session"
-
-    if [ -z "$ref" ]; then ref="$(_push_range)"; fi
+    # 범위와 경로 제한(SCOPE_PATHS)은 호출자가 _push_scope 로 정한다. 여기서 다시 구하지 않는다.
     [ -z "$ref" ] && return 1
     REVIEW_RANGE="$ref"
+    [ "${#SCOPE_PATHS[@]}" -gt 0 ] && sp=(-- "${SCOPE_PATHS[@]}")
 
     # 트랙은 **범위 전체**로 정한다. 이 push 가 공유하는 작업 전체가 요구 수준을 정한다.
-    json="$(bash "$IMPACT" score "$ref" 2>/dev/null)" || return 1
+    json="$(bash "$IMPACT" score "$ref" ${sp[@]+"${sp[@]}"} 2>/dev/null)" || return 1
     [ -z "$json" ] && return 1
     tr="$(_track_and_required "$json")"
     REVIEW_JSON="$json"
@@ -820,7 +1089,7 @@ _analyze() {
 # ("게이트가 조용히 아무 일도 하지 않았다")가 "리뷰가 필요 없었다"와 구별되지 않는다.
 _record_fail_open() {
     local rec="$GATE_DIR/efficacy-recorder.sh"
-    echo "MangoLove review gate: 판정 범위를 정할 수 없어 통과시킵니다 (fail-open, 감사 대상)" >&2
+    echo "MangoLove review gate: 판정 범위를 정할 수 없어 통과시킵니다 (fail-open, 감사 대상)${1:+: $1}" >&2
     if [ -f "$rec" ]; then bash "$rec" record-skip review "fail-open" 2>/dev/null || true; fi
 }
 
@@ -859,12 +1128,23 @@ _bypassed() {
     return 1
 }
 
+# 사람이 읽을 범위 표기. 기준이 sha 면 그 커밋을 가진 원격 ref 이름으로 바꾼다(origin/develop~2).
+_range_label() {
+    local a="${1%%...*}" b="${1##*...}" n
+    case "$a" in
+        ''|*[!0-9a-f]*) ;;
+        *) n="$(git name-rev --name-only --no-undefined --refs='refs/remotes/*' "$a" 2>/dev/null)" \
+               && a="${n#remotes/}" ;;
+    esac
+    printf '%s...%s' "$a" "$b"
+}
+
 # 차단 사유를 stderr 로 낸다. 호출자가 종료코드를 정한다(훅 종류마다 다르다).
 _emit_block() {
     {
         echo "--- MangoLove review gate: push 차단 ---"
         echo "이 변경의 트랙은 코드가 계산했습니다(모델 추정 아님): ${REVIEW_TRACK}"
-        echo "  판정 범위 ${REVIEW_RANGE} (upstream 대비 이 브랜치의 순변경)"
+        echo "  판정 범위 $(_range_label "$REVIEW_RANGE") (원격에 아직 없는 커밋이 더하는 변경)"
         echo "  ${REVIEW_JSON}"
         echo ""
         echo "${REVIEW_TRACK} 트랙에 필요한 리뷰 중 아직 이 내용을 보지 않은 것:"
@@ -872,12 +1152,12 @@ _emit_block() {
         echo ""
         case "$REVIEW_BLOCK_KIND" in
             missing)
-                echo "이 스킬들은 이 세션에서 아예 실행되지 않았습니다. 그냥 실행하세요."
+                echo "이 스킬들은 이 작업 트리에서 실행된 기록이 없습니다. 그냥 실행하세요."
                 echo "사용자에게 묻지 마세요: 물어야 할 결정이 아니라 하면 되는 일입니다."
                 ;;
             scope)
                 echo "스킬은 돌았지만 그 호출이 이 트리를 보지 않았습니다"
-                echo "  (원격 PR 번호, 다른 worktree, 이 트리에 없는 경로를 인자로 준 경우)."
+                echo "  (원격 PR 번호나 링크, 다른 작업 트리 경로, 갈라진 다른 브랜치만 짚은 경우)."
                 echo "강도만 주거나(/code-review high) 이 트리의 경로를 짚어 다시 돌리세요."
                 ;;
             *)
@@ -897,43 +1177,72 @@ _emit_block() {
     if [ -f "$rec" ]; then bash "$rec" record-block review "${REVIEW_BLOCK_KIND:-missing}" 2>/dev/null || true; fi
 }
 
-# ── pretooluse: git push / gh pr create 경계에서만 게이트.
+# rev 하나를 현재 디렉토리의 레포에서 판정한다. 0 통과(판정 불가면 감사를 남기고 통과), 1 차단.
+# PreToolUse 와 pre-push 가 같은 순서를 공유한다: 두 벌이면 fail-open 사유와 통과 문구가 갈라진다.
+_judge_rev() {
+    _push_scope "$1" "${2:-}"
+    [ -n "$SCOPE_RANGE" ] || { _record_fail_open; return 0; }
+    # 새 커밋이 없다: 공유할 내용이 없으므로 점수화할 것도 없다(점수화 한 번이 100ms 를 넘는다).
+    [ "${SCOPE_RANGE%%...*}" = "${SCOPE_RANGE##*...}" ] && return 0
+    _analyze "$SCOPE_RANGE" || { _record_fail_open; return 0; }
+    if [ -z "$REVIEW_MISSING" ]; then
+        # 통과. 원장은 여기서 지우지 않는다: push 가 실제로 성공했는지 알 수 없기 때문이다.
+        [ -z "$REVIEW_REQUIRED" ] || echo "MangoLove review gate: ${REVIEW_TRACK} 필수 리뷰 충족 (${REVIEW_REQUIRED})" >&2
+        return 0
+    fi
+    _emit_block
+    return 1
+}
+
+# ── pretooluse: git push 경계에서만 게이트. 한 명령의 push 가 여럿이면 전부, 각자 실제 레포에서 본다.
+# gh pr create 는 보지 않는다. 내용을 올리지 않고(비대화형에서 push 를 대신하지 않는다), 이미 올라간
+# 브랜치는 원격 추적 ref 가 갱신돼 범위가 늘 비므로 막을 수 있는 대상이 없다.
 do_pretooluse() {
-    local input cmd line
+    local input raw dir rev gd top rc key seen=$'\n' bypassed=$'\n' blocked=0 parsed=0
     # read -d '' 는 builtin 이라 cat 의 포크를 없앤다. NUL 이 없으면 1 을 반환하나
     # 그때도 읽은 내용은 input 에 담긴다.
     IFS= read -r -d '' input || true
-    cmd="$(_unescape_cmd "$(_json_str "$input" command)")"
-
-    # dry-run/삭제 세그먼트는 _gated_push_line 안에서 걸러진다.
-    line="$(_gated_push_line "$cmd")"
-    [ -n "$line" ] || exit 0
-
+    raw="$(_json_str "$input" command)"
+    # 대부분의 Bash 호출은 push 가 아니다. 포크 없이 글자로 먼저 거르고, 판정은 파서에 맡긴다.
+    # 정규식으로 엄격하게 거르면 정규식이 모르는 모양이 파서에 닿기도 전에 조용히 빠져나간다.
+    case "$raw" in *push*) ;; *) exit 0 ;; esac
     _cd_to_hook_cwd "$input"
-    git rev-parse --git-dir >/dev/null 2>&1 || exit 0
-    _ml_init_state
 
-    _bypassed && exit 0
-
-    # 범위를 못 정하거나 impact 계산이 실패하면 fail-open: 게이트가 작업을 인질로 잡지 않는다.
-    # 다만 조용히 넘기지 않는다(위 _record_fail_open 주석).
-    _analyze "$(_push_range "$(_push_source_ref "$line")")" "$(_json_str "$input" session_id)" \
-        || { _record_fail_open; exit 0; }
-
-    if [ -z "$REVIEW_MISSING" ]; then
-        # 통과. 원장은 여기서 지우지 않는다: push 가 실제로 성공했는지 알 수 없기 때문이다.
-        if [ -n "$REVIEW_REQUIRED" ]; then
-            echo "MangoLove review gate: ${REVIEW_TRACK} 필수 리뷰 충족 (${REVIEW_REQUIRED})" >&2
+    while IFS=$'\t' read -r dir rev; do
+        [ -n "$dir" ] || continue
+        if [ "$dir" = "!" ]; then parsed=1; continue; fi
+        if [ "$dir" = "?" ] || [ "$rev" = "?" ] || [ ! -d "$dir" ]; then
+            _record_fail_open "push 대상 레포나 커밋을 명령에서 정할 수 없음"
+            continue
         fi
-        exit 0
-    fi
+        # 레포 식별은 git 한 번으로 한다: git-dir 은 상태 경로, toplevel 은 같은 레포를 묶는 키다.
+        gd=""; top=""
+        { read -r gd; read -r top; } < <(git -C "$dir" rev-parse --absolute-git-dir --show-toplevel 2>/dev/null)
+        [ -n "$top" ] || continue                       # 비-git 디렉토리는 판정 대상이 아니다
+        # 같은 명령에서 같은 레포, 같은 커밋은 한 번만 본다(PreToolUse 는 실행 전이라 둘이 같은 상태다).
+        key="${top}"$'\t'"${rev}"
+        case "$seen" in *$'\n'"$key"$'\n'*) continue ;; esac
+        seen="${seen}${key}"$'\n'
+        # 이 레포의 1회 우회를 이미 썼으면 그 레포의 나머지 push 도 그 우회에 든다.
+        case "$bypassed" in *$'\n'"$top"$'\n'*) continue ;; esac
+        ( cd "$dir" 2>/dev/null || exit 0
+          _ml_init_state "$gd"
+          _bypassed && exit 3
+          _judge_rev "$rev" ); rc=$?
+        case "$rc" in
+            1) blocked=1 ;;
+            3) bypassed="${bypassed}${top}"$'\n' ;;
+        esac
+    done < <(_push_targets "$(_json_unescape "$raw" nl)" "$PWD")
+    # 파서가 끝까지 돌지 못하면(awk 문법 오류 등) 판정할 push 가 하나도 안 나와 전부 조용히 통과한다.
+    # 실제로 그랬다(awk 예약어 sub 를 인자 이름으로 써서 게이트 전체가 꺼졌다). 감사로 남긴다.
+    [ "$parsed" = 1 ] || _record_fail_open "push 명령 파서가 끝까지 돌지 못함"
 
-    _emit_block
-    exit 2
+    [ "$blocked" -eq 1 ] && exit 2
+    exit 0
 }
 
 # ── prepush: .githooks/pre-push 용. Claude Code 밖의 터미널 push 도 같은 규칙으로 막는다.
-#    세션 인자가 없으므로 원장은 세션 기준으로 버리지 않는다(그 작업을 한 세션의 리뷰를 인정).
 #
 #    git 은 stdin 으로 "<local ref> <local sha> <remote ref> <remote sha>" 를 준다. 이것이
 #    무엇을 push 하는지에 대한 **유일한 권위 있는 정보**다. 현재 브랜치를 가정하면
@@ -941,7 +1250,7 @@ do_pretooluse() {
 #    git 이 부른 경우($# >= 2: 원격 이름 + URL)에는 stdin 만 믿는다. 올릴 것이 없으면
 #    stdin 이 비고, 그때는 공유되는 내용도 없으므로 통과다.
 do_prepush() {
-    local from_git=0 lref lsha rref rsha base range blocked=0 saw=0 _used
+    local from_git=0 lref lsha rref rsha blocked=0 saw=0 _used
     [ "$#" -ge 2 ] && from_git=1
     git rev-parse --git-dir >/dev/null 2>&1 || exit 0
     _ml_init_state
@@ -968,23 +1277,16 @@ do_prepush() {
         saw=1
         # local sha 가 전부 0 = 원격 ref 삭제. 내용을 공유하지 않는다.
         case "$lsha" in *[!0]*) ;; *) continue ;; esac
-        case "${rsha:-}" in
-            *[!0]*) base="$rsha" ;;               # 기존 원격 ref: 그 지점 이후가 새 것
-            *)      base="$(_default_base)" ;;    # 새 ref: 기본 트렁크 기준
-        esac
-        [ -n "$base" ] || { _record_fail_open; continue; }
-        range="${base}...${lsha}"
-        _analyze "$range" "" || { _record_fail_open; continue; }
-        [ -z "$REVIEW_MISSING" ] && continue
-        _emit_block
-        blocked=1
+        # 원격이 이미 가진 것 이후가 새 것이다. git 이 준 원격 sha 는 fetch 전이라 추적 ref 에
+        # 없을 수 있어 함께 뺀다. 새 ref(원격 sha 가 0)라도 트렁크를 가정하지 않는다.
+        case "${rsha:-}" in *[!0]*) ;; *) rsha="" ;; esac
+        _judge_rev "$lsha" "$rsha" || blocked=1
     done
 
     if [ "$blocked" -eq 1 ]; then exit 1; fi
     # git 이 부른 게 아니고(수동 진단) stdin 도 비었으면 현재 브랜치를 본다.
     if [ "$from_git" -eq 0 ] && [ "$saw" -eq 0 ]; then
-        _analyze "" "" || { _record_fail_open; exit 0; }
-        if [ -n "$REVIEW_MISSING" ]; then _emit_block; exit 1; fi
+        _judge_rev HEAD || exit 1
     fi
     exit 0
 }
@@ -1024,17 +1326,18 @@ do_status() {
         *) echo "review-gate: status 는 범위(A...B)만 받습니다. 인자 없이 부르면 push 범위를 봅니다." >&2
            exit 2 ;;
     esac
+    if [ -z "$ref" ]; then _push_scope HEAD; ref="$SCOPE_RANGE"; else SCOPE_PATHS=(); fi
     if ! _analyze "$ref"; then
-        echo "review-gate: 판정 범위를 정할 수 없습니다 (원격 upstream 이나 origin/HEAD 확인)" >&2
+        echo "review-gate: 판정 범위를 정할 수 없습니다 (원격 추적 ref 가 있는지 확인: git fetch)" >&2
         exit 1
     fi
-    echo "Review gate: ${REVIEW_RANGE}  (upstream 대비 이 브랜치의 순변경)"
+    echo "Review gate: $(_range_label "$REVIEW_RANGE")  (원격에 아직 없는 커밋이 더하는 변경)"
     echo "  계산된 트랙: ${REVIEW_TRACK}"
     echo "  필수 리뷰: ${REVIEW_REQUIRED:-(없음)}"
     if [ -f "$LEDGER_REL" ]; then
-        echo "  이번 세션 실행 스킬: $(tr '\n' ' ' < "$LEDGER_REL")"
+        echo "  실행된 스킬 기록: $(tr '\n' ' ' < "$LEDGER_REL")"
     else
-        echo "  이번 세션 실행 스킬: (없음)"
+        echo "  실행된 스킬 기록: (없음)"
     fi
     if [ -z "$REVIEW_MISSING" ]; then
         echo "  판정: PASS"

@@ -1436,19 +1436,17 @@ MD" "$PWD")"'
     [ "$status" -eq 2 ]
 }
 
-@test "대상 레포: 명령에서 풀 수 없는 디렉토리는 추정해서 막지 않고 감사만 남긴다" {
+@test "대상 레포: 명령치환으로 준 디렉토리는 바뀌지 않은 것으로 보고 세션 레포에서 판정한다" {
+    # 판정 불가로 통과시키면 `git -C "$(git rev-parse --show-toplevel)" push` 같은 흔한 형태의 미검토 push 가 샌다.
     _commit_external_api
     _gate 'git -C "$(git rev-parse --show-toplevel)" push'
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"fail-open"* ]]
-    grep -q '"kind":"fail-open"' "$MANGOLOVE_DIR/efficacy/proj.jsonl"
+    [ "$status" -eq 2 ]
 }
 
 @test "대상 레포: 따옴표 없는 명령치환 경로도 서브커맨드를 잘못 읽지 않는다" {
     _commit_external_api
     _gate 'git -C $(git rev-parse --show-toplevel) push'
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"fail-open"* ]]
+    [ "$status" -eq 2 ]
 }
 
 @test "refspec: 리다이렉션(2>&1)을 refspec 으로 오인해 통과시키지 않는다" {
@@ -1687,4 +1685,51 @@ MD" "$PWD")"'
     _gate 'git commit -m "$(cat <<EOF\nfix: 게이트 수정\n\n배포는 git push origin main 으로 한다\nEOF\n)"'
     [ "$status" -eq 0 ]
     ! grep -q '"kind":"fail-open"' "$MANGOLOVE_DIR/efficacy/proj.jsonl" 2>/dev/null
+}
+
+# ── 최종 리뷰가 재현한 결함 ───────────────────────────────────────
+
+@test "해석: 한 조각 안에 겹친 복합 명령(do if, then {)의 cd 도 파이프라인이 끝나면 되돌린다" {
+    _other_repo
+    _commit_external_api
+    _gate "for r in a; do if true; then cd $OTHER && git status; fi; done 2>&1 | tail -3; git push origin main"
+    [ "$status" -eq 2 ]
+    _gate "if true; then { cd $OTHER && git status; }>/dev/null | cat; git push origin main; fi"
+    [ "$status" -eq 2 ]
+}
+
+@test "대상 레포: 명령 밖에서 정해진 환경변수 경로를 따라간다 (CLAUDE_PROJECT_DIR)" {
+    _other_repo
+    _commit_external_api_in "$OTHER"
+    export CLAUDE_PROJECT_DIR="$OTHER"
+    _gate 'cd "$CLAUDE_PROJECT_DIR" && git push origin main'
+    [ "$status" -eq 2 ]
+}
+
+@test "해석: 명령치환 속 heredoc 본문의 짝 안 맞는 따옴표와 괄호가 커밋을 push 로 만들지 않는다" {
+    local cmdf="$TEST_DIR/cmd.txt"
+    printf '%s\n' 'git commit -m "$(cat <<EOF' 'fix: 따옴표 하나 " 와 괄호 (x)' 'git push origin main' 'EOF' ')"' '#MANGOLOVE_PARSER_END' > "$cmdf"
+    run bash -c "source '$GATE'; _push_targets \"\$(cat '$cmdf')\" /cwd"
+    [ "$output" = $'!\tEND' ]
+}
+
+@test "범위: 경로 끝을 떼다 . 이나 .. 가 되면 경로로 인정하지 않는다 (다른 브랜치 리뷰가 트리 전체로 바뀌지 않게)" {
+    _make_sibling other-x
+    mkdir -p "$REPO_DIR/sub"
+    printf 'const o = await axios.get("https://api.example.com/o")\n' > "$REPO_DIR/sub/o.js"
+    CWD="$REPO_DIR/sub" _run_all_reviews "other-x ..."
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm sub
+    _gate "git push"
+    [ "$status" -eq 2 ]
+}
+
+@test "우회: 하위 디렉토리에서 남긴 1회 우회도 레포 루트에서 판정하는 게이트가 찾는다" {
+    mkdir -p "$REPO_DIR/sub"
+    _commit_external_api
+    run bash -c "cd '$REPO_DIR/sub' && bash '$GATE' skip '근거: 테스트'"
+    [ "$status" -eq 0 ]
+    [ -f "$REPO_DIR/.mangolove/.review-skip" ]
+    run bash -c "printf '%s' '$(CWD="$REPO_DIR/sub" _json_cmd "git push")' | bash '$GATE' pretooluse"
+    [ "$status" -eq 0 ]
 }

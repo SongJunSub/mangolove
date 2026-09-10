@@ -121,9 +121,14 @@ SKIP_REL=".mangolove/.review-skip"
 # cwd 가 정해진 뒤 상태 경로를 확정한다. 호출자가 git-dir 을 이미 구했으면 넘겨 git 호출을 아낀다.
 # git-dir 을 못 구하면(비-git) 워킹트리 기본값을 그대로 쓰는데, 그 경우는 어차피 게이트가 fail-open 한다.
 _ml_init_state() {
+    local top="${2:-}"
     STATE_DIR="${1:+$1/mangolove}"
     [ -n "$STATE_DIR" ] || STATE_DIR="$(_ml_state_dir)"
     [ -n "$STATE_DIR" ] || return 0
+    # 우회 파일은 워크트리 루트에 고정한다. cwd 상대로 두면 하위 디렉토리에서 남긴 우회를 루트에서 판정하는
+    # 게이트가 못 찾아, 안내대로 우회했는데 다시 막혔다.
+    [ -n "$top" ] || top="$(git rev-parse --show-toplevel 2>/dev/null)"
+    [ -n "$top" ] && SKIP_REL="$top/.mangolove/.review-skip"
     LEDGER_REL="$STATE_DIR/.review-ledger"
     COVERED_REL="$STATE_DIR/.review-covered"
     NOSCOPE_REL="$STATE_DIR/.review-noscope"
@@ -152,7 +157,7 @@ _ensure_regular_file() {
 }
 
 _ml_seed_gitignore() {
-    local d="./.mangolove" f p
+    local d="${SKIP_REL%/*}" f p
     [ -d "$d" ] || return 0
     f="$d/.gitignore"
     if [ ! -f "$f" ]; then
@@ -327,42 +332,59 @@ EOF
 # 이동과 변수를 따라가 push 인자까지 푼다. 레포, dry-run/삭제 여부, refspec 을 서로 다른 토크나이저로
 # 따로 읽으면 규칙이 갈라진다(한쪽만 변수를 풀어 조용히 샜다).
 #
-# 출력: 판정할 push 마다 "<디렉토리>\t<rev>". 디렉토리를 풀 수 없으면 "?\t?"(호출자가 막지 않고
-# 감사만 남긴다: 추정한 대상으로 막으면 그게 곧 오탐이다). 입력 끝의 PARSER_END 줄까지 읽었으면
-# 마지막에 "!\tEND" 를 낸다(앞 단계 어디서 죽어도 표시가 없어 호출자가 감사로 돌린다).
-# 따라가는 것: cd/pushd, git -C(누적), NAME=값(export 포함), for NAME in 값들, ~, $HOME, $PWD,
-#   sh/bash -c(옵션과 래퍼가 붙어도), eval, $( ). 서브셸 ( ), 파이프라인, 백그라운드, $( ), sh -c
-#   안의 cd 는 밖으로 새지 않게 한다. dry-run(-n)과 삭제(-d, :dst)는 내지 않는다.
-# 흉내내지 않는 것: 명령치환의 결과값. refspec 이 명령치환이면 현재 브랜치(HEAD)로 본다(흔한
-#   "$(git branch --show-current)". 옛 게이트도 같은 추정을 했다).
+# 출력: 판정할 push 마다 "<디렉토리>\t<rev>". 입력 끝의 PARSER_END 줄까지 읽었으면 마지막에 "!\tEND"
+# 를 낸다(앞 단계 어디서 죽어도 표시가 없어 호출자가 감사로 돌린다). git 도 셸도 못 찾았는데 문자열이
+# push 모양이면 "?\t?" 를 낸다(호출자가 막지 않고 감사한다).
+# 따라가는 것: cd/pushd, git -C(누적), NAME=값(export 포함), 명령 밖에서 정해진 환경변수, for NAME in
+#   값들, ~, $HOME, $PWD, sh/bash -c(옵션과 래퍼가 붙어도), eval, $( ). 서브셸 ( ), 파이프라인,
+#   백그라운드, $( ), sh -c 안의 cd 는 밖으로 새지 않게 한다. dry-run(-n)과 삭제(-d, :dst)는 내지 않는다.
+# 풀 수 없는 것은 **바뀌지 않은 것으로 본다**: 풀 수 없는 cd/-C("$(git rev-parse --show-toplevel)",
+#   cd -)는 디렉토리를 그대로 두고, 명령치환 refspec("$(git branch --show-current)")은 HEAD 로 본다.
+#   흔한 형태가 세션 레포와 현재 브랜치를 가리키고, 옛 게이트도 같은 추정으로 판정했다(판정 불가로
+#   통과시키면 미검토 push 가 샌다).
 # LC_ALL=C: 바이트 단위로 돈다. UTF-8 로케일의 awk 는 잘못된 바이트열에서 멈춘다.
 PARSER_END="#MANGOLOVE_PARSER_END"
 _push_targets() {
     _strip_heredocs "$1" "$HEREDOC_DATA_SINKS" \
         | LC_ALL=C awk -v cwd="$2" -v home="$HOME" -v push_re="$GIT_PUSH_RE" \
               -v sink="$HEREDOC_DATA_SINKS" -v endmark="$PARSER_END" '
-        BEGIN { U = "\001?"; S = "\034"; DIR = cwd; DEPTH = 0; SEEN = 0; ACTS = 0 }
+        BEGIN { U = "\001?"; S = "\034"; DIR = cwd; DEPTH = 0; SEEN = 0 }
         $0 == endmark { SEEN = 1; next }
         { if (sub(/\\$/, "")) buf = buf $0 " "; else buf = buf $0 "\n" }
         END { process(buf); if (SEEN) print "!\tEND" }
 
-        # 따옴표와 $( ) 밖의 연산자에서 단순 명령으로 가르고, 가르는 즉시 순서대로 해석한다.
+        # 따옴표와 $( ) 밖의 연산자에서 단순 명령으로 가르고, 가르는 즉시 순서대로 해석한다. 해석했으면 1.
+        # $( ) 는 인용을 새로 시작한다: 바깥 "..." 안의 $( 에서도 따옴표와 괄호는 안쪽 기준으로 짝을 맞춘다.
+        # $( ) 안에서 데이터 싱크가 받는 heredoc 은 본문을 읽지 않는다: 커밋 메시지 본문의 짝 안 맞는 따옴표,
+        # 괄호, "git push" 글자가 해석을 흔들어 커밋 명령이 push 로 읽혔다(맨 바깥 본문은 _strip_heredocs 가 벗긴다).
         # 파이프라인(원소가 둘 이상), 백그라운드 &, 서브셸 ( ) 은 자식 셸에서 돌므로 그 안의 cd 는 밖으로
-        # 새지 않는다. 파이프라인의 원소는 { }, for, if 같은 복합 명령일 수 있어서, 복합 명령 깊이마다
-        # 파이프라인 시작 디렉토리를 기억했다가 파이프라인이 끝날 때 되돌린다
-        # (`{ cd /tmp && ls; } 2>&1 | tail; git push` 의 push 를 /tmp 에서 판정해 조용히 통과시켰다).
-        # 리다이렉션의 & 와 | 는 연산자가 아니다(2>&1, &>, >|).
-        function process(s,    n, i, c, nx, q, dp, cur, stk, sp, depth, pst, pip) {
-            if (++DEPTH > 8) { DEPTH--; return }
-            ACTS++
-            n = length(s); cur = ""; q = ""; dp = 0; sp = 0; depth = 0; pst[0] = DIR; pip[0] = 0
+        # 새지 않는다. 원소가 { }, for, if 같은 복합 명령일 수 있어, 복합 명령 깊이마다 파이프라인 시작
+        # 디렉토리를 기억했다가 끝에서 되돌린다. 리다이렉션의 & 와 | 는 연산자가 아니다(2>&1, &>, >|).
+        function process(s,    n, i, c, nx, q, dp, qs, ist, cur, stk, sp, depth, pst, pip, hm, hd, e, t) {
+            if (++DEPTH > 8) { DEPTH--; return 0 }
+            n = length(s); cur = ""; q = ""; dp = 0; sp = 0; depth = 0; pst[0] = DIR; pip[0] = 0; hm = ""
             for (i = 1; i <= n; i++) {
                 c = substr(s, i, 1); nx = substr(s, i + 1, 1)
+                if (c == "\n" && hm != "") {
+                    cur = cur c
+                    while (i < n) {
+                        e = index(substr(s, i + 1), "\n"); if (e == 0) { i = n; break }
+                        t = substr(s, i + 1, e - 1); i += e
+                        if (hd) sub(/^\t+/, "", t)
+                        if (t == hm) break
+                    }
+                    hm = ""; continue
+                }
                 if (q == "\047") { cur = cur c; if (c == "\047") q = ""; continue }
                 if (c == "\\") { cur = cur c nx; i++; continue }
+                if (c == "$" && nx == "(") { qs[++dp] = q; q = ""; ist[dp] = length(cur) + 3; cur = cur "$("; i++; continue }
+                if (c == ")" && dp > 0 && q == "") { q = qs[dp--]; cur = cur c; continue }
                 if (c == "\047" || c == "\"") { if (q == "") q = c; else if (q == c) q = ""; cur = cur c; continue }
-                if (c == "$" && nx == "(") { dp++; cur = cur "$("; i++; continue }
-                if (c == ")" && dp > 0) { dp--; cur = cur c; continue }
+                if (c == "<" && nx == "<" && q == "" && dp > 0 && hm == "" && substr(cur, ist[dp]) ~ sink \
+                    && match(substr(s, i + 2), /^-?[ \t]*("[^"]+"|\047[^\047]+\047|[A-Za-z_][A-Za-z0-9_]*)/)) {
+                    hm = substr(s, i + 2, RLENGTH); hd = (hm ~ /^-/); sub(/^-?[ \t]*/, "", hm); gsub(/["\047]/, "", hm)
+                    cur = cur "<<"; i++; continue
+                }
                 if (q != "" || dp > 0 || !index(";|&()\n", c)) { cur = cur c; continue }
                 if ((c == "&" || c == "|") && (substr(s, i - 1, 1) ~ /[<>]/ || (c == "&" && nx == ">"))) { cur = cur c; continue }
                 depth = run(cur, depth, pst, pip); cur = ""
@@ -376,13 +398,19 @@ _push_targets() {
             depth = run(cur, depth, pst, pip)
             endpipe(depth, pst, pip)
             DEPTH--
+            return 1
         }
-        # 단순 명령 하나를 해석하고, 복합 명령 키워드로 깊이를 조정해 돌려준다.
-        function run(cmd, depth, pst, pip,    w) {
+        # 단순 명령 하나를 해석한다. 앞에 이어진 복합 명령 키워드를 전부 훑어 깊이를 맞춘다
+        # (`then {`, `do {` 의 { 를 놓치면 짝인 } 가 바깥 if 의 깊이를 닫아 엉뚱한 디렉토리로 되돌렸다).
+        function run(cmd, depth, pst, pip,    T, m, k) {
             if (cmd !~ /[^ \t\n]/) return depth
-            w = cmd; sub(/^[ \t\n]+/, "", w); sub(/[ \t\n].*/, "", w)
-            if (w ~ /^(\}|fi|done|esac)$/ && depth > 0) { endpipe(depth, pst, pip); depth-- }
-            if (w ~ /^(\{|if|for|while|until|case|select)$/) { depth++; pst[depth] = DIR; pip[depth] = 0 }
+            m = split(cmd, T, /[ \t\n]+/)
+            for (k = 1; k <= m; k++) {
+                if (T[k] == "" || T[k] ~ /^(then|do|else|elif|time|!)$/) continue
+                if (T[k] ~ /^(\}|fi|done|esac)([0-9]*[<>&].*)?$/) { if (depth > 0) { endpipe(depth, pst, pip); depth-- }; continue }
+                if (T[k] ~ /^(\{|if|for|while|until|case|select)$/) { depth++; pst[depth] = DIR; pip[depth] = 0; continue }
+                break
+            }
             simple(cmd)
             return depth
         }
@@ -392,46 +420,45 @@ _push_targets() {
             pip[depth] = 0; pst[depth] = DIR
         }
         # 셸 낱말 분리. 작은따옴표 안의 $ 는 확장하지 않도록 \002 로 표시해 둔다.
-        function words(s, W,    n, len, i, c, tok, q, has, dp) {
-            n = 0; tok = ""; q = ""; has = 0; dp = 0; len = length(s)
+        # $( ) 안의 글자는 그대로 둔다(안쪽 명령을 subst 가 다시 해석한다): 짝만 안쪽 인용 기준으로 맞춘다.
+        function words(s, W,    n, len, i, c, tok, q, has, dp, iq) {
+            n = 0; tok = ""; q = ""; has = 0; dp = 0; iq = ""; len = length(s)
             for (i = 1; i <= len; i++) {
                 c = substr(s, i, 1)
+                if (dp > 0) {
+                    tok = tok c
+                    if (iq == "\047") { if (c == "\047") iq = ""; continue }
+                    if (c == "\\") { tok = tok substr(s, i + 1, 1); i++; continue }
+                    if (c == "\047" || c == "\"") { if (iq == "") iq = c; else if (iq == c) iq = ""; continue }
+                    if (iq == "" && c == "$" && substr(s, i + 1, 1) == "(") { tok = tok "("; i++; dp++; continue }
+                    if (iq == "" && c == ")") dp--
+                    continue
+                }
                 if (q == "\047") { if (c == "\047") q = ""; else tok = tok (c == "$" ? "\002" : c); continue }
                 if (c == "\\" && q == "") { tok = tok substr(s, i + 1, 1); i++; continue }
-                if (c == "$" && substr(s, i + 1, 1) == "(") { dp++; tok = tok "$("; i++; continue }
-                if (dp > 0 && c == ")") { dp--; tok = tok c; continue }
+                if (c == "$" && substr(s, i + 1, 1) == "(") { dp = 1; iq = ""; tok = tok "$("; i++; continue }
                 if (q == "\"") { if (c == "\"") q = ""; else tok = tok c; continue }
                 if (c == "\047" || c == "\"") { q = c; has = 1; continue }
-                if ((c == " " || c == "\t") && dp == 0) { if (tok != "" || has) { W[++n] = tok; tok = ""; has = 0 }; continue }
+                if (c == " " || c == "\t") { if (tok != "" || has) { W[++n] = tok; tok = ""; has = 0 }; continue }
                 tok = tok c
             }
             if (tok != "" || has) W[++n] = tok
             return n
         }
         # 낱말 안의 $( ... ) 명령도 본다(out=$(git push 2>&1)). 명령치환은 자식 셸이라 cd 가 새지 않는다.
-        # 그 안의 heredoc 본문은 벗긴다: "$(cat <<EOF ... EOF)" 로 넘긴 커밋 메시지나 PR 본문의
-        # "git push" 글자가 명령으로 읽혀 커밋 명령이 막히거나 감사가 수십 건 쌓였다.
-        function subst(w,    len, i, dp, st, saved) {
-            dp = 0; len = length(w)
+        # 해석한 명령치환 수를 돌려준다(simple 이 "무엇이든 해석했는가"를 판단한다).
+        function subst(w,    len, i, c, dp, iq, st, saved, ran) {
+            dp = 0; iq = ""; ran = 0; len = length(w)
             for (i = 1; i <= len; i++) {
-                if (substr(w, i, 2) == "$(") { if (dp++ == 0) st = i + 2; i++; continue }
-                if (substr(w, i, 1) == ")" && dp > 0 && --dp == 0) {
-                    saved = DIR; process(dehere(substr(w, st, i - st))); DIR = saved
-                }
+                c = substr(w, i, 1)
+                if (dp == 0) { if (c == "$" && substr(w, i + 1, 1) == "(") { dp = 1; iq = ""; st = i + 2; i++ }; continue }
+                if (iq == "\047") { if (c == "\047") iq = ""; continue }
+                if (c == "\\") { i++; continue }
+                if (c == "\047" || c == "\"") { if (iq == "") iq = c; else if (iq == c) iq = ""; continue }
+                if (iq == "" && c == "$" && substr(w, i + 1, 1) == "(") { dp++; i++; continue }
+                if (iq == "" && c == ")" && --dp == 0) { saved = DIR; ran += process(substr(w, st, i - st)); DIR = saved }
             }
-        }
-        # 데이터 싱크(cat, tee, python 등)가 받는 heredoc 본문을 뺀다(_strip_heredocs 와 같은 판단의 줄 단위판).
-        function dehere(s,    L, n, k, out, mk, dash, t, m) {
-            n = split(s, L, "\n"); out = ""; mk = ""
-            for (k = 1; k <= n; k++) {
-                if (mk != "") { t = L[k]; if (dash) sub(/^\t+/, "", t); if (t == mk) mk = ""; continue }
-                if (L[k] ~ sink && match(L[k], /<<-?[ \t]*("[^"]+"|\047[^\047]+\047|[A-Za-z_][A-Za-z0-9_]*)/)) {
-                    m = substr(L[k], RSTART + 2, RLENGTH - 2); dash = (m ~ /^-/)
-                    sub(/^-?[ \t]*/, "", m); gsub(/["\047]/, "", m); mk = m
-                }
-                out = out L[k] "\n"
-            }
-            return out
+            return ran
         }
         # 낱말 하나를 확장한다. 값이 여럿이면 S 로 잇고, 풀 수 없으면 U.
         function expand(w,    pre, rest, name, vals, r, nv, nr, V, R, k, j, out) {
@@ -447,6 +474,7 @@ _push_targets() {
             if (name == "HOME") vals = home
             else if (name == "PWD") vals = DIR
             else if (name in VAR) vals = VAR[name]
+            else if (name in ENVIRON) vals = ENVIRON[name]          # $CLAUDE_PROJECT_DIR 처럼 명령 밖에서 정해진 값
             else return U
             if (vals == U || pre ~ /\$/) return U
             r = expand(rest)
@@ -458,24 +486,22 @@ _push_targets() {
             gsub(/\002/, "$", out)
             return out
         }
-        # base(여럿일 수 있다) 기준으로 p(여럿일 수 있다)를 푼다.
+        # base(여럿일 수 있다) 기준으로 p(여럿일 수 있다)를 푼다. p 를 풀 수 없으면 base 를 그대로 둔다.
         function resolve(base, p,    nb, np, B, P, k, j, out) {
-            if (base == U || p == U || p == "") return U
+            if (p == U || p == "") return base
             nb = split(base, B, S); np = split(p, P, S); out = ""
             for (k = 1; k <= nb; k++) for (j = 1; j <= np; j++)
                 out = out (out == "" ? "" : S) (substr(P[j], 1, 1) == "/" ? P[j] : B[k] "/" P[j])
             return out
         }
         function emit(d, rev,    n, D, k) {
-            ACTS++
             if (d == U || rev == U) { print "?\t?"; return }
             n = split(d, D, S)
             for (k = 1; k <= n; k++) print D[k] "\t" rev
         }
-        function simple(s,    W, n, i, k, e, v, name, arg, g, d, sc, acts) {
-            acts = ACTS
-            n = words(s, W)
-            for (k = 1; k <= n; k++) if (index(W[k], "$(")) subst(W[k])
+        function simple(s,    W, n, i, k, e, v, name, arg, g, d, sc, ran) {
+            n = words(s, W); ran = 0
+            for (k = 1; k <= n; k++) if (index(W[k], "$(")) ran += subst(W[k])
             i = 1
             while (i <= n && W[i] ~ /^(if|then|else|elif|do|while|until|time|!|\{|\})$/) i++
             if (i > n) return
@@ -496,23 +522,22 @@ _push_targets() {
                 arg = ""
                 for (k = i + 1; k <= n; k++) { if (W[k] == "--" || W[k] ~ /^-[LPe@]+$/) continue; arg = W[k]; break }
                 if (arg == "") DIR = home
-                else if (arg == "-") DIR = U
-                else DIR = resolve(DIR, expand(arg))
+                else if (arg != "-") DIR = resolve(DIR, expand(arg))
                 return
             }
-            if (W[i] == "popd") { DIR = U; return }
+            if (W[i] == "popd") return
             if (W[i] == "eval") { arg = ""; for (k = i + 1; k <= n; k++) arg = arg " " W[k]; process(arg); return }
             # 셸과 git 은 아무 위치에서나 찾는다(timeout 60 bash -c ..., nohup git push ...).
             for (g = i; g <= n; g++) if (W[g] ~ /(^|\/)(ba|z|da|k)?sh$/ && shellcmd(W, g, n)) return
             for (g = i; g <= n; g++) if (W[g] == "git" || W[g] ~ /\/git$/) break
             # git 을 찾았는데 서브커맨드가 push 가 아니면 push 가 아니다(커밋 메시지 속 "git push" 글자).
-            # git 도 셸도 못 찾았는데 문자열이 push 모양이면 판정 불가로 감사한다(조용히 통과하지 않는다).
-            if (g > n) { if (ACTS == acts && s ~ push_re) emit(U, U); return }
+            # git 도 셸도 명령치환도 해석하지 못했는데 문자열이 push 모양이면 판정 불가로 감사한다.
+            if (g > n) { if (!ran && s ~ push_re) emit(U, U); return }
             d = DIR; sc = 0
             for (k = g + 1; k <= n; k++) {
                 if (W[k] == "-C") { k++; d = resolve(d, expand(W[k])); continue }
                 if (W[k] == "-c" || W[k] == "--namespace" || W[k] == "--super-prefix") { k++; continue }
-                if (W[k] ~ /^--(git-dir|work-tree)/) { d = U; if (W[k] !~ /=/) k++; continue }
+                if (W[k] ~ /^--(git-dir|work-tree)/) { if (W[k] !~ /=/) k++; continue }
                 if (W[k] ~ /^-/) continue
                 sc = k; break
             }
@@ -655,8 +680,8 @@ ML_TOP=""             # 이 트리의 루트(물리 경로). 호출자가 구해
 _coverage_remote() { COVERAGE_MODE="none"; COVERAGE_TREES=(); }
 
 _coverage_scope() {
-    local args root raw clean path abs out t pre d leaf nested h name up
-    local cache="" elsewhere=0 here=0 saw_pr=0 saw_num=0 prev="" refs=""
+    local args root raw clean path abs t pre d leaf re
+    local elsewhere=0 here=0 saw_pr=0 saw_num=0 prev="" refs=""
     COVERAGE_MODE=""; COVERAGE_PATHS=(); COVERAGE_TREES=(); REF_CUR=""; REF_UP=""; REF_FROM="-"
     args="$(_json_unescape "${1:-}")"
     [ -z "${args//[[:space:]]/}" ] && { COVERAGE_MODE="all"; return 0; }
@@ -716,15 +741,16 @@ _coverage_scope() {
             # 목록은 첫 필요 시점에 **한 번만** 뜨고, 현재 브랜치와 upstream 도 그 호출에서 함께 받는다.
             # HEAD 는 for-each-ref 에 없으므로 직접 넣는다.
             if [ -z "$refs" ]; then
-                refs="HEAD"
-                while IFS=$'\t' read -r h name up; do
-                    refs="${refs}"$'\n'"${name}"
-                    if [ "$h" = "*" ]; then REF_CUR="$name"; REF_UP="$up"; fi
-                done < <(git for-each-ref --format='%(HEAD)%09%(refname:short)%09%(upstream:short)' \
-                             refs/heads refs/tags refs/remotes 2>/dev/null)
+                # 현재 브랜치 줄에만 "<이름>\t<upstream>" 을 붙여 한 번에 받는다. 줄마다 read 로 돌면 ref 가
+                # 수백 개인 레포에서 기록 한 번이 100ms 넘게 늘었다.
+                refs="HEAD"$'\n'"$(git for-each-ref \
+                    --format='%(refname:short)%(if)%(HEAD)%(then)%09%(upstream:short)%(end)' \
+                    refs/heads refs/tags refs/remotes 2>/dev/null)"
+                re=$'\n([^\t\n]+)\t([^\n]*)'
+                if [[ "$refs" =~ $re ]]; then REF_CUR="${BASH_REMATCH[1]}"; REF_UP="${BASH_REMATCH[2]}"; fi
             fi
             case $'\n'"$refs"$'\n' in
-                *$'\n'"$clean"$'\n'*) _ref_is_base "$clean" || elsewhere=1; continue ;;
+                *$'\n'"$clean"$'\n'*|*$'\n'"$clean"$'\t'*) _ref_is_base "$clean" || elsewhere=1; continue ;;
             esac
         fi
 
@@ -738,29 +764,17 @@ _coverage_scope() {
         case "$abs" in
             */../*|*/..|*/./*|*/.) ;;
             "$root"|"$root"/*)
-                nested=0; t="$d"
-                while [ "${#t}" -gt "${#root}" ]; do
-                    if [ -e "$t/.git" ] || [ -L "$t" ]; then nested=1; break; fi
-                    t="${t%/*}"
-                done
-                if [ "$nested" = 0 ]; then
+                t="$d"
+                while [ "${#t}" -gt "${#root}" ] && [ ! -e "$t/.git" ] && [ ! -L "$t" ]; do t="${t%/*}"; done
+                if [ "${#t}" -le "${#root}" ]; then
                     pre="${abs#"$root"}"; pre="${pre#/}"
                     COVERAGE_PATHS+=("${pre:-.}")
                     continue
                 fi ;;
         esac
-        # --show-toplevel 은 물리 경로를, --show-prefix 는 그 루트 기준 위치를 준다. 같은 디렉토리는 한 번만 묻는다.
+        # --show-toplevel 은 물리 경로를, --show-prefix 는 그 루트 기준 위치를 준다.
         t=""; pre=""
-        case "$cache" in
-            *$'\n'"$d"$'\t'*)
-                out="${cache#*$'\n'"$d"$'\t'}"; out="${out%%$'\n'*}"
-                t="${out%%$'\t'*}"; pre="${out#*$'\t'}" ;;
-            *)
-                if out="$(git -C "$d" rev-parse --show-toplevel --show-prefix 2>/dev/null)"; then
-                    t="${out%%$'\n'*}"; pre="${out#*$'\n'}"; [ "$pre" = "$out" ] && pre=""
-                fi
-                cache="${cache}"$'\n'"${d}"$'\t'"${t}"$'\t'"${pre}" ;;
-        esac
+        { read -r t; read -r pre; } < <(git -C "$d" rev-parse --show-toplevel --show-prefix 2>/dev/null)
         [ -n "$t" ] || continue
         pre="${pre}${leaf}"
         if [ "$t" = "$root" ]; then
@@ -793,8 +807,14 @@ _path_hit() {
     local t="$1" n=0
     HIT=""
     while [ -n "$t" ] && [ "$n" -le 16 ]; do
-        if [ -e "$t" ]; then HIT="$t"; [ "$HIT" = "/" ] || HIT="${HIT%/}"; return 0; fi
+        if [ -e "$t" ]; then
+            # 떼어 낸 끝이 . 이나 .. 이면 짚은 적 없는 디렉토리다("..." 이 .. 이 되어 레포 루트를 인정했다).
+            case "$n/$t" in 0/*) ;; */.|*/..) return 0 ;; esac
+            HIT="$t"; [ "$HIT" = "/" ] || HIT="${HIT%/}"; return 0
+        fi
         case "$t" in */) return 0 ;; esac
+        # 구두점과 비-ASCII(한글 조사)만 뗀다. 영숫자까지 떼면 lib2 가 lib 로 넓어진다.
+        case "${t: -1}" in [abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-]) return 0 ;; esac
         t="${t%?}"; n=$((n + 1))
     done
     return 0
@@ -808,12 +828,9 @@ _path_hit() {
 # 첫 push 의 -u 뒤에는 upstream 이 자기 원격 브랜치로 바뀌고, 기준 브랜치가 앞서 나가면 조상도 아니게
 # 된다. 딴 지점은 브랜치 reflog 의 첫 줄에 남아 있다("branch: Created from origin/develop"). reflog 는
 # 문자열 비교가 모두 빗나갔을 때 한 번만 읽는다.
-REF_CUR=""; REF_UP=""; REF_FROM="-"
 _ref_is_base() {
     local r="$1"
-    [ "$r" = HEAD ] && return 0
-    if [ -n "$REF_CUR" ] && [ "$r" = "$REF_CUR" ]; then return 0; fi
-    if [ -n "$REF_UP" ] && { [ "$r" = "$REF_UP" ] || [ "$r" = "${REF_UP#*/}" ]; }; then return 0; fi
+    case "$r" in HEAD|"$REF_CUR"|"$REF_UP"|"${REF_UP#*/}") return 0 ;; esac
     if [ "$REF_FROM" = "-" ]; then
         REF_FROM=""
         if [ -n "$REF_CUR" ]; then
@@ -826,7 +843,7 @@ _ref_is_base() {
             esac
         fi
     fi
-    if [ -n "$REF_FROM" ] && { [ "$r" = "$REF_FROM" ] || [ "$r" = "${REF_FROM#*/}" ]; }; then return 0; fi
+    case "$r" in "$REF_FROM"|"${REF_FROM#*/}") return 0 ;; esac
     git merge-base --is-ancestor "$r" HEAD 2>/dev/null
 }
 
@@ -1019,7 +1036,7 @@ do_record() {
     # 레포 식별은 git 한 번으로 한다: git-dir 은 상태 경로, toplevel 은 경로 판정의 기준이다.
     gd=""; ML_TOP=""
     { read -r gd; read -r ML_TOP; } < <(git rev-parse --absolute-git-dir --show-toplevel 2>/dev/null)
-    _ml_init_state "$gd"
+    _ml_init_state "$gd" "$ML_TOP"
     # 인자는 여기서 **한 번만** 해석한다. 트리마다 다시 해석하면 같은 낱말이 트리마다 다른 역할이
     # 된다(이 트리에서는 맥락이던 경로가 다른 트리에서는 대상이 되고, 상대경로가 엉뚱한 트리에 붙는다).
     _coverage_scope "$args"
@@ -1038,7 +1055,7 @@ do_record() {
               [ "${line%%$'\t'*}" = "$t" ] && COVERAGE_PATHS+=("${line#*$'\t'}")
           done
           ML_TOP="$t"
-          _ml_init_state
+          _ml_init_state "" "$t"
           _record_skill "$skill" )
     done <<EOF
 $roots
@@ -1051,7 +1068,7 @@ EOF
 _record_skill() {
     local skill="$1"
     mkdir -p "$(dirname "$LEDGER_REL")" 2>/dev/null || return 0
-    mkdir -p ".mangolove" 2>/dev/null || true
+    mkdir -p "${SKIP_REL%/*}" 2>/dev/null || true
     _ensure_regular_file "$LEDGER_REL" || return 0
     _ensure_regular_file "$COVERED_REL" || return 0
     _ensure_regular_file "$COVERED_REL.tmp" || return 0
@@ -1233,7 +1250,7 @@ _emit_block() {
                 echo "델타가 사소하면 근거를 남기고 스스로 우회하세요. 이것도 묻지 마세요."
                 echo "  방법 1: Write 도구로 ${SKIP_REL} 파일에 근거를 적는다"
                 echo "          (권한이 필요 없어 실행 중인 세션에서도 바로 됩니다)"
-                echo "  방법 2: mangolove review skip \"<무엇을 리뷰했고 델타가 무엇인지>\""
+                echo "  방법 2: cd \"$PWD\" && mangolove review skip \"<무엇을 리뷰했고 델타가 무엇인지>\""
                 echo "델타가 사소하지 않으면 다시 돌리는 편이 낫습니다."
                 ;;
         esac
@@ -1266,7 +1283,7 @@ _judge_rev() {
 # gh pr create 는 보지 않는다. 내용을 올리지 않고(비대화형에서 push 를 대신하지 않는다), 이미 올라간
 # 브랜치는 원격 추적 ref 가 갱신돼 범위가 늘 비므로 막을 수 있는 대상이 없다.
 do_pretooluse() {
-    local input raw dir rev gd top rc key hit seen=$'\n' bypassed=$'\n' repos=$'\n' blocked=0 parsed=0 unknown=0
+    local input raw dir rev gd top rc key seen=$'\n' bypassed=$'\n' blocked=0 parsed=0 unknown=0
     # read -d '' 는 builtin 이라 cat 의 포크를 없앤다. NUL 이 없으면 1 을 반환하나
     # 그때도 읽은 내용은 input 에 담긴다.
     IFS= read -r -d '' input || true
@@ -1279,15 +1296,10 @@ do_pretooluse() {
     while IFS=$'\t' read -r dir rev; do
         [ -n "$dir" ] || continue
         if [ "$dir" = "!" ]; then parsed=1; continue; fi
-        if [ "$dir" = "?" ] || [ ! -d "$dir" ]; then unknown=1; continue; fi
-        # 레포 식별은 디렉토리마다 git 한 번: git-dir 은 상태 경로, toplevel 은 판정 위치이자 레포 키다.
-        case "$repos" in
-            *$'\n'"$dir"$'\t'*) hit="${repos#*$'\n'"$dir"$'\t'}"; hit="${hit%%$'\n'*}"
-                                gd="${hit%%$'\t'*}"; top="${hit#*$'\t'}" ;;
-            *) gd=""; top=""
-               { read -r gd; read -r top; } < <(git -C "$dir" rev-parse --absolute-git-dir --show-toplevel 2>/dev/null)
-               repos="${repos}${dir}"$'\t'"${gd}"$'\t'"${top}"$'\n' ;;
-        esac
+        if [ "$dir" = "?" ]; then unknown=1; continue; fi
+        # 레포 식별은 git 한 번: git-dir 은 상태 경로, toplevel 은 판정 위치이자 레포 키다.
+        gd=""; top=""
+        { read -r gd; read -r top; } < <(git -C "$dir" rev-parse --absolute-git-dir --show-toplevel 2>/dev/null)
         # 비-git 디렉토리에서는 진짜 push 가 실패한다. 판정이 여기 닿았다면 파서가 디렉토리를 잘못 풀었다는
         # 뜻이므로 조용히 넘기지 않고 감사한다.
         if [ -z "$top" ]; then unknown=1; continue; fi
@@ -1300,7 +1312,7 @@ do_pretooluse() {
         # 판정은 레포 루트에서 한다. 범위의 경로는 루트 기준이라, 하위 디렉토리(cd sub && git push)에서
         # 판정하면 경로 제한이 한 건도 안 맞아 미검토 변경이 조용히 통과했다.
         ( cd "$top" 2>/dev/null || exit 0
-          _ml_init_state "$gd"
+          _ml_init_state "$gd" "$top"
           _bypassed && exit 3
           _judge_rev "$rev" ); rc=$?
         case "$rc" in
@@ -1375,6 +1387,7 @@ do_prepush() {
 do_skip() {
     local reason="${*:-}"
     git rev-parse --git-dir >/dev/null 2>&1 || { echo "review-gate: git 저장소가 아닙니다" >&2; exit 1; }
+    _ml_init_state
     [ -n "$reason" ] || { echo "usage: mangolove review skip \"<근거>\"" >&2; exit 2; }
     mkdir -p "$(dirname "$SKIP_REL")" 2>/dev/null || true
     # 워킹트리에 남는 유일한 상태 파일이라 브랜치가 심볼릭 링크를 실어 올 수 있다.
@@ -1394,10 +1407,11 @@ do_skip() {
 
 # ── status: 사람용 진단. 인자가 없으면 게이트가 실제로 볼 push 범위를 그대로 보여준다.
 do_status() {
-    local ref="${1:-}" top
+    local ref="${1:-}" gd="" top=""
     # 판정은 레포 루트에서 한다(범위의 경로가 루트 기준이다: do_pretooluse 주석).
-    if top="$(git rev-parse --show-toplevel 2>/dev/null)"; then cd "$top" || exit 1; fi
-    _ml_init_state
+    { read -r gd; read -r top; } < <(git rev-parse --absolute-git-dir --show-toplevel 2>/dev/null)
+    if [ -n "$top" ]; then cd "$top" || exit 1; fi
+    _ml_init_state "$gd" "$top"
     # _range_signature 는 A...B 만 이해한다. sha 나 --working 을 넘기면 서명이 비어
     # 모든 스킬이 충족으로 보이는 **거짓 PASS** 가 난다. 아예 받지 않는다.
     case "$ref" in

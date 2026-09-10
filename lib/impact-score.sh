@@ -34,10 +34,8 @@ _gitp() {
 # 인덱스(--staged), 범위(A...B) 지원.
 # --working 은 untracked(아직 git add 안 한) 신규 파일도 포함한다(인덱스 변경 없이).
 # --staged 는 인덱스에 올라간 것만 본다.
-# A...B 는 세 점(merge base 기준)이다: push 게이트가 `<upstream>...HEAD` 로 "이 브랜치가
-# upstream 에 더하는 순변경"을 본다. 이미 upstream 에 있는 머지 내용은 merge base 가
-# 자동으로 빼주므로 머지 특별처리가 필요 없다. 반대로 upstream 에 없는 브랜치를 머지하면
-# 그 내용은 범위에 남아 그대로 점수화된다(미검토 코드가 머지로 숨지 못한다).
+# A...B 는 세 점(merge base 기준)이다. push 게이트는 기준을 스스로 정해 `<경계>...<rev>` 로 넘기고,
+# 경계가 여럿이면 경로 제한도 함께 준다(review-gate.sh 의 _push_scope). 여기서는 기준을 추정하지 않는다.
 _ref_names() {
     case "$1" in
         --working) { _gitp diff --name-only HEAD; _gitp ls-files --others --exclude-standard; } | sort -u ;;

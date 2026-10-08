@@ -146,6 +146,134 @@ _run_cost() {
     [[ "$output" == *"5.00"* ]]
 }
 
+# ── 2026-09 ~ 10 출시 모델 (Opus 5.5 / Sonnet 5.5 / Fable 5.1 / Haiku 5.5) ──
+# 회귀 대상: 표에 없는 모델이 접두사 폴백으로 새어 Opus 5.5 가 $5/$25 에 캐시 읽기 $0.50/M 로
+# 계산됐다(가격표는 $4/$20, $0.20/M). 캐시 읽기가 토큰의 대부분이라 총액이 2배로 나왔다.
+# 캐시 승수는 모델마다 다르고(읽기 0.1 / 0.05 / 0.025), 쓰기는 TTL 로 갈린다(5분 1.25, 1시간 2).
+
+# usage 레코드 한 줄을 TTL 분해(cache_creation)까지 실어 쓴다.
+# $1=model $2=cache_write 합계 $3=1시간 몫 $4=5분 몫 $5=file
+_write_cache_write_session() {
+    printf '{"message":{"model":"%s","usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":%s,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_1h_input_tokens":%s,"ephemeral_5m_input_tokens":%s}}}}\n' \
+        "$1" "$2" "$3" "$4" > "$5"
+}
+
+@test "opus 5.5 1M output → \$20.00 (접두사 폴백 \$25 아님)" {
+    _write_output_only_session "claude-opus-5-5" 1000000 "$PROJ_DIR/o55.jsonl"
+    _run_cost
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'$20.00'* ]]
+    [[ "$output" != *'$25.00'* ]]
+}
+
+@test "sonnet 5.5 1M output → \$10.00 (접두사 폴백 \$15 아님)" {
+    _write_output_only_session "claude-sonnet-5-5" 1000000 "$PROJ_DIR/s55.jsonl"
+    _run_cost
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'$10.00'* ]]
+    [[ "$output" != *'$15.00'* ]]
+}
+
+@test "opus 5.5 cache read 는 input×0.05 다 (10M → \$2.00, 0.1 승수의 \$4.00 아님)" {
+    _usage_line "claude-opus-5-5" 0 0 0 10000000 > "$PROJ_DIR/o55cr.jsonl"
+    _run_cost
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'$2.00'* ]]
+    [[ "$output" != *'$4.00'* ]]
+    [[ "$output" != *'$5.00'* ]]
+}
+
+@test "sonnet 5.5 cache read 는 input×0.05 다 (10M → \$1.00)" {
+    _usage_line "claude-sonnet-5-5" 0 0 0 10000000 > "$PROJ_DIR/s55cr.jsonl"
+    _run_cost
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'$1.00'* ]]
+    [[ "$output" != *'$2.00'* ]]
+}
+
+@test "fable 5.1 cache read 는 input×0.025 다 (10M → \$2.50, 0.1 승수의 \$10.00 아님)" {
+    _usage_line "claude-fable-5-1" 0 0 0 10000000 > "$PROJ_DIR/f51cr.jsonl"
+    _run_cost
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'$2.50'* ]]
+    [[ "$output" != *'$10.00'* ]]
+}
+
+@test "haiku 5.5 10M output → \$5.00 (haiku 4.5 단가의 \$50.00 아님)" {
+    _write_output_only_session "claude-haiku-5-5" 10000000 "$PROJ_DIR/h55.jsonl"
+    _run_cost
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'$5.00'* ]]
+    [[ "$output" != *'$50.00'* ]]
+}
+
+@test "haiku 5.5 는 프롬프트가 100K 를 넘는 요청에 상위 단가를 적용한다" {
+    # 프롬프트 = input + cache write + cache read = 200K. output 10M × $2.50 + read 0.2M × $0.05
+    _usage_line "claude-haiku-5-5" 0 10000000 0 200000 > "$PROJ_DIR/h55long.jsonl"
+    _run_cost
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'$25.01'* ]]
+}
+
+@test "haiku 5.5 프롬프트가 정확히 100K 면 기본 단가다 (초과가 아니다)" {
+    # output 10M × $0.50 + input 0.1M × $0.10
+    _usage_line "claude-haiku-5-5" 100000 10000000 0 0 > "$PROJ_DIR/h55edge.jsonl"
+    _run_cost
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'$5.01'* ]]
+}
+
+@test "1시간 TTL cache write 는 input×2 다 (opus 5.5 1M → \$8.00)" {
+    _write_cache_write_session "claude-opus-5-5" 1000000 1000000 0 "$PROJ_DIR/cw1h.jsonl"
+    _run_cost
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'$8.00'* ]]
+}
+
+@test "5분 TTL cache write 는 input×1.25 다 (opus 5.5 1M → \$5.00)" {
+    _write_cache_write_session "claude-opus-5-5" 1000000 0 1000000 "$PROJ_DIR/cw5m.jsonl"
+    _run_cost
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'$5.00'* ]]
+    [[ "$output" != *'$8.00'* ]]
+}
+
+@test "TTL 분해가 없는 cache write 는 5분 단가로 계산한다 (opus 5.5 1M → \$5.00)" {
+    _usage_line "claude-opus-5-5" 0 0 1000000 0 > "$PROJ_DIR/cwplain.jsonl"
+    _run_cost
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'$5.00'* ]]
+}
+
+@test "opus 5.5 fast 1M output → \$40.00" {
+    _write_output_only_session_speed "claude-opus-5-5" 1000000 "fast" "$PROJ_DIR/o55f.jsonl"
+    _run_cost
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'$40.00'* ]]
+}
+
+@test "opus 4.8 fast 1M output → \$50.00 (표준 \$25 아님)" {
+    _write_output_only_session_speed "claude-opus-4-8" 1000000 "fast" "$PROJ_DIR/o48f.jsonl"
+    _run_cost
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'$50.00'* ]]
+}
+
+# 폴백은 추정이다. 조용히 적용되면 새 모델이 나온 뒤 몇 주씩 틀린 비용을 낸다.
+@test "단가표에 없는 모델은 폴백 사실을 출력에 밝힌다" {
+    _write_output_only_session "claude-opus-9-9" 1000000 "$PROJ_DIR/o99.jsonl"
+    _run_cost
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"claude-opus-9-9"* ]]
+}
+
+@test "단가표에 있는 모델만 있으면 폴백 안내가 없다" {
+    _write_output_only_session "claude-opus-5-5[1m]" 1000000 "$PROJ_DIR/o55m.jsonl"
+    _run_cost
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"단가표에 없는 모델"* ]]
+}
+
 # ─────────────────────────────────────────────
 # cost sessions: 세션별 집중도 뷰
 #

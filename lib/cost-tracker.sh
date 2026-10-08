@@ -17,7 +17,8 @@ PROJECTS_DIR="${MANGOLOVE_COST_PROJECTS_DIR:-$CLAUDE_DIR/projects}"
 # 의 PRICES 로 레코드 단위 적용한다. (과거엔 Opus 단가를 전 세션에 평면 적용해 경량 모델
 # 비용을 과대 계상했다. 게다가 그 Opus 값($15/$75)마저 구형이라 현행 Opus($5/$25)의 3배였다.)
 # fast mode(usage.speed=='fast')는 같은 모델의 프리미엄 단가로 별도 계산한다 (FAST_PRICES).
-# cache write=input×1.25, cache read=input×0.1 (5분 ephemeral 기준)로 유도한다.
+# 캐시 승수는 상수가 아니다. 읽기는 모델마다 다르고(0.1 / 0.05 / 0.025), 쓰기는 TTL 로
+# 갈린다(5분 1.25, 1시간 2). 단가 출처: platform 가격표 (2026-10-08 확인).
 
 # ─────────────────────────────────────────────
 # Parse a single session file and sum tokens
@@ -31,28 +32,59 @@ PROJECTS_DIR="${MANGOLOVE_COST_PROJECTS_DIR:-$CLAUDE_DIR/projects}"
 # 두 곳에 복사하면 단가가 조용히 갈라진다: 이 파일이 이미 한 번 겪은 사고다
 # (전 세션에 구형 Opus 단가를 평면 적용해 3배로 계산했다. tests/cost-tracker.bats 참조).
 _ML_PRICE_PY=$(cat <<'PRICEPY'
-# 모델별 (input, output) 달러/1M 토큰. cache write=input*1.25, read=input*0.1 로 유도.
+# 모델별 (input, output) 달러/1M 토큰.
 PRICES = {
+    'claude-fable-5-1': (10.0, 50.0),
+    'claude-mythos-5-1': (10.0, 50.0),
+    'claude-fable-5': (10.0, 50.0),
+    'claude-mythos-5': (10.0, 50.0),
+    'claude-opus-5-5': (4.0, 20.0),
     'claude-opus-5': (5.0, 25.0),
     'claude-opus-4-8': (5.0, 25.0),
     'claude-opus-4-7': (5.0, 25.0),
     'claude-opus-4-6': (5.0, 25.0),
     'claude-opus-4-5': (5.0, 25.0),
+    'claude-sonnet-5-5': (2.0, 10.0),
     'claude-sonnet-5': (2.0, 10.0),
     'claude-sonnet-4-6': (3.0, 15.0),
     'claude-sonnet-4-5': (3.0, 15.0),
+    'claude-haiku-5-5': (0.10, 0.50),
     'claude-haiku-4-5': (1.0, 5.0),
-    'claude-fable-5': (10.0, 50.0),
-    'claude-mythos-5': (10.0, 50.0),
 }
-DEFAULT = PRICES['claude-opus-5']  # 미상 모델 → 현행 Opus 단가로 추정
+DEFAULT = PRICES['claude-opus-5']  # 미상 모델 → Opus 5 단가로 추정
+
+# 프롬프트 길이로 단가가 갈리는 모델: 한 요청의 프롬프트(input + cache write + cache read)가
+# 임계를 "넘으면" 상위 단가다. 정확히 임계인 요청은 기본 단가.
+LONG_PROMPT_TOKENS = 100_000
+LONG_PROMPT_PRICES = {
+    'claude-haiku-5-5': (0.50, 2.50),
+}
 
 # fast mode(usage.speed == 'fast')는 같은 모델을 더 비싸게 과금한다. 세션 jsonl 의
 # usage.speed 를 읽어 프리미엄 단가로 계산한다. 공개 단가가 확인된 모델만 싣는다
 # (미등재 모델의 fast 는 표준 단가로 계산: 과소 계상될 수 있는 known-gap, 추정 금지).
 FAST_PRICES = {
+    'claude-opus-5-5': (8.0, 40.0),
     'claude-opus-5': (10.0, 50.0),
+    'claude-opus-4-8': (10.0, 50.0),
 }
+
+# 캐시 승수(기준 = 그 요청에 적용된 input 단가). 읽기 승수를 식에 0.1 로 박아 두면
+# 승수가 다른 새 모델이 조용히 몇 배로 계산된다: Opus 5.5 가 그랬다(캐시 읽기가 토큰의
+# 대부분이라 총액이 2배가 됐다). 표에 없는 모델만 기본 0.1 을 쓴다.
+CACHE_READ_MULT = {
+    'claude-fable-5-1': 0.025,
+    'claude-mythos-5-1': 0.025,
+    'claude-opus-5-5': 0.05,
+    'claude-sonnet-5-5': 0.05,
+}
+CACHE_READ_MULT_DEFAULT = 0.1
+CACHE_WRITE_MULT_5M = 1.25
+CACHE_WRITE_MULT_1H = 2.0
+
+# 단가표에 없어 폴백(추정)으로 계산한 모델. 호출자가 출력에 밝힌다: 조용히 추정하면
+# 새 모델이 나온 뒤 표를 고칠 계기가 없다.
+UNPRICED = set()
 
 # 세션 레코드의 model 은 변형 접미사를 달고 온다: 실측: 'claude-opus-5[1m]'(1M 컨텍스트),
 # 그리고 과거 모델의 '-20251101' 같은 날짜 스냅샷. 정규화 없이 정확 일치 표만 보면
@@ -64,25 +96,35 @@ def normalize_model(model):
     m = model.split('[', 1)[0]                       # [1m] 등 변형 접미사 제거
     return re.sub(r'-20\d{6}$', '', m)                # -YYYYMMDD 날짜 스냅샷 제거
 
-# 한 usage 레코드의 비용. 단가표만 공유하고 이 식을 복제해 두면, 캐시 승수(1.25/0.1)를
-# 바꾸는 순간 프로젝트 뷰와 세션 뷰의 비용이 다시 갈라진다. 공유의 의도를 여기서 완성한다.
+# 한 usage 레코드의 비용. 단가표만 공유하고 이 식을 복제해 두면, 캐시 승수를 바꾸는 순간
+# 프로젝트 뷰와 세션 뷰의 비용이 다시 갈라진다. 공유의 의도를 여기서 완성한다.
 def cost_of(usage, model):
     i = usage.get('input_tokens', 0) or 0
     o = usage.get('output_tokens', 0) or 0
     cw = usage.get('cache_creation_input_tokens', 0) or 0
     cr = usage.get('cache_read_input_tokens', 0) or 0
-    p_in, p_out = price_for(model, usage.get('speed'))
-    return (i, o, cw, cr,
-            (i * p_in + o * p_out + cw * (p_in * 1.25) + cr * (p_in * 0.1)) / 1_000_000)
-
-def price_for(model, speed=None):
     model = normalize_model(model)
+    p_in, p_out = price_for(model, usage.get('speed'), i + cw + cr, tokens=i + o + cw + cr)
+    # cache write 는 TTL 별로 쪼개져 온다. 분해가 없거나 합이 모자라면 나머지는 5분으로 본다.
+    ttl = usage.get('cache_creation') or {}
+    cw_1h = min(ttl.get('ephemeral_1h_input_tokens', 0) or 0, cw) if isinstance(ttl, dict) else 0
+    cw_cost = cw_1h * CACHE_WRITE_MULT_1H + (cw - cw_1h) * CACHE_WRITE_MULT_5M
+    cr_mult = CACHE_READ_MULT.get(model, CACHE_READ_MULT_DEFAULT)
+    return (i, o, cw, cr,
+            (i * p_in + o * p_out + cw_cost * p_in + cr * cr_mult * p_in) / 1_000_000)
+
+# model 은 정규화된 id 다. tokens 가 0 인 레코드(예: '<synthetic>')는 UNPRICED 에 싣지 않는다.
+def price_for(model, speed=None, prompt_tokens=0, tokens=0):
     if speed == 'fast' and model in FAST_PRICES:
         return FAST_PRICES[model]
     if not model:
         return DEFAULT
+    if model in LONG_PROMPT_PRICES and prompt_tokens > LONG_PROMPT_TOKENS:
+        return LONG_PROMPT_PRICES[model]
     if model in PRICES:
         return PRICES[model]
+    if tokens:
+        UNPRICED.add(model)
     if model.startswith('claude-fable') or model.startswith('claude-mythos'):
         return (10.0, 50.0)
     if model.startswith('claude-opus'):
@@ -141,6 +183,8 @@ for line in file_list.strip().split('\n'):
 
 for name, v in projects.items():
     print(f'{name},{v[0]},{v[1]},{v[2]},{v[3]},{v[4]},{v[5]},{v[6]:.2f}')
+if UNPRICED:
+    print('!unpriced,' + ' '.join(sorted(UNPRICED)))
 " 2>/dev/null
 }
 
@@ -388,10 +432,12 @@ show_cost() {
     local total_input=0 total_output=0 total_cache_write=0 total_cache_read=0
     local total_messages=0 total_sessions=0
     local total_cost=0
-    local project_data=""
+    local project_data="" unpriced=""
 
     while IFS=',' read -r pname p_in p_out p_cw p_cr p_msgs p_sess p_cost; do
         [ -z "$pname" ] && continue
+        # 집계 행이 아니라 "폴백으로 계산한 모델 목록" 한 줄이다 (batch_parse_sessions 참조)
+        if [ "$pname" = "!unpriced" ]; then unpriced="$p_in"; continue; fi
         project_data="${project_data}${p_cost}|${pname}|${p_in}|${p_out}|${p_cw}|${p_cr}|${p_msgs}|${p_sess}
 "
         total_input=$((total_input + p_in))
@@ -436,7 +482,11 @@ show_cost() {
 
     echo ""
     echo -e "${DIM}──────────────────────────────────────${R}"
-    echo -e "  ${DIM}단가(모델별, /1M in-out): opus \$5/\$25, sonnet 5 \$2/\$10, sonnet 4.6 \$3/\$15, haiku \$1/\$5, fable \$10/\$50, opus 5 fast \$10/\$50 (cache 추정)${R}"
+    echo -e "  ${DIM}단가: platform 가격표 기준 모델별 정가(추정치, 청구액 아님). 캐시 쓰기 5분 1.25x / 1시간 2x, 읽기는 모델별${R}"
+    if [ -n "$unpriced" ]; then
+        echo -e "  ${Y}단가표에 없는 모델(같은 계열 단가로 추정): ${unpriced}${R}"
+        echo -e "  ${DIM}lib/cost-tracker.sh 의 PRICES 에 추가하면 정확해집니다.${R}"
+    fi
     echo ""
 }
 

@@ -478,12 +478,14 @@ _repo_root_project() {
 @test "seed: 경로에 글롭 문자가 있어도 info/exclude 패턴이 맞는다" {
     SBOX="$(mktemp -d)"
     git -C "$SBOX" init -q
-    mkdir -p "$SBOX/apps/[web]/.mangolove"
-    printf 'hooks/*.log\n' > "$SBOX/apps/[web]/.mangolove/.gitignore"
+    # [ 와 * 와 ? 를 모두 담은 폴더 이름
+    local odd='apps/[web]*v?'
+    mkdir -p "$SBOX/$odd/.mangolove"
+    printf 'hooks/*.log\n' > "$SBOX/$odd/.mangolove/.gitignore"
     git -C "$SBOX" add -A
     git -C "$SBOX" -c user.email=t@example.com -c user.name=t commit -q -m init
-    printf '#!/usr/bin/env bash\nexit 1\n' > "$SBOX/apps/[web]/.mangolove/dod.sh"
-    printf '{"hook_event_name":"Stop","session_id":"S","cwd":"%s"}' "$SBOX/apps/[web]" | "$GATE" >/dev/null 2>&1 || true
+    printf '#!/usr/bin/env bash\nexit 1\n' > "$SBOX/$odd/.mangolove/dod.sh"
+    printf '{"hook_event_name":"Stop","session_id":"S","cwd":"%s"}' "$SBOX/$odd" | "$GATE" >/dev/null 2>&1 || true
 
     run git -C "$SBOX" status --porcelain
     [ -z "$output" ]

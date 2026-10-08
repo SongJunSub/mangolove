@@ -1090,14 +1090,17 @@ ${resume_context}"
         bash "$SESSION_MEMORY" save 2>/dev/null &
         bash "$PLUGIN_MANAGER" hook on_session_end 2>/dev/null &
         _ml_plugin_pid=$!
-        _ml_logger_pid=0
+        _ml_logger_pid=""
         if [ "$MANGOLOVE_AUTO_LOG" = "true" ]; then
             bash "$WORK_LOGGER" end 2>/dev/null &
             _ml_logger_pid=$!
         fi
         _ml_wait=0
         while [ $_ml_wait -lt 10 ]; do
-            kill -0 $_ml_plugin_pid 2>/dev/null || kill -0 $_ml_logger_pid 2>/dev/null || break
+            # 띄우지 않은 로거를 기다리지 않는다: pid 자리에 0 을 두면 kill -0 0 이 항상 성공해
+            # 작업 로그를 끈 사용자는 종료할 때마다 10초를 기다렸다.
+            kill -0 $_ml_plugin_pid 2>/dev/null \
+                || { [ -n "$_ml_logger_pid" ] && kill -0 $_ml_logger_pid 2>/dev/null; } || break
             sleep 1
             _ml_wait=$((_ml_wait + 1))
         done

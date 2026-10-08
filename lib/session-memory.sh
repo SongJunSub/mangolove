@@ -80,9 +80,14 @@ EOF
     fi
 
     # Check for failing tests
-    if [ -f "CLAUDE.md" ]; then
+    # claude v2.1.277 부터 CLAUDE.md 가 없는 프로젝트는 AGENTS.md 를 읽는다. 같은 순서로 찾는다.
+    local instructions=""
+    if [ -f "CLAUDE.md" ]; then instructions="CLAUDE.md"
+    elif [ -f "AGENTS.md" ]; then instructions="AGENTS.md"
+    fi
+    if [ -n "$instructions" ]; then
         local test_cmd
-        test_cmd=$(grep "Test:" "CLAUDE.md" 2>/dev/null | sed 's/.*`\(.*\)`.*/\1/' | head -1) || true
+        test_cmd=$(grep "Test:" "$instructions" 2>/dev/null | sed 's/.*`\(.*\)`.*/\1/' | head -1) || true
         if [ -n "$test_cmd" ]; then
             cat >> "$session_file" << EOF
 

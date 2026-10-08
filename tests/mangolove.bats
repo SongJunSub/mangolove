@@ -499,3 +499,28 @@ FAKE
     run env PATH="$TEST_DIR/fakebin:$PATH" bash "$MANGOLOVE_DIR/bin/mangolove" doctor
     [[ "$output" == *"cc-plugin: valid"* ]]
 }
+
+# ─────────────────────────────────────────────
+# AGENTS.md: claude v2.1.277 부터 CLAUDE.md 가 없는 프로젝트는 AGENTS.md 를 읽는다
+# ─────────────────────────────────────────────
+
+@test "instructions: CLAUDE.md 가 없으면 AGENTS.md 를 프로젝트 지침 파일로 본다" {
+    mkdir -p "$TEST_DIR/a" "$TEST_DIR/b" "$TEST_DIR/c"
+    echo x > "$TEST_DIR/a/AGENTS.md"
+    echo x > "$TEST_DIR/b/AGENTS.md"; echo x > "$TEST_DIR/b/CLAUDE.md"
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'
+      [ \"\$(_ml_instructions_file '$TEST_DIR/a')\" = '$TEST_DIR/a/AGENTS.md' ] || exit 1
+      [ \"\$(_ml_instructions_file '$TEST_DIR/b')\" = '$TEST_DIR/b/CLAUDE.md' ] || exit 2
+      [ -z \"\$(_ml_instructions_file '$TEST_DIR/c')\" ] || exit 3
+      exit 0"
+    [ "$status" -eq 0 ]
+}
+
+@test "session-memory: AGENTS.md 만 있는 프로젝트에서도 테스트 명령을 저장한다" {
+    mkdir -p "$TEST_DIR/agentsproj" && cd "$TEST_DIR/agentsproj"
+    git init -q . && git -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m init
+    printf 'Test: `npm run test:unit`\n' > AGENTS.md
+    run bash "$MANGOLOVE_DIR/lib/session-memory.sh" save
+    [ "$status" -eq 0 ]
+    grep -q 'npm run test:unit' "$MANGOLOVE_DIR/sessions/agentsproj.md"
+}

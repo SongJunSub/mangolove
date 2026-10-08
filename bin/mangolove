@@ -39,6 +39,7 @@ MANGOLOVE_MODEL=""
 MANGOLOVE_EFFORT=""
 MANGOLOVE_MODE=""
 MANGOLOVE_SESSION_GATES=true
+ML_RESUME=0   # `mangolove resume` 서브커맨드가 1 로 올린다 (_ml_launch 참조)
 # Methodology delivery: split (lean core.md + on-demand cc-plugin skills) | monolith (full strict.md).
 # Default split: context 는 가장 비싼 자원이고, 상시 주입이 길수록 개별 지시의 효력이 희석된다.
 # 트랙 판정, 승인 게이트, 안전 절차는 코어에 상주하고 무거운 절차만 온디맨드로 내려간다.
@@ -76,6 +77,71 @@ _ml_is_off() {
         off|false|0|no|disabled) return 0 ;;
         *) return 1 ;;
     esac
+}
+
+# 설치된 claude 의 버전("2.1.293 (Claude Code)" → 2.1.293). 못 읽으면 빈 문자열.
+_ml_claude_version() {
+    claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1
+}
+
+# $1 >= $2 인가. 점으로 나눈 세 자리를 수로 비교한다(문자열 비교는 2.1.99 를 2.1.257 보다 크게 본다).
+# 어느 쪽이든 비어 있으면 거짓이다: 버전을 모르면 충족으로 치지 않는다.
+_ml_version_ge() {
+    [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
+    [ "$(printf '%s\n%s\n' "$1" "$2" | sort -t. -k1,1n -k2,2n -k3,3n | head -1)" = "$2" ]
+}
+
+# 재개 실행이면 시스템 프롬프트 스냅샷을 끄는 인자를 ML_SNAPSHOT_ARGS 에 담는다.
+#
+# claude v2.1.265 부터 대화 첫 요청의 시스템 프롬프트가 세션에 기록되고, --continue /
+# --resume 뒤에도 압축 전까지 그 기록이 쓰인다. 재개하며 넘긴 새 --append-system-prompt 는
+# 무시된다(v2.1.293 실측). 그대로 두면 --mode 전환, 프로필, 갱신된 방법론, 날짜가 든 작업
+# 로그 경로가 전부 옛 값인데 훅은 새 코드라 게이트와 지시가 어긋난다.
+#
+# 새 대화에는 넘기지 않는다. 스냅샷은 프롬프트 캐시를 안정시키려고 생긴 것이고, 새 대화의
+# 기록은 어차피 지금 넘기는 프롬프트다.
+# 플래그는 v2.1.257 에 생겼다. 그보다 낮은 CLI 는 모르는 옵션으로 실행을 거부하므로 넘기지
+# 않는다(그 버전대는 프롬프트 플래그를 주면 기록이 꺼졌으므로 필요도 없다).
+# 결과는 전역 배열로 돌려준다: 명령치환은 빈 결과와 요소 경계를 잃는다.
+ML_SNAPSHOT_ARGS=()
+_ml_snapshot_args() {
+    ML_SNAPSHOT_ARGS=()
+    local a resume=0
+    for a in "$@"; do
+        case "$a" in
+            --system-prompt-snapshot|--system-prompt-snapshot=*) return 0 ;;
+            -c|--continue|-r|--resume|--resume=*|--from-pr|--from-pr=*) resume=1 ;;
+        esac
+    done
+    [ "$resume" = "1" ] || return 0
+    _ml_version_ge "$(_ml_claude_version)" "2.1.257" || return 0
+    ML_SNAPSHOT_ARGS=(--system-prompt-snapshot off)
+}
+
+# 마지막 단계: CLAUDE_ARGS 를 실어 claude 를 띄운다.
+#
+# `mangolove resume`(ML_RESUME=1)은 직전 대화를 -c 로 잇고, MangoLove 세션 메모리를 **첫
+# 사용자 메시지**로 넘긴다. 시스템 프롬프트로 넘기면 위에 적은 이유로 재개 시 무시된다.
+# 이을 대화가 없으면 -c 가 실패하므로 같은 메시지로 새 대화를 연다.
+_ml_launch() {
+    if [ "${ML_RESUME:-0}" != "1" ]; then
+        _ml_snapshot_args "$@"
+        claude "${CLAUDE_ARGS[@]}" "${ML_SNAPSHOT_ARGS[@]}" "$@"
+        return
+    fi
+
+    local session_context="" first_message=()
+    session_context=$(bash "$SESSION_MEMORY" load 2>/dev/null) || true
+    if [ -n "$session_context" ]; then
+        first_message=("## Previous Session Context
+${session_context}
+
+Continue from where you left off. Summarize the previous session state and ask what to work on next.")
+    fi
+
+    _ml_snapshot_args -c "$@"
+    claude "${CLAUDE_ARGS[@]}" "${ML_SNAPSHOT_ARGS[@]}" -c "$@" "${first_message[@]}" 2>/dev/null \
+        || claude "${CLAUDE_ARGS[@]}" "$@" "${first_message[@]}"
 }
 
 check_dependencies() {
@@ -700,23 +766,11 @@ main() {
             exit 0
             ;;
         resume)
+            # 예전에는 여기서 claude 를 따로 띄워 세션 게이트(--settings)와 플러그인 없이
+            # 실행됐다. 이제 아래 공통 경로를 그대로 타고, 차이는 _ml_launch 가 낸다.
             bash "$SESSION_MEMORY" show
-            # After showing context, launch claude with session context
-            check_dependencies
-            local session_context=""
-            session_context=$(bash "$SESSION_MEMORY" load 2>/dev/null) || true
-            if [ -n "$session_context" ]; then
-                claude --append-system-prompt "## Previous Session Context
-${session_context}
-
-Continue from where you left off. Summarize the previous session state and ask what to work on next." -c 2>/dev/null || claude --append-system-prompt "## Previous Session Context
-${session_context}
-
-Continue from where you left off. Summarize the previous session state and ask what to work on next."
-            else
-                claude -c 2>/dev/null || claude
-            fi
-            exit 0
+            ML_RESUME=1
+            shift
             ;;
         sessions)
             bash "$SESSION_MEMORY" list
@@ -965,7 +1019,7 @@ ${methodology}"
     fi
 
     # Launch Claude Code
-    claude "${CLAUDE_ARGS[@]}" "$@"
+    _ml_launch "$@"
 }
 
 # 세션 게이트 설정 파일을 생성한다: bare mangolove 에서도 시크릿 게이트 + 비가역 가드를

@@ -294,3 +294,133 @@ teardown() {
     run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'; MANGOLOVE_REVIEW_GATE=on generate_session_settings '$out'"
     grep -q "review-gate.sh" "$out"
 }
+
+# ─────────────────────────────────────────────
+# 재개 경로: claude v2.1.265 부터 대화 첫 요청의 시스템 프롬프트가 세션에 기록되고
+# --continue / --resume 뒤에도 압축 전까지 재사용된다. 실측(v2.1.293): 재개하며 넘긴 새
+# --append-system-prompt 는 무시되고 --system-prompt-snapshot off 에서만 반영된다.
+# ─────────────────────────────────────────────
+
+# claude 를 셸 함수로 가린다. --version 은 $1 을 내고, 그 밖의 호출은 인자를 한 줄씩 기록한다.
+_stub_claude() {
+    cat <<STUB
+claude() {
+    if [ "\${1:-}" = "--version" ]; then echo "$1 (Claude Code)"; return 0; fi
+    { printf '%s\n' "\$@"; echo "<<END>>"; } >> "$TEST_DIR/claude-calls"
+    return \${STUB_RC:-0}
+}
+STUB
+}
+
+@test "version: _ml_version_ge 는 점 구분 버전을 수로 비교한다" {
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'
+      _ml_version_ge 2.1.293 2.1.257 || exit 1
+      _ml_version_ge 2.1.257 2.1.257 || exit 2
+      _ml_version_ge 3.0.0 2.1.257   || exit 3
+      # 문자열 비교였다면 99 > 257 로 통과한다
+      if _ml_version_ge 2.1.99 2.1.257;  then exit 4; fi
+      if _ml_version_ge 2.0.300 2.1.257; then exit 5; fi
+      # 버전을 못 읽으면 '충족'이 아니다: 모르는 플래그를 넘겨 실행을 깨뜨리지 않는다
+      if _ml_version_ge '' 2.1.257;      then exit 6; fi
+      exit 0"
+    [ "$status" -eq 0 ]
+}
+
+@test "resume: 재개 플래그가 있으면 시스템 프롬프트 스냅샷을 끈다" {
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'
+      $(_stub_claude 2.1.293)
+      for f in -c --continue -r --resume --resume=abc --from-pr; do
+        _ml_snapshot_args \"\$f\"
+        [ \"\${ML_SNAPSHOT_ARGS[*]}\" = '--system-prompt-snapshot off' ] || { echo \"miss: \$f\"; exit 1; }
+      done"
+    [ "$status" -eq 0 ]
+}
+
+@test "resume: 새 대화에는 스냅샷 플래그를 넘기지 않는다 (캐시 안정성 유지)" {
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'
+      $(_stub_claude 2.1.293)
+      _ml_snapshot_args;                          [ \${#ML_SNAPSHOT_ARGS[@]} -eq 0 ] || exit 1
+      _ml_snapshot_args 'fix the -c option';      [ \${#ML_SNAPSHOT_ARGS[@]} -eq 0 ] || exit 2
+      _ml_snapshot_args --model opus 'hello';     [ \${#ML_SNAPSHOT_ARGS[@]} -eq 0 ] || exit 3
+      exit 0"
+    [ "$status" -eq 0 ]
+}
+
+@test "resume: 플래그를 모르는 구버전 claude 에는 넘기지 않는다" {
+    # v2.1.257 미만은 --system-prompt-snapshot 을 모르는 옵션으로 거부해 실행 자체가 깨진다.
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'
+      $(_stub_claude 2.1.240)
+      _ml_snapshot_args -c; [ \${#ML_SNAPSHOT_ARGS[@]} -eq 0 ]"
+    [ "$status" -eq 0 ]
+}
+
+@test "resume: 사용자가 직접 준 --system-prompt-snapshot 은 건드리지 않는다" {
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'
+      $(_stub_claude 2.1.293)
+      _ml_snapshot_args -c --system-prompt-snapshot on; [ \${#ML_SNAPSHOT_ARGS[@]} -eq 0 ]"
+    [ "$status" -eq 0 ]
+}
+
+@test "launch: 평소에는 인자를 그대로 넘기고 claude 를 한 번만 부른다" {
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'
+      $(_stub_claude 2.1.293)
+      CLAUDE_ARGS=(--settings /tmp/s.json); ML_RESUME=0
+      _ml_launch 'hello world'"
+    [ "$status" -eq 0 ]
+    [ "$(grep -c '<<END>>' "$TEST_DIR/claude-calls")" -eq 1 ]
+    [ "$(tr '\n' '|' < "$TEST_DIR/claude-calls")" = "--settings|/tmp/s.json|hello world|<<END>>|" ]
+}
+
+@test "launch: -c 로 재개하면 스냅샷을 끄고 나머지는 그대로다" {
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'
+      $(_stub_claude 2.1.293)
+      CLAUDE_ARGS=(--settings /tmp/s.json); ML_RESUME=0
+      _ml_launch -c"
+    [ "$status" -eq 0 ]
+    [ "$(tr '\n' '|' < "$TEST_DIR/claude-calls")" = "--settings|/tmp/s.json|--system-prompt-snapshot|off|-c|<<END>>|" ]
+}
+
+# mangolove resume: 예전에는 게이트(--settings)도 플러그인도 없이 claude 를 따로 띄웠고,
+# 세션 컨텍스트를 --append-system-prompt 로 넘겨 재개 시 통째로 무시됐다.
+@test "launch: mangolove resume 은 게이트를 실은 채 -c 로 잇고 컨텍스트를 첫 메시지로 넘긴다" {
+    cat > "$MANGOLOVE_DIR/lib/session-memory.sh" <<'SM'
+#!/bin/bash
+[ "$1" = "load" ] && echo "branch: feat/x"
+SM
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'
+      $(_stub_claude 2.1.293)
+      CLAUDE_ARGS=(--settings /tmp/s.json --append-system-prompt METHODOLOGY); ML_RESUME=1
+      _ml_launch"
+    [ "$status" -eq 0 ]
+    [ "$(grep -c '<<END>>' "$TEST_DIR/claude-calls")" -eq 1 ]
+    grep -qx -- '--settings' "$TEST_DIR/claude-calls"
+    grep -qx -- '-c' "$TEST_DIR/claude-calls"
+    grep -qx -- 'off' "$TEST_DIR/claude-calls"
+    # 컨텍스트는 시스템 프롬프트 값이 아니라 마지막 위치 인자(첫 사용자 메시지)다
+    grep -q 'branch: feat/x' "$TEST_DIR/claude-calls"
+    grep -qx 'METHODOLOGY' "$TEST_DIR/claude-calls"
+    [ "$(grep -c 'Previous Session Context' "$TEST_DIR/claude-calls")" -eq 1 ]
+}
+
+@test "launch: 이을 대화가 없어 -c 가 실패하면 새 대화로 같은 컨텍스트를 넘긴다" {
+    cat > "$MANGOLOVE_DIR/lib/session-memory.sh" <<'SM'
+#!/bin/bash
+[ "$1" = "load" ] && echo "branch: feat/x"
+SM
+    # 첫 호출(-c)만 실패시킨다
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'
+      claude() {
+          if [ \"\${1:-}\" = '--version' ]; then echo '2.1.293 (Claude Code)'; return 0; fi
+          { printf '%s\n' \"\$@\"; echo '<<END>>'; } >> '$TEST_DIR/claude-calls'
+          case \" \$* \" in *' -c '*) return 1 ;; esac
+          return 0
+      }
+      CLAUDE_ARGS=(--settings /tmp/s.json); ML_RESUME=1
+      _ml_launch"
+    [ "$status" -eq 0 ]
+    [ "$(grep -c '<<END>>' "$TEST_DIR/claude-calls")" -eq 2 ]
+    [ "$(grep -cx -- '-c' "$TEST_DIR/claude-calls")" -eq 1 ]
+    # 새 대화에는 스냅샷 플래그가 필요 없다
+    [ "$(grep -cx -- '--system-prompt-snapshot' "$TEST_DIR/claude-calls")" -eq 1 ]
+    [ "$(grep -c 'branch: feat/x' "$TEST_DIR/claude-calls")" -eq 2 ]
+}

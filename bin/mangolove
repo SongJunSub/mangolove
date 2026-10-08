@@ -327,7 +327,7 @@ show_help() {
     echo "  mangolove eval                Self-eval: deterministic component scores (impact calibration, guard P/R)"
     echo "  mangolove ab                  A/B harness (Phase 4 v2): methodology vs bare claude (gate protection + scorer)"
     echo "  mangolove ab live             Run cc-plugin evals with and without the plugin (real sessions, billed)"
-    echo "  mangolove switch <project>    Switch to project directory and launch claude"
+    echo "  mangolove switch <project>    Start a MangoLove session in that project directory"
     echo "  mangolove projects            List project profiles"
     echo "  mangolove profile add         Add a new project profile"
     echo "  mangolove profile auto [dir]  Auto-generate profile from project scan"
@@ -783,10 +783,10 @@ handle_switch() {
         return 1
     fi
 
+    # 폴더만 옮긴다. 실행은 main 의 공통 경로가 한다: 여기서 claude 를 따로 띄우면 방법론도,
+    # 세션 게이트(--settings)도, 플러그인도 없는 맨 claude 가 뜬다.
     echo -e "  \033[38;5;113mSwitching to:\033[0m $target_path"
     cd "$target_path" || return 1
-    check_dependencies
-    exec claude
 }
 
 handle_profile() {
@@ -925,7 +925,16 @@ main() {
             ;;
         switch)
             shift
-            handle_switch "$@"
+            # 이름이 없으면 목록만 낸다. 예전에는 목록을 찍고 그대로 흘러가 지금 폴더에서
+            # 세션이 떴다.
+            if [ $# -eq 0 ]; then
+                handle_switch
+                exit 0
+            fi
+            # 프로젝트 폴더로 옮긴 뒤 아래 공통 경로를 그대로 탄다(실패하면 set -e 로 끝난다).
+            # 이름은 여기서 소비한다: 남기면 claude 의 프롬프트 인자가 된다.
+            handle_switch "$1"
+            shift
             ;;
         projects)
             bash "$PROFILE_MANAGER" list

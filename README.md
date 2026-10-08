@@ -103,7 +103,7 @@ mangolove stats month         # 월간 유형별 분석
 ### 프로젝트 네비게이션
 ```bash
 mangolove switch              # 등록된 프로젝트 목록
-mangolove switch crs-be       # 프로젝트로 전환 + claude 실행
+mangolove switch crs-be       # 그 프로젝트 폴더에서 mangolove 세션 시작 (게이트, 방법론 포함)
 mangolove projects            # 프로젝트 프로필 목록
 ```
 

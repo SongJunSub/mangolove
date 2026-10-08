@@ -641,3 +641,60 @@ _fake_install_repo() {
     [ "$status" -eq 0 ]
     git -C "$inst" diff --quiet -- .gitignore
 }
+
+# ─────────────────────────────────────────────
+# switch: 다른 프로젝트로 건너가도 MangoLove 세션이어야 한다
+# 예전에는 프로젝트 폴더로 옮긴 뒤 claude 를 아무 인자 없이 띄웠다. 방법론도, 시크릿 스캔과
+# 비가역 가드도, 리뷰 게이트도 없는 맨 claude 인데 겉으로는 구분되지 않았다(resume 과 같은 결함).
+# ─────────────────────────────────────────────
+
+# 받은 인자와 실행된 폴더를 기록하는 가짜 claude
+_fake_claude_recording() {
+    install_fake_claude <<FAKE
+if [ "\${1:-}" = "--version" ]; then echo "2.1.293 (Claude Code)"; exit 0; fi
+{ pwd -P; printf '%s\n' "\$@" | cut -c1-60; } > "$TEST_DIR/switch-calls"
+exit 0
+FAKE
+}
+
+_register_demo_project() {
+    mkdir -p "$TEST_DIR/demoproj"
+    printf 'name: demo\npath: %s\n' "$TEST_DIR/demoproj" > "$MANGOLOVE_DIR/projects/demo.md"
+}
+
+@test "switch: 인자가 없으면 목록만 내고 세션을 띄우지 않는다" {
+    _fake_claude_recording
+    _register_demo_project
+    cd "$TEST_DIR"
+    run env HOME="$TEST_DIR" PATH="$TEST_DIR/fakebin:$PATH" bash "$MANGOLOVE_DIR/bin/mangolove" switch </dev/null
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"MangoLove Switch"* ]]
+    [ ! -e "$TEST_DIR/switch-calls" ]
+}
+
+@test "switch: 이름을 주면 그 프로젝트 폴더에서 게이트와 방법론을 실은 채 뜬다" {
+    command -v python3 >/dev/null 2>&1 || skip "needs python3"
+    _fake_claude_recording
+    _register_demo_project
+    cd "$TEST_DIR"
+    local started=$SECONDS
+    run env HOME="$TEST_DIR" PATH="$TEST_DIR/fakebin:$PATH" bash "$MANGOLOVE_DIR/bin/mangolove" switch demo </dev/null
+    local elapsed=$((SECONDS - started))
+    [ "$status" -eq 0 ]
+    [ "$(head -1 "$TEST_DIR/switch-calls")" = "$(cd "$TEST_DIR/demoproj" && pwd -P)" ]
+    grep -qx -- '--append-system-prompt' "$TEST_DIR/switch-calls"
+    grep -qx -- '--settings' "$TEST_DIR/switch-calls"
+    # 프로젝트 이름이 claude 의 프롬프트 인자로 새지 않는다
+    ! grep -qx 'demo' "$TEST_DIR/switch-calls"
+    # 작업 로그가 꺼져 있을 때 종료 대기가 10초를 꽉 채우던 문제(kill -0 0 은 항상 성공한다)
+    [ "$elapsed" -lt 7 ]
+}
+
+@test "switch: 없는 프로젝트면 세션을 띄우지 않고 실패한다" {
+    _fake_claude_recording
+    cd "$TEST_DIR"
+    run env HOME="$TEST_DIR" PATH="$TEST_DIR/fakebin:$PATH" bash "$MANGOLOVE_DIR/bin/mangolove" switch nope </dev/null
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"Project not found"* ]]
+    [ ! -e "$TEST_DIR/switch-calls" ]
+}

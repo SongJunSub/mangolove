@@ -1,0 +1,4 @@
+# claude plugin eval 실행 결과 (mangolove ab live). 실행마다 달라지는 산출물이다.
+# 루트 .gitignore 가 아니라 여기 둔다: 루트 파일을 바꾸면, 옛 게이트가 그 파일에 줄을 덧붙여 둔
+# 설치본에서 업데이트의 git pull 이 거부된다.
+results/

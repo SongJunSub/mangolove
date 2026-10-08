@@ -380,6 +380,24 @@ show_help() {
     echo ""
 }
 
+# 옛 게이트가 설치본의 추적 파일 .gitignore 에 덧붙인 줄을 pull 전에 되돌린다. $1=설치본 경로
+#
+# 홈 디렉토리에서 세션을 돌리면 게이트는 ./.mangolove(= 설치본)를 프로젝트의 작업 폴더로 보고
+# 그 .gitignore 에 무시 줄을 심었다. 그 로컬 수정이 남아 있으면 .gitignore 를 바꾸는 업데이트의
+# pull 이 거부된다. 게이트는 이제 그 자리에 쓰지 않지만(lib/dod-gate.sh 의 _ml_seed_gitignore),
+# 이미 남은 줄은 여기서 치운다.
+# 게이트가 심던 줄을 걷어낸 결과가 HEAD 의 내용과 같을 때만 되돌린다. 사용자가 손댄 줄이 하나라도
+# 섞여 있으면 건드리지 않는다.
+_ml_heal_install_gitignore() {
+    local dir="${1:-$MANGOLOVE_DIR}" stripped
+    [ -e "$dir/.git" ] && [ -f "$dir/.gitignore" ] || return 0
+    git -C "$dir" ls-files --error-unmatch .gitignore >/dev/null 2>&1 || return 0
+    git -C "$dir" diff --quiet -- .gitignore 2>/dev/null && return 0
+    stripped="$(grep -vxE '\.gitignore|dod\.sh|\.dod-gate-attempts|\.review-ledger|\.review-ledger\.base|\.review-skip|\.review-covered' "$dir/.gitignore" || true)"
+    [ "$stripped" = "$(git -C "$dir" show HEAD:.gitignore 2>/dev/null)" ] || return 0
+    git -C "$dir" checkout -q -- .gitignore 2>/dev/null || true
+}
+
 _sync_after_pull() {
     local new_version
     new_version=$(grep -m1 '^MANGOLOVE_VERSION=' "$MANGOLOVE_DIR/bin/mangolove" | cut -d'"' -f2)
@@ -407,6 +425,7 @@ do_update() {
         local before_commit
         before_commit=$(git rev-parse HEAD)
 
+        _ml_heal_install_gitignore "$MANGOLOVE_DIR"
         git pull origin main
 
         local after_commit
@@ -461,14 +480,21 @@ auto_update_check() {
         echo ""
         echo -e "\033[38;5;208m⬆ MangoLove 업데이트가 있습니다 (현재: v${current_version})\033[0m"
 
-        git pull origin main --quiet 2>/dev/null
+        _ml_heal_install_gitignore "$MANGOLOVE_DIR"
+        # 업데이트 실패가 실행을 막아서는 안 된다. 예전에는 pull 이 실패하면 이 서브셸이 죽고
+        # 그 종료코드로 mangolove 자체가 끝났다(매 실행마다 반복). 알리고 설치된 버전으로 뜬다.
+        if ! git pull origin main --quiet 2>/dev/null; then
+            echo -e "\033[38;5;220m△ 자동 업데이트에 실패했습니다. 설치된 버전으로 계속합니다. 원인은 'mangolove update' 로 확인할 수 있습니다.\033[0m"
+            echo ""
+            exit 0
+        fi
 
         local new_version
         new_version=$(_sync_after_pull)
 
         echo -e "\033[38;5;113m✅ v${current_version} → v${new_version:-unknown} 업데이트 완료\033[0m"
         echo ""
-    )
+    ) || true
 
     # Record check time only after successful fetch
     echo "$now" > "$check_file"

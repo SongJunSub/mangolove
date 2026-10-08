@@ -601,3 +601,43 @@ _fake_cc_plugin() {
     [ "$status" -eq 0 ]
     grep -q 'npm run test:unit' "$MANGOLOVE_DIR/sessions/agentsproj.md"
 }
+
+# ─────────────────────────────────────────────
+# 업데이트: 설치본의 .gitignore 에 옛 게이트가 남긴 줄과, 실패해도 뜨는 자동 업데이트
+# ─────────────────────────────────────────────
+
+# 추적되는 .gitignore 를 가진 가짜 설치본. $1=경로
+_fake_install_repo() {
+    mkdir -p "$1"
+    git -C "$1" init -q
+    printf '# rules\n*.swp\n' > "$1/.gitignore"
+    git -C "$1" add .gitignore
+    git -C "$1" -c user.email=t@example.com -c user.name=t commit -q -m init
+}
+
+@test "update: 게이트가 덧붙인 줄만 있는 .gitignore 수정은 되돌린다" {
+    local inst="$TEST_DIR/inst"
+    _fake_install_repo "$inst"
+    printf '.gitignore\ndod.sh\n.dod-gate-attempts\n.review-ledger\n.review-ledger.base\n.review-skip\n' >> "$inst/.gitignore"
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'; _ml_heal_install_gitignore '$inst'"
+    [ "$status" -eq 0 ]
+    git -C "$inst" diff --quiet -- .gitignore
+}
+
+@test "update: 사용자가 손댄 줄이 섞인 .gitignore 는 건드리지 않는다" {
+    local inst="$TEST_DIR/inst"
+    _fake_install_repo "$inst"
+    printf 'dod.sh\nmy-notes/\n' >> "$inst/.gitignore"
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'; _ml_heal_install_gitignore '$inst'"
+    [ "$status" -eq 0 ]
+    grep -qx 'my-notes/' "$inst/.gitignore"
+    grep -qx 'dod.sh' "$inst/.gitignore"
+}
+
+@test "update: 수정이 없거나 git 설치본이 아니면 아무 일도 하지 않는다" {
+    local inst="$TEST_DIR/inst"
+    _fake_install_repo "$inst"
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'; _ml_heal_install_gitignore '$inst' && _ml_heal_install_gitignore '$TEST_DIR/nope'"
+    [ "$status" -eq 0 ]
+    git -C "$inst" diff --quiet -- .gitignore
+}

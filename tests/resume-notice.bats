@@ -60,8 +60,10 @@ _message() {
     run bash -c "printf '%s' '$(_payload resume 5400 182340 true 1.1396)' | LC_ALL=en_US.ISO8859-1 bash '$HOOK'"
     [ "$status" -eq 0 ]
     [ -n "$output" ]
-    ! printf '%s' "$output" | LC_ALL=C grep -q '[^ -~]'
     [[ "$(_message)" == *"1시간 30분"* ]]
+    # bats 에서 `! 명령` 은 마지막 줄이 아니면 실패해도 테스트를 떨어뜨리지 않는다. run 으로 받는다.
+    run bash -c "printf '%s' '$output' | LC_ALL=C grep -q '[^ -~]'"
+    [ "$status" -ne 0 ]
 }
 
 @test "resume-notice: 단위는 반올림한 뒤에 고른다 (999,600 토큰은 1.0M)" {

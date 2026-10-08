@@ -252,6 +252,54 @@ release_gate_as() {
     [ "$status" -eq 0 ]
 }
 
+# ── 홈 디렉토리 세션: ./.mangolove 가 MangoLove 설치본(그 자체로 git 저장소)이다 ──────
+# 실측 사고: 게이트가 설치본의 **추적 파일** .gitignore 에 무시 줄을 덧붙였다. 설치본이
+# "로컬 수정 있음"이 되어, .gitignore 를 바꾸는 업데이트의 git pull 이 거부됐고 자동 업데이트가
+# 실패하면 그대로 종료하는 탓에 mangolove 가 아예 뜨지 않았다(스크래치 미러로 재현).
+
+# cwd 의 ./.mangolove 가 저장소 루트인 프로젝트를 만든다. 추적되는 .gitignore 한 줄을 커밋해 둔다.
+_repo_root_project() {
+    SBOX="$(mktemp -d)"
+    mkdir -p "$SBOX/.mangolove"
+    git -C "$SBOX/.mangolove" init -q
+    printf '*.swp\n' > "$SBOX/.mangolove/.gitignore"
+    git -C "$SBOX/.mangolove" add .gitignore
+    git -C "$SBOX/.mangolove" -c user.email=t@example.com -c user.name=t commit -q -m init
+}
+
+@test "seed: ./.mangolove 가 저장소 루트면 dod-gate 는 추적 파일 .gitignore 를 건드리지 않는다" {
+    _repo_root_project
+    printf '#!/usr/bin/env bash\nexit 1\n' > "$SBOX/.mangolove/dod.sh"
+    printf '{"hook_event_name":"Stop","session_id":"S","cwd":"%s"}' "$SBOX" | "$GATE" >/dev/null 2>&1 || true
+
+    run git -C "$SBOX/.mangolove" status --porcelain
+    rm -r "$SBOX"
+    # 추적 파일은 그대로고, 게이트의 일시 파일은 로컬 전용 무시(.git/info/exclude)로 가려진다
+    [ -z "$output" ]
+}
+
+@test "seed: ./.mangolove 가 저장소 루트면 review-gate 도 추적 파일 .gitignore 를 건드리지 않는다" {
+    _repo_root_project
+    printf '{"hook_event_name":"PostToolUse","session_id":"S","cwd":"%s","tool_input":{"skill":"simplify"}}' "$SBOX" \
+        | bash "$REPO/lib/review-gate.sh" record >/dev/null 2>&1 || true
+
+    run git -C "$SBOX/.mangolove" diff --quiet -- .gitignore
+    local tracked_untouched="$status"
+    run grep -qx 'dod.sh' "$SBOX/.mangolove/.git/info/exclude"
+    local seeded="$status"
+    rm -r "$SBOX"
+    [ "$tracked_untouched" -eq 0 ]
+    [ "$seeded" -eq 0 ]
+}
+
+@test "boundary: 두 게이트의 _ml_seed_gitignore 가 바이트 동일하다" {
+    local a b
+    a="$(sed -n '/^_ml_seed_gitignore() {/,/^}/p' "$REPO/lib/dod-gate.sh")"
+    b="$(sed -n '/^_ml_seed_gitignore() {/,/^}/p' "$REPO/lib/review-gate.sh")"
+    [ -n "$a" ]
+    [ "$a" = "$b" ]
+}
+
 @test "boundary: 이미 심어진 옛 .gitignore 에도 빠진 패턴이 채워진다" {
     # "없을 때만 생성"이던 옛 동작 탓에 기존 레포에는 .review-skip 이 빠져 있다.
     printf '.gitignore\ndod.sh\n.dod-gate-attempts\n' > "$PROJ/.mangolove/.gitignore"

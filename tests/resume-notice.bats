@@ -36,13 +36,11 @@ _message() {
     run bash -c "printf '%s' '$(_payload resume 5400 182340 true 1.1396)' | bash '$HOOK'"
     [ "$status" -eq 0 ]
     # 출력은 systemMessage 하나만 든 JSON 이어야 한다. 일반 텍스트 stdout 은 모델 컨텍스트로 들어간다.
-    python3 -c "
-import json, sys
-d = json.loads(sys.argv[1])
-assert list(d) == ['systemMessage'], d
-m = d['systemMessage']
-assert '1.14' in m and '182K' in m and '1시간 30분' in m, m
-" "$output"
+    python3 -c 'import json, sys; assert list(json.loads(sys.argv[1])) == ["systemMessage"]' "$output"
+    local m; m="$(_message)"
+    [[ "$m" == *"1.14"* ]]
+    [[ "$m" == *"182K"* ]]
+    [[ "$m" == *"1시간 30분"* ]]
 }
 
 @test "resume-notice: 안내는 질문도 권유도 아니다 (끊을 시점은 사용자가 판단한다)" {

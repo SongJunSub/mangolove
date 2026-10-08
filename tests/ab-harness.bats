@@ -105,12 +105,14 @@ FAKE
     [ ! -e "$TEST_DIR/eval-args" ]
 }
 
-# $1=evals 디렉토리. 케이스(prompt.md 나 case.yaml 이 있는 디렉토리)마다 타입이 있는 grader 가
-# 있는지 보고, 케이스 수를 낸다. results/ 나 mocks/ 는 케이스가 아니므로 건너뛴다.
+# $1=evals 디렉토리. 케이스마다 프롬프트와 타입이 있는 grader 가 있는지 보고, 케이스 수를 낸다.
+# 케이스가 아닌 것으로 건너뛰는 디렉토리는 이름으로 정해 둔 둘(results, mocks)뿐이다. 그 밖의
+# 디렉토리에 prompt.md 도 case.yaml 도 없으면 프롬프트를 빠뜨린 케이스이므로 실패다.
 _check_eval_cases() {
     local d g n=0
     for d in "$1"/*/; do
-        [ -f "${d}prompt.md" ] || [ -f "${d}case.yaml" ] || continue
+        case "$(basename "$d")" in results|mocks) continue ;; esac
+        [ -f "${d}prompt.md" ] || [ -f "${d}case.yaml" ] || { echo "no prompt: $d"; return 1; }
         ls "${d}graders/"*.md >/dev/null 2>&1 || { echo "no graders: $d"; return 1; }
         for g in "${d}graders/"*.md; do
             grep -qE '^type: (regex|tool_used|tool_order|file_exists|llm|baseline)$' "$g" || { echo "bad type: $g"; return 1; }
@@ -124,6 +126,15 @@ _check_eval_cases() {
     run _check_eval_cases "$(PLUGIN)/evals"
     [ "$status" -eq 0 ]
     [ "$output" -ge 3 ]
+}
+
+@test "evals: 프롬프트를 빠뜨린 케이스는 건너뛰지 않고 잡는다" {
+    cp -R "$(PLUGIN)/evals" "$TEST_DIR/evals-broken"
+    mkdir -p "$TEST_DIR/evals-broken/half-written/graders"
+    printf -- '---\ntype: regex\npattern: x\n---\n' > "$TEST_DIR/evals-broken/half-written/graders/g.md"
+    run _check_eval_cases "$TEST_DIR/evals-broken"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"half-written"* ]]
 }
 
 @test "evals: ab live 가 남긴 results/ 는 케이스로 세지 않는다" {

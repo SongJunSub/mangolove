@@ -90,12 +90,14 @@ _ml_instructions_file() {
     fi
 }
 
-# MangoLove 가 claude 버전에 기대는 두 지점. 사용자 설정이 아니라 사실이다.
+# MangoLove 가 claude 버전에 기대는 지점들. 사용자 설정이 아니라 사실이다.
 #   권장 하한: v2.1.259 는 Stop 훅이 턴을 막은 직후 그 턴의 추론이 유실되고 일부 모델에서
 #             프롬프트 캐시를 놓치던 문제를 고쳤다(DoD 게이트가 쓰는 경로). doctor 가 경고한다.
 #   스냅샷 플래그: --system-prompt-snapshot 은 v2.1.257 에 생겼다(_ml_snapshot_args 참조).
+#   재개 필드: SessionStart 훅의 재개 비용 필드는 v2.1.251 부터 온다(lib/resume-notice.sh).
 ML_CLAUDE_RECOMMENDED="2.1.259"
 ML_SNAPSHOT_FLAG_MIN="2.1.257"
+ML_RESUME_FIELDS_MIN="2.1.251"
 
 # "2.1.293 (Claude Code)" 같은 문자열에서 버전만 뽑는다. 없으면 빈 출력.
 # 못 찾아도 0 으로 끝난다: 이 스크립트는 set -eo pipefail 이라, grep 의 "불일치(1)"가 그대로
@@ -139,7 +141,15 @@ _ml_snapshot_args() {
         esac
     done
     [ "$resume" = "1" ] || return 0
-    _ml_version_ge "$(_ml_claude_version)" "$ML_SNAPSHOT_FLAG_MIN" || return 0
+    local version
+    version="$(_ml_claude_version)"
+    if [ -z "$version" ]; then
+        # 모르는 버전에 플래그를 넘기면 낮은 CLI 는 실행을 거부한다. 넘기지 않되 조용히 넘어가지는
+        # 않는다: 최신 CLI 였다면 재개한 대화가 옛 프롬프트로 도는 것을 사용자가 알 길이 없다.
+        echo "△ claude 버전을 읽지 못해 --system-prompt-snapshot off 를 넘기지 않았습니다. 재개한 대화가 처음 기록된 시스템 프롬프트로 돌 수 있습니다." >&2
+        return 0
+    fi
+    _ml_version_ge "$version" "$ML_SNAPSHOT_FLAG_MIN" || return 0
     ML_SNAPSHOT_ARGS=(--system-prompt-snapshot off)
 }
 
@@ -586,9 +596,9 @@ do_doctor() {
 
     # Resume notice
     if ! _ml_is_off "${MANGOLOVE_RESUME_NOTICE:-on}" && [ -f "$MANGOLOVE_DIR/lib/resume-notice.sh" ]; then
-        # 재개 필드는 claude v2.1.251 부터 온다. 그보다 낮으면 훅은 돌지만 보여줄 값이 없다.
-        if [ -n "$cver" ] && ! _ml_version_ge "$cver" "2.1.251"; then
-            echo -e "  \033[38;5;220m△\033[0m Resume notice: on 이지만 표시되지 않음 (claude 2.1.251 이상 필요)"
+        # 재개 필드가 없는 낮은 버전에서는 훅은 돌지만 보여줄 값이 없다.
+        if [ -n "$cver" ] && ! _ml_version_ge "$cver" "$ML_RESUME_FIELDS_MIN"; then
+            echo -e "  \033[38;5;220m△\033[0m Resume notice: on 이지만 표시되지 않음 (claude ${ML_RESUME_FIELDS_MIN} 이상 필요)"
         else
             echo -e "  \033[38;5;113m✓\033[0m Resume notice: on (캐시 만료된 대화 재개 시 재캐시 비용 표시)"
         fi

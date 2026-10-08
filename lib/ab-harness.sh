@@ -152,9 +152,15 @@ ab_live() {
     command -v claude >/dev/null 2>&1 || { echo "ab live: claude 를 찾을 수 없습니다." >&2; return 2; }
     [ -d "$plugin/evals" ] || { echo "ab live: eval 케이스가 없습니다: $plugin/evals" >&2; return 2; }
     # 종료코드로는 알 수 없다: 없는 서브커맨드에 --help 를 붙이면 claude 는 plugin 도움말을 찍고
-    # 0 을 낸다. eval 의 도움말에만 나오는 옵션이 있는지로 판단한다.
-    claude plugin eval --help 2>&1 | grep -q -- '--ablation' \
-        || { echo "ab live: 'claude plugin eval' 이 없습니다 (Claude Code v2.1.269 이상 필요)." >&2; return 2; }
+    # 0 을 낸다. eval 의 도움말에만 나오는 옵션이 있는지로 판단한다. 출력을 받아 두고 본다:
+    # 파이프로 grep -q 에 물리면 pipefail 아래에서 일찍 끝난 grep 이 앞 명령을 SIGPIPE 로 죽여
+    # "없음"으로 오판할 수 있다.
+    local eval_help
+    eval_help="$(claude plugin eval --help 2>&1)" || true
+    case "$eval_help" in
+        *--ablation*) ;;
+        *) echo "ab live: 'claude plugin eval' 이 없습니다 (Claude Code v2.1.269 이상 필요)." >&2; return 2 ;;
+    esac
     local cap="${AB_LIVE_MAX_COST_USD:-3}"
     echo "live arm: 실세션을 띄우므로 과금됩니다 (케이스 x 반복 x arm 2개). 비용 상한 \$${cap}"
     claude plugin eval "$plugin" --no-publish --trust-plugin --ablation with-without \

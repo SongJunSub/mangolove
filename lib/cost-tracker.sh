@@ -120,18 +120,20 @@ def price_for(model, speed=None, prompt_tokens=0):
         p_in, p_out = LONG_PROMPT_PRICES[model]
     return p_in, p_out, cr_mult
 
-# 표에 없는 모델: 같은 계열의 단가로 추정한다(cost_of 가 UNPRICED 에 싣는다).
+# 표에 없는 모델: 같은 계열의 (input, output) 으로 추정하고 캐시 읽기는 기본 승수를 쓴다
+# (cost_of 가 UNPRICED 에 싣는다). 어느 계열도 아니거나 모델이 비면 DEFAULT.
+FALLBACK_BY_FAMILY = (
+    (('claude-fable', 'claude-mythos'), (10.0, 50.0)),
+    (('claude-opus',), (5.0, 25.0)),
+    (('claude-sonnet',), (3.0, 15.0)),
+    (('claude-haiku',), (1.0, 5.0)),
+)
+FALLBACK_CACHE_READ_MULT = 0.1
+
 def _fallback(model):
-    if not model:
-        return DEFAULT
-    if model.startswith(('claude-fable', 'claude-mythos')):
-        return (10.0, 50.0, 0.1)
-    if model.startswith('claude-opus'):
-        return (5.0, 25.0, 0.1)
-    if model.startswith('claude-sonnet'):
-        return (3.0, 15.0, 0.1)
-    if model.startswith('claude-haiku'):
-        return (1.0, 5.0, 0.1)
+    for prefixes, in_out in FALLBACK_BY_FAMILY:
+        if model and model.startswith(prefixes):
+            return in_out + (FALLBACK_CACHE_READ_MULT,)
     return DEFAULT
 PRICEPY
 )

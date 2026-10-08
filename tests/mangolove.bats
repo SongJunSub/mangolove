@@ -381,6 +381,16 @@ STUB
     [ "$status" -eq 0 ]
 }
 
+@test "resume: 버전을 읽지 못하면 플래그를 넘기지 않되 그 사실을 알린다" {
+    # 조용히 넘어가면, 최신 CLI 에서 재개한 대화가 옛 프롬프트로 도는 것을 알 길이 없다.
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'
+      claude() { echo 'dev-build'; }
+      _ml_snapshot_args -c
+      [ \${#ML_SNAPSHOT_ARGS[@]} -eq 0 ]"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"버전을 읽지 못해"* ]]
+}
+
 @test "resume: 사용자가 직접 준 --system-prompt-snapshot 은 건드리지 않는다" {
     run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'
       $(_stub_claude 2.1.293)
@@ -434,7 +444,6 @@ SM
 }
 
 @test "launch: mangolove resume 은 게이트를 실은 채 -c 로 잇고 메시지를 자동 제출하지 않는다" {
-    _stub_session_memory
     run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'
       $(_stub_claude 2.1.293)
       CLAUDE_ARGS=(--settings /tmp/s.json --append-system-prompt METHODOLOGY); ML_RESUME=1

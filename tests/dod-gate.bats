@@ -16,7 +16,7 @@ setup() {
 
 teardown() {
     [ -n "${PROJ:-}" ] && rm -rf "$PROJ"
-    [ -n "${SBOX:-}" ] && rm -rf "$SBOX"
+    [ -n "${SBOX:-}" ] && rm -rf "$SBOX" "$SBOX.ml"
     return 0
 }
 
@@ -272,7 +272,7 @@ _repo_root_project() {
 @test "seed: ./.mangolove 가 저장소 루트면 dod-gate 는 추적 파일 .gitignore 를 건드리지 않는다" {
     _repo_root_project
     printf '#!/usr/bin/env bash\nexit 1\n' > "$SBOX/.mangolove/dod.sh"
-    printf '{"hook_event_name":"Stop","session_id":"S","cwd":"%s"}' "$SBOX" | "$GATE" >/dev/null 2>&1 || true
+    printf '{"hook_event_name":"Stop","session_id":"S","cwd":"%s"}' "$SBOX" | MANGOLOVE_DIR="$SBOX.ml" "$GATE" >/dev/null 2>&1 || true
 
     run git -C "$SBOX/.mangolove" status --porcelain
     # 추적 파일은 그대로고, 게이트의 일시 파일은 로컬 전용 무시(.git/info/exclude)로 가려진다
@@ -282,11 +282,12 @@ _repo_root_project() {
 @test "seed: ./.mangolove 가 저장소 루트면 review-gate 도 추적 파일 .gitignore 를 건드리지 않는다" {
     _repo_root_project
     printf '{"hook_event_name":"PostToolUse","session_id":"S","cwd":"%s","tool_input":{"skill":"simplify"}}' "$SBOX" \
-        | bash "$REPO/lib/review-gate.sh" record >/dev/null 2>&1 || true
+        | MANGOLOVE_DIR="$SBOX/ml" bash "$REPO/lib/review-gate.sh" record >/dev/null 2>&1 || true
 
     run git -C "$SBOX/.mangolove" diff --quiet -- .gitignore
     local tracked_untouched="$status"
-    run grep -qx 'dod.sh' "$SBOX/.mangolove/.git/info/exclude"
+    # 저장소 루트 기준 경로로 심는다(작업 폴더가 곧 루트라 접두사가 없다)
+    run grep -qx '/dod.sh' "$SBOX/.mangolove/.git/info/exclude"
     local seeded="$status"
     [ "$tracked_untouched" -eq 0 ]
     [ "$seeded" -eq 0 ]
@@ -299,7 +300,10 @@ _repo_root_project() {
     git -C "$SBOX" init -q
     git -C "$SBOX" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m init
     mkdir -p "$SBOX/sub"
-    ( cd "$SBOX/sub" && bash "$REPO/lib/review-gate.sh" skip "하위 디렉토리에서 남기는 근거" >/dev/null 2>&1 ) || true
+    # MANGOLOVE_DIR 을 격리한다: skip 은 효능 원장에 기록을 남기는데, 격리하지 않으면 개발자의
+    # 실제 ~/.mangolove/efficacy 에 실행마다 파일이 쌓인다.
+    # (레포 밖 경로여야 한다. 안에 두면 그 폴더가 untracked 로 떠서 아래 단언을 깨뜨린다.)
+    ( cd "$SBOX/sub" && MANGOLOVE_DIR="$SBOX.ml" bash "$REPO/lib/review-gate.sh" skip "하위 디렉토리에서 남기는 근거" >/dev/null 2>&1 ) || true
 
     [ -f "$SBOX/.mangolove/.review-skip" ]
     grep -qx '.review-skip' "$SBOX/.mangolove/.gitignore"
@@ -316,9 +320,37 @@ _repo_root_project() {
     write_failing_dod
     run_gate_as SESSION-A >/dev/null 2>&1 || true
     printf '{"hook_event_name":"PostToolUse","session_id":"S","cwd":"%s","tool_input":{"skill":"simplify"}}' "$PROJ" \
-        | bash "$REPO/lib/review-gate.sh" record >/dev/null 2>&1 || true
+        | MANGOLOVE_DIR="$PROJ/ml" bash "$REPO/lib/review-gate.sh" record >/dev/null 2>&1 || true
 
     [ "$(cat "$victim")" = '{"keep":true}' ]
+}
+
+@test "seed: 작업 폴더 자체가 심볼릭 링크면 따라가 쓰지 않는다" {
+    SBOX="$(mktemp -d)"
+    mkdir -p "$SBOX/proj" "$SBOX/victim"
+    git -C "$SBOX/proj" init -q
+    ln -s ../victim "$SBOX/proj/.mangolove"
+    printf '{"hook_event_name":"PostToolUse","session_id":"S","cwd":"%s","tool_input":{"skill":"simplify"}}' "$SBOX/proj" \
+        | MANGOLOVE_DIR="$SBOX/ml" bash "$REPO/lib/review-gate.sh" record >/dev/null 2>&1 || true
+
+    [ ! -e "$SBOX/victim/.gitignore" ]
+}
+
+# 설치본 사고와 원인이 같은 일반형: 프로젝트가 .mangolove/.gitignore 를 버전관리하면 게이트가
+# 그 추적 파일에 줄을 덧붙여 작업 트리를 더럽혔다("커밋되지 않은 변경 없음" DoD 를 스스로 깬다).
+@test "seed: 프로젝트가 추적하는 .mangolove/.gitignore 에는 덧붙이지 않고 info/exclude 에 심는다" {
+    SBOX="$(mktemp -d)"
+    git -C "$SBOX" init -q
+    mkdir -p "$SBOX/.mangolove"
+    printf 'hooks/*.log\n' > "$SBOX/.mangolove/.gitignore"
+    git -C "$SBOX" add .mangolove/.gitignore
+    git -C "$SBOX" -c user.email=t@example.com -c user.name=t commit -q -m init
+    printf '#!/usr/bin/env bash\nexit 1\n' > "$SBOX/.mangolove/dod.sh"
+    printf '{"hook_event_name":"Stop","session_id":"S","cwd":"%s"}' "$SBOX" | MANGOLOVE_DIR="$SBOX.ml" "$GATE" >/dev/null 2>&1 || true
+
+    grep -qx '/.mangolove/dod.sh' "$SBOX/.git/info/exclude"
+    run git -C "$SBOX" status --porcelain
+    [ -z "$output" ]
 }
 
 @test "boundary: 두 게이트의 _ml_seed_gitignore 가 바이트 동일하다" {

@@ -107,24 +107,28 @@ SESSION="$(_json_str "$input" session_id)"
 #  없거나 깨져도 다른 게이트가 같이 죽지 않게 하는 기존 설계를 따른다. 두 사본이 같은 목록을
 #  심는지는 tests/dod-gate.bats 의 경계 테스트가 강제한다.)
 _ml_seed_gitignore() {
-    local d="${1:-./.mangolove}" f p
+    local d="${1:-./.mangolove}" f p prefix=""
     local patterns=(.gitignore dod.sh .dod-gate-attempts .review-skip)
+    # 링크를 따라 쓰지 않는다. 브랜치가 작업 폴더나 그 안의 .gitignore 를 레포 밖을 가리키는
+    # 심볼릭 링크로 실어 오면 아래 쓰기가 그 대상(예: 설정 JSON)에 줄을 덧붙여 깨뜨린다.
+    [ -L "$d" ] && return 0
     [ -d "$d" ] || return 0
     f="$d/.gitignore"
-    # 작업 폴더가 그 자체로 git 저장소 루트일 때가 있다: 홈 디렉토리에서 돌린 세션에서는
-    # ./.mangolove 가 곧 MangoLove 설치본이다. 그 .gitignore 는 저장소가 추적하는 파일이라,
-    # 거기에 덧붙이면 설치본이 "로컬 수정 있음"이 되고 .gitignore 를 바꾸는 업데이트의 git pull 이
-    # 거부된다(실제로 그렇게 mangolove 가 뜨지 않게 됐다). 저장소 루트에서는 로컬 전용 무시
-    # 규칙의 자리인 .git/info/exclude 에 심고, 추적 파일인 .gitignore 는 목록에서도 뺀다.
-    if [ -e "$d/.git" ]; then
+    [ -L "$f" ] && return 0
+    # 그 .gitignore 를 git 이 추적하고 있으면 거기에 덧붙이지 않는다. 덧붙이면 작업 트리가
+    # "로컬 수정 있음"이 된다. 프로젝트가 .mangolove/.gitignore 를 버전관리하는 경우가 그렇고,
+    # 홈 디렉토리에서 돌린 세션도 그렇다: 홈의 .mangolove 는 곧 MangoLove 설치본이라 그 루트
+    # .gitignore 가 추적 파일이다. 실제로 설치본이 그렇게 더러워져, .gitignore 를 바꾸는 업데이트의
+    # git pull 이 거부되고 mangolove 가 뜨지 않게 됐다. 추적 파일이면 로컬 전용 무시 규칙의
+    # 자리인 .git/info/exclude 에, 저장소 루트 기준 경로로 심는다.
+    if git -C "$d" ls-files --error-unmatch .gitignore >/dev/null 2>&1; then
         f="$(git -C "$d" rev-parse --git-path info/exclude 2>/dev/null)" || return 0
         case "$f" in /*) ;; *) f="$d/$f" ;; esac
-        mkdir -p "${f%/*}" 2>/dev/null || return 0
+        prefix="/$(git -C "$d" rev-parse --show-prefix 2>/dev/null)"
         patterns=(dod.sh .dod-gate-attempts .review-skip)
+        mkdir -p "${f%/*}" 2>/dev/null || return 0
+        [ -L "$f" ] && return 0
     fi
-    # 링크를 따라 쓰지 않는다. 브랜치가 이 파일을 레포 밖을 가리키는 심볼릭 링크로 실어 오면
-    # 아래 쓰기가 그 대상(예: 설정 JSON)에 줄을 덧붙여 깨뜨린다.
-    [ -L "$f" ] && return 0
     if [ ! -f "$f" ]; then
         {
             echo "# MangoLove 게이트의 일시 상태 (자동 생성). 레포 내용이 아니다."
@@ -137,7 +141,7 @@ _ml_seed_gitignore() {
         printf '\n' >> "$f" 2>/dev/null || return 0
     fi
     for p in "${patterns[@]}"; do
-        grep -qxF "$p" "$f" 2>/dev/null || printf '%s\n' "$p" >> "$f" 2>/dev/null || true
+        grep -qxF "$prefix$p" "$f" 2>/dev/null || printf '%s\n' "$prefix$p" >> "$f" 2>/dev/null || true
     done
 }
 

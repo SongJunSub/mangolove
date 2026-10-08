@@ -157,25 +157,28 @@ _ensure_regular_file() {
 }
 
 _ml_seed_gitignore() {
-    local d="./.mangolove" f p repo_root=0
+    local d="${1:-./.mangolove}" f p
+    local patterns=(.gitignore dod.sh .dod-gate-attempts .review-skip)
     [ -d "$d" ] || return 0
     f="$d/.gitignore"
-    # ./.mangolove 가 그 자체로 git 저장소 루트일 때가 있다: 홈 디렉토리에서 돌린 세션에서는
+    # 작업 폴더가 그 자체로 git 저장소 루트일 때가 있다: 홈 디렉토리에서 돌린 세션에서는
     # ./.mangolove 가 곧 MangoLove 설치본이다. 그 .gitignore 는 저장소가 추적하는 파일이라,
     # 거기에 덧붙이면 설치본이 "로컬 수정 있음"이 되고 .gitignore 를 바꾸는 업데이트의 git pull 이
     # 거부된다(실제로 그렇게 mangolove 가 뜨지 않게 됐다). 저장소 루트에서는 로컬 전용 무시
-    # 규칙의 자리인 .git/info/exclude 에 심고, 추적 파일은 건드리지 않는다.
+    # 규칙의 자리인 .git/info/exclude 에 심고, 추적 파일인 .gitignore 는 목록에서도 뺀다.
     if [ -e "$d/.git" ]; then
         f="$(git -C "$d" rev-parse --git-path info/exclude 2>/dev/null)" || return 0
-        [ -n "$f" ] || return 0
         case "$f" in /*) ;; *) f="$d/$f" ;; esac
         mkdir -p "${f%/*}" 2>/dev/null || return 0
-        repo_root=1
+        patterns=(dod.sh .dod-gate-attempts .review-skip)
     fi
-    if [ ! -f "$f" ] && [ "$repo_root" = "0" ]; then
+    # 링크를 따라 쓰지 않는다. 브랜치가 이 파일을 레포 밖을 가리키는 심볼릭 링크로 실어 오면
+    # 아래 쓰기가 그 대상(예: 설정 JSON)에 줄을 덧붙여 깨뜨린다.
+    [ -L "$f" ] && return 0
+    if [ ! -f "$f" ]; then
         {
             echo "# MangoLove 게이트의 일시 상태 (자동 생성). 레포 내용이 아니다."
-            echo "# 이 파일 자신도 무시한다. 게이트가 어느 머신에서든 다시 만든다."
+            echo "# 게이트가 어느 머신에서든 다시 만든다."
         } > "$f" 2>/dev/null || return 0
     fi
     # 마지막 줄에 개행이 없으면 append 가 그 줄에 붙어 패턴 두 개를 한꺼번에 무효화한다
@@ -183,9 +186,7 @@ _ml_seed_gitignore() {
     if [ -s "$f" ] && [ -n "$(tail -c1 "$f" 2>/dev/null)" ]; then
         printf '\n' >> "$f" 2>/dev/null || return 0
     fi
-    for p in .gitignore dod.sh .dod-gate-attempts .review-skip; do
-        # 저장소 루트의 .gitignore 는 추적 파일이다. 무시 목록에 넣지 않는다.
-        [ "$repo_root" = "1" ] && [ "$p" = ".gitignore" ] && continue
+    for p in "${patterns[@]}"; do
         grep -qxF "$p" "$f" 2>/dev/null || printf '%s\n' "$p" >> "$f" 2>/dev/null || true
     done
 }
@@ -1086,7 +1087,7 @@ _record_skill() {
     _ensure_regular_file "$LEDGER_REL" || return 0
     _ensure_regular_file "$COVERED_REL" || return 0
     _ensure_regular_file "$COVERED_REL.tmp" || return 0
-    _ml_seed_gitignore
+    _ml_seed_gitignore "${SKIP_REL%/*}"
     # 같은 스킬을 여러 번 호출해도 한 줄만 남긴다: 원장은 집합이지 호출 로그가 아니다.
     grep -qxF "$skill" "$LEDGER_REL" 2>/dev/null || printf '%s\n' "$skill" >> "$LEDGER_REL" 2>/dev/null || true
     # 이 스킬이 무엇을 봤는지 내용 주소로 붙잡는다. 원장(무엇을 돌렸나)만으로는
@@ -1411,7 +1412,7 @@ do_skip() {
         exit 1
     fi
     _ensure_regular_file "$SKIP_REL" || { echo "review-gate: 마커 경로가 정상 파일이 아닙니다" >&2; exit 1; }
-    _ml_seed_gitignore
+    _ml_seed_gitignore "${SKIP_REL%/*}"
     printf '%s\n' "$reason" > "$SKIP_REL" 2>/dev/null || { echo "review-gate: 마커를 쓸 수 없습니다" >&2; exit 1; }
     local rec="$GATE_DIR/efficacy-recorder.sh"
     if [ -f "$rec" ]; then bash "$rec" record-skip review "requested" 2>/dev/null || true; fi

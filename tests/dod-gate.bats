@@ -16,6 +16,8 @@ setup() {
 
 teardown() {
     [ -n "${PROJ:-}" ] && rm -rf "$PROJ"
+    [ -n "${SBOX:-}" ] && rm -rf "$SBOX"
+    return 0
 }
 
 run_gate() { printf '%s' "$JSON" | "$GATE"; }
@@ -273,7 +275,6 @@ _repo_root_project() {
     printf '{"hook_event_name":"Stop","session_id":"S","cwd":"%s"}' "$SBOX" | "$GATE" >/dev/null 2>&1 || true
 
     run git -C "$SBOX/.mangolove" status --porcelain
-    rm -r "$SBOX"
     # 추적 파일은 그대로고, 게이트의 일시 파일은 로컬 전용 무시(.git/info/exclude)로 가려진다
     [ -z "$output" ]
 }
@@ -287,9 +288,37 @@ _repo_root_project() {
     local tracked_untouched="$status"
     run grep -qx 'dod.sh' "$SBOX/.mangolove/.git/info/exclude"
     local seeded="$status"
-    rm -r "$SBOX"
     [ "$tracked_untouched" -eq 0 ]
     [ "$seeded" -eq 0 ]
+}
+
+# 두 사본을 맞추다가 review-gate 의 기준 디렉토리를 cwd 상대로 바꿔 버린 적이 있다. 마커는
+# 워크트리 루트의 .mangolove 에 쓰이는데 무시 규칙은 cwd 의 .mangolove 를 찾아 심기지 않았다.
+@test "seed: review-gate 는 하위 디렉토리에서 돌아도 워크트리 루트의 작업 폴더에 심는다" {
+    SBOX="$(mktemp -d)"
+    git -C "$SBOX" init -q
+    git -C "$SBOX" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m init
+    mkdir -p "$SBOX/sub"
+    ( cd "$SBOX/sub" && bash "$REPO/lib/review-gate.sh" skip "하위 디렉토리에서 남기는 근거" >/dev/null 2>&1 ) || true
+
+    [ -f "$SBOX/.mangolove/.review-skip" ]
+    grep -qx '.review-skip' "$SBOX/.mangolove/.gitignore"
+    run git -C "$SBOX" status --porcelain
+    [ -z "$output" ]
+}
+
+# 브랜치가 .mangolove/.gitignore 를 레포 밖을 가리키는 링크로 실어 올 수 있다. 따라가 쓰면
+# 그 대상(설정 JSON 등)에 무시 줄이 덧붙어 깨진다.
+@test "seed: .gitignore 가 심볼릭 링크면 따라가 쓰지 않는다" {
+    local victim="$PROJ/victim.json"
+    printf '{"keep":true}\n' > "$victim"
+    ln -s "$victim" "$PROJ/.mangolove/.gitignore"
+    write_failing_dod
+    run_gate_as SESSION-A >/dev/null 2>&1 || true
+    printf '{"hook_event_name":"PostToolUse","session_id":"S","cwd":"%s","tool_input":{"skill":"simplify"}}' "$PROJ" \
+        | bash "$REPO/lib/review-gate.sh" record >/dev/null 2>&1 || true
+
+    [ "$(cat "$victim")" = '{"keep":true}' ]
 }
 
 @test "boundary: 두 게이트의 _ml_seed_gitignore 가 바이트 동일하다" {

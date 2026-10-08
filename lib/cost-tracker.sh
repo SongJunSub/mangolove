@@ -32,27 +32,32 @@ PROJECTS_DIR="${MANGOLOVE_COST_PROJECTS_DIR:-$CLAUDE_DIR/projects}"
 # 두 곳에 복사하면 단가가 조용히 갈라진다: 이 파일이 이미 한 번 겪은 사고다
 # (전 세션에 구형 Opus 단가를 평면 적용해 3배로 계산했다. tests/cost-tracker.bats 참조).
 _ML_PRICE_PY=$(cat <<'PRICEPY'
-# 모델별 (input, output) 달러/1M 토큰.
+# 모델별 (input, output, cache read 승수). 앞의 둘은 달러/1M 토큰, 승수의 기준은 input 단가다.
+# 세 값을 한 레코드에 둔다. 승수를 따로 둔 표에서 찾으면, 단가만 넣고 승수를 빠뜨린 모델이
+# 기본값 0.1 로 조용히 계산된다: Opus 5.5 가 그렇게 2배로 나왔다(캐시 읽기가 토큰의 대부분이다).
 PRICES = {
-    'claude-fable-5-1': (10.0, 50.0),
-    'claude-mythos-5-1': (10.0, 50.0),
-    'claude-fable-5': (10.0, 50.0),
-    'claude-mythos-5': (10.0, 50.0),
-    'claude-opus-5-5': (4.0, 20.0),
-    'claude-opus-5': (5.0, 25.0),
-    'claude-opus-4-8': (5.0, 25.0),
-    'claude-opus-4-7': (5.0, 25.0),
-    'claude-opus-4-6': (5.0, 25.0),
-    'claude-opus-4-5': (5.0, 25.0),
-    'claude-sonnet-5-5': (2.0, 10.0),
-    'claude-sonnet-5': (2.0, 10.0),
-    'claude-sonnet-4-6': (3.0, 15.0),
-    'claude-sonnet-4-5': (3.0, 15.0),
-    'claude-haiku-5-5': (0.10, 0.50),
-    'claude-haiku-4-5': (1.0, 5.0),
+    'claude-fable-5-1': (10.0, 50.0, 0.025),
+    'claude-mythos-5-1': (10.0, 50.0, 0.025),
+    'claude-fable-5': (10.0, 50.0, 0.1),
+    'claude-mythos-5': (10.0, 50.0, 0.1),
+    'claude-opus-5-5': (4.0, 20.0, 0.05),
+    'claude-opus-5': (5.0, 25.0, 0.1),
+    'claude-opus-4-8': (5.0, 25.0, 0.1),
+    'claude-opus-4-7': (5.0, 25.0, 0.1),
+    'claude-opus-4-6': (5.0, 25.0, 0.1),
+    'claude-opus-4-5': (5.0, 25.0, 0.1),
+    'claude-sonnet-5-5': (2.0, 10.0, 0.05),
+    'claude-sonnet-5': (2.0, 10.0, 0.1),
+    'claude-sonnet-4-6': (3.0, 15.0, 0.1),
+    'claude-sonnet-4-5': (3.0, 15.0, 0.1),
+    'claude-haiku-5-5': (0.10, 0.50, 0.1),
+    'claude-haiku-4-5': (1.0, 5.0, 0.1),
 }
 DEFAULT = PRICES['claude-opus-5']  # 미상 모델 → Opus 5 단가로 추정
 
+# 아래 두 표는 같은 모델의 (input, output) 만 바꾼다. 캐시 승수는 위 레코드의 것을 그대로 쓴다
+# (가격표: 캐시 승수는 fast 단가 위에 그대로 얹힌다).
+#
 # 프롬프트 길이로 단가가 갈리는 모델: 한 요청의 프롬프트(input + cache write + cache read)가
 # 임계를 "넘으면" 상위 단가다. 정확히 임계인 요청은 기본 단가.
 LONG_PROMPT_TOKENS = 100_000
@@ -69,20 +74,11 @@ FAST_PRICES = {
     'claude-opus-4-8': (10.0, 50.0),
 }
 
-# 캐시 승수(기준 = 그 요청에 적용된 input 단가). 읽기 승수를 식에 0.1 로 박아 두면
-# 승수가 다른 새 모델이 조용히 몇 배로 계산된다: Opus 5.5 가 그랬다(캐시 읽기가 토큰의
-# 대부분이라 총액이 2배가 됐다). 표에 없는 모델만 기본 0.1 을 쓴다.
-CACHE_READ_MULT = {
-    'claude-fable-5-1': 0.025,
-    'claude-mythos-5-1': 0.025,
-    'claude-opus-5-5': 0.05,
-    'claude-sonnet-5-5': 0.05,
-}
-CACHE_READ_MULT_DEFAULT = 0.1
+# cache write 는 TTL 로 갈린다(기준 = 그 요청에 적용된 input 단가).
 CACHE_WRITE_MULT_5M = 1.25
 CACHE_WRITE_MULT_1H = 2.0
 
-# 단가표에 없어 폴백(추정)으로 계산한 모델. 호출자가 출력에 밝힌다: 조용히 추정하면
+# 단가표에 없어 폴백(추정)으로 계산한 모델. 각 뷰가 출력에 밝힌다: 조용히 추정하면
 # 새 모델이 나온 뒤 표를 고칠 계기가 없다.
 UNPRICED = set()
 
@@ -104,35 +100,38 @@ def cost_of(usage, model):
     cw = usage.get('cache_creation_input_tokens', 0) or 0
     cr = usage.get('cache_read_input_tokens', 0) or 0
     model = normalize_model(model)
-    p_in, p_out = price_for(model, usage.get('speed'), i + cw + cr, tokens=i + o + cw + cr)
+    # 토큰이 0 인 레코드(예: '<synthetic>')는 비용에 영향이 없으므로 싣지 않는다.
+    if model and model not in PRICES and (i + o + cw + cr):
+        UNPRICED.add(model)
+    p_in, p_out, cr_mult = price_for(model, usage.get('speed'), i + cw + cr)
     # cache write 는 TTL 별로 쪼개져 온다. 분해가 없거나 합이 모자라면 나머지는 5분으로 본다.
     ttl = usage.get('cache_creation') or {}
     cw_1h = min(ttl.get('ephemeral_1h_input_tokens', 0) or 0, cw) if isinstance(ttl, dict) else 0
     cw_cost = cw_1h * CACHE_WRITE_MULT_1H + (cw - cw_1h) * CACHE_WRITE_MULT_5M
-    cr_mult = CACHE_READ_MULT.get(model, CACHE_READ_MULT_DEFAULT)
     return (i, o, cw, cr,
             (i * p_in + o * p_out + cw_cost * p_in + cr * cr_mult * p_in) / 1_000_000)
 
-# model 은 정규화된 id 다. tokens 가 0 인 레코드(예: '<synthetic>')는 UNPRICED 에 싣지 않는다.
-def price_for(model, speed=None, prompt_tokens=0, tokens=0):
+# model 은 정규화된 id 다. (input, output, cache read 승수) 를 낸다.
+def price_for(model, speed=None, prompt_tokens=0):
+    p_in, p_out, cr_mult = PRICES.get(model) or _fallback(model)
     if speed == 'fast' and model in FAST_PRICES:
-        return FAST_PRICES[model]
+        p_in, p_out = FAST_PRICES[model]
+    elif model in LONG_PROMPT_PRICES and prompt_tokens > LONG_PROMPT_TOKENS:
+        p_in, p_out = LONG_PROMPT_PRICES[model]
+    return p_in, p_out, cr_mult
+
+# 표에 없는 모델: 같은 계열의 단가로 추정한다(cost_of 가 UNPRICED 에 싣는다).
+def _fallback(model):
     if not model:
         return DEFAULT
-    if model in LONG_PROMPT_PRICES and prompt_tokens > LONG_PROMPT_TOKENS:
-        return LONG_PROMPT_PRICES[model]
-    if model in PRICES:
-        return PRICES[model]
-    if tokens:
-        UNPRICED.add(model)
-    if model.startswith('claude-fable') or model.startswith('claude-mythos'):
-        return (10.0, 50.0)
+    if model.startswith(('claude-fable', 'claude-mythos')):
+        return (10.0, 50.0, 0.1)
     if model.startswith('claude-opus'):
-        return (5.0, 25.0)
+        return (5.0, 25.0, 0.1)
     if model.startswith('claude-sonnet'):
-        return (3.0, 15.0)
+        return (3.0, 15.0, 0.1)
     if model.startswith('claude-haiku'):
-        return (1.0, 5.0)
+        return (1.0, 5.0, 0.1)
     return DEFAULT
 PRICEPY
 )
@@ -262,6 +261,8 @@ def pct(x):
 print('T|%.4f|%d|%d|%.4f|%.1f|%d|%.4f|%.1f|%d' % (
     total, len(rows), min(TOP_N, len(rows)), top_cost, pct(top_cost),
     len(long_rows), long_cost, pct(long_cost), LONG_TURNS))
+if UNPRICED:
+    print('U|' + ' '.join(sorted(UNPRICED)))
 " 2>/dev/null
 }
 
@@ -309,13 +310,14 @@ show_sessions() {
     echo -e "  ${G}Top Sessions${R} ${DIM}(추정 비용순)${R}"
     printf "    %9s %6s %11s %9s  %s\n" "cost" "turns" "cacheRead" "peak ctx" "session"
 
-    # 파서 출력은 S 행들 뒤에 T 행 하나다. 한 번만 훑는다.
-    # 두 행은 필드 수가 다르므로(S=7, T=10) 줄을 통째로 읽고 태그별로 나눠 담는다.
+    # 파서 출력은 S 행들 뒤에 T 행 하나, 폴백 모델이 있으면 U 행 하나다. 한 번만 훑는다.
+    # 행마다 필드 수가 다르므로(S=7, T=10) 줄을 통째로 읽고 태그별로 나눠 담는다.
     local shown=0 line
     local c t cr pk sid proj
-    local total n topn topc toppct longn longc longpct thr
+    local total n topn topc toppct longn longc longpct thr unpriced=""
     while IFS= read -r line; do
         case "$line" in
+            U\|*) unpriced="${line#U|}" ;;
             S\|*)
                 [ "$shown" -ge 20 ] && continue
                 shown=$((shown + 1))
@@ -335,12 +337,22 @@ show_sessions() {
                 ;;
         esac
     done < <(printf '%s\n' "$parsed")
+    _print_unpriced "$unpriced"
 
     echo ""
     echo -e "${DIM}──────────────────────────────────────${R}"
     echo -e "  ${DIM}peak ctx = 한 요청이 보낸 최대 컨텍스트(input+cache write+cache read). 저장된 필드가 아니라 유도값.${R}"
     echo -e "  ${DIM}구독 과금이면 비용은 청구액이 아니라 플랜 사용량 소모의 대리 지표다.${R}"
     echo ""
+}
+
+# ─────────────────────────────────────────────
+# 폴백(추정)으로 계산한 모델을 밝힌다. 두 뷰가 공유한다. $1=공백으로 이은 모델 id (없으면 무출력)
+# ─────────────────────────────────────────────
+_print_unpriced() {
+    [ -n "${1:-}" ] || return 0
+    echo -e "  ${Y}단가표에 없는 모델(같은 계열 단가로 추정): ${1}${R}"
+    echo -e "  ${DIM}lib/cost-tracker.sh 의 PRICES 에 추가하면 정확해집니다.${R}"
 }
 
 # ─────────────────────────────────────────────
@@ -483,10 +495,7 @@ show_cost() {
     echo ""
     echo -e "${DIM}──────────────────────────────────────${R}"
     echo -e "  ${DIM}단가: platform 가격표 기준 모델별 정가(추정치, 청구액 아님). 캐시 쓰기 5분 1.25x / 1시간 2x, 읽기는 모델별${R}"
-    if [ -n "$unpriced" ]; then
-        echo -e "  ${Y}단가표에 없는 모델(같은 계열 단가로 추정): ${unpriced}${R}"
-        echo -e "  ${DIM}lib/cost-tracker.sh 의 PRICES 에 추가하면 정확해집니다.${R}"
-    fi
+    _print_unpriced "$unpriced"
     echo ""
 }
 

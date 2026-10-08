@@ -267,6 +267,30 @@ _write_cache_write_session() {
     [[ "$output" == *"claude-opus-9-9"* ]]
 }
 
+@test "cost sessions: 세션 뷰도 폴백 사실을 밝힌다 (같은 단가 모듈을 쓴다)" {
+    _write_output_only_session "claude-opus-9-9" 1000000 "$PROJ_DIR/o99s.jsonl"
+    _run_sessions
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"claude-opus-9-9"* ]]
+}
+
+# 단가만 넣고 캐시 승수를 빠뜨린 "반쯤 추가된 모델"이 기본 승수로 조용히 계산되는 것을 막는다.
+@test "단가표의 모든 모델은 캐시 읽기 승수까지 갖고, 보조 표의 모델은 단가표에 있다" {
+    command -v python3 >/dev/null 2>&1 || skip "needs python3"
+    sed -n "/<<'PRICEPY'/,/^PRICEPY\$/p" "$MANGOLOVE_DIR/lib/cost-tracker.sh" | sed '1d;$d' > "$TEST_DIR/price.py"
+    run python3 -c "
+import re
+exec(open('$TEST_DIR/price.py', encoding='utf-8').read())
+assert PRICES, 'empty'
+for m, rec in PRICES.items():
+    assert len(rec) == 3 and 0 < rec[2] <= 0.1, (m, rec)
+for table in (FAST_PRICES, LONG_PROMPT_PRICES):
+    for m, rec in table.items():
+        assert m in PRICES and len(rec) == 2, (m, rec)
+"
+    [ "$status" -eq 0 ]
+}
+
 @test "단가표에 있는 모델만 있으면 폴백 안내가 없다" {
     _write_output_only_session "claude-opus-5-5[1m]" 1000000 "$PROJ_DIR/o55m.jsonl"
     _run_cost

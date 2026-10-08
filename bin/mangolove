@@ -380,33 +380,36 @@ show_help() {
     echo ""
 }
 
-# 옛 게이트가 설치본의 추적 파일 .gitignore 에 덧붙인 줄을 pull 전에 되돌린다. $1=설치본 경로
+# 게이트가 심던 줄(지금은 안 심는 옛 목록까지). install.sh 가 같은 값과 아래 함수를 한 벌 더
+# 갖는다(설치 전에도 돌아 이 파일을 못 쓴다). 둘이 같은지는 tests/mangolove.bats 가 고정한다.
+GATE_IGNORE_LINES='\.gitignore|dod\.sh|\.dod-gate-attempts|\.review-ledger|\.review-ledger\.base|\.review-skip|\.review-covered'
+
+# 옛 게이트가 설치본의 추적 파일 .gitignore 에 덧붙인 줄을, 새 버전으로 올리기 전에 되돌린다.
+# $1=설치본 경로
 #
 # 홈 디렉토리에서 세션을 돌리면 게이트는 ./.mangolove(= 설치본)를 프로젝트의 작업 폴더로 보고
 # 그 .gitignore 에 무시 줄을 심었다. 게이트는 이제 그 자리에 쓰지 않지만(lib/dod-gate.sh 의
-# _ml_seed_gitignore) 이미 남은 줄은 여기서 치운다. 남겨 두면 .gitignore 를 바꾸는 업데이트의
-# pull 이 "로컬 수정을 덮어쓴다"며 거부된다.
-# 게이트가 심던 줄을 걷어낸 결과가 HEAD 의 내용과 같을 때만 되돌린다. 사용자가 손댄 줄이 하나라도
-# 섞여 있으면 건드리지 않는다.
-# 게이트가 심던 줄(지금은 안 심는 옛 목록까지). install.sh 가 같은 값을 한 벌 더 갖는다
-# (설치 전에도 돌아 이 파일을 못 쓴다). 둘이 같은지는 tests/mangolove.bats 가 고정한다.
-GATE_IGNORE_LINES='\.gitignore|dod\.sh|\.dod-gate-attempts|\.review-ledger|\.review-ledger\.base|\.review-skip|\.review-covered'
-
+# _ml_seed_gitignore) 이미 남은 줄은 여기서 치운다. 남겨 두면 .gitignore 를 바꾸는 버전으로
+# 올릴 때 git 이 "로컬 수정을 덮어쓴다"며 거부한다.
 _ml_heal_install_gitignore() {
-    local dir="${1:-$MANGOLOVE_DIR}" work head
+    local dir="${1:-$MANGOLOVE_DIR}" changes extra
     [ -e "$dir/.git" ] && [ -f "$dir/.gitignore" ] || return 0
     # 수정이 없거나 추적하지 않는 파일이면 diff 가 조용히 0 을 낸다
     git -C "$dir" diff --quiet -- .gitignore 2>/dev/null && return 0
-    # 양쪽에서 같은 줄을 걷어 비교한다: 저장소의 .gitignore 가 언젠가 그 줄 중 하나를 직접
-    # 갖게 돼도 판정이 어긋나지 않는다.
-    work="$(grep -vxE "$GATE_IGNORE_LINES" "$dir/.gitignore" || true)"
-    head="$(git -C "$dir" show HEAD:.gitignore 2>/dev/null | grep -vxE "$GATE_IGNORE_LINES" || true)"
-    [ "$work" = "$head" ] || return 0
+    # 로컬 수정이 "게이트 줄이 더해진 것"뿐일 때만 되돌린다. 지워진 줄이 하나라도 있거나, 더해진 줄
+    # 중에 게이트 줄이 아닌 것이 있으면 사용자가 손댄 파일이므로 건드리지 않는다.
+    changes="$(git -C "$dir" diff --unified=0 -- .gitignore 2>/dev/null \
+        | grep -E '^[+-]' | grep -vE '^(\+\+\+ b/|--- a/)' || true)"
+    case $'\n'"$changes" in *$'\n'-*) return 0 ;; esac
+    extra="$(printf '%s\n' "$changes" | sed -n 's/^+//p' | grep -vxE "$GATE_IGNORE_LINES" || true)"
+    [ -z "$(printf '%s' "$extra" | tr -d '[:space:]')" ] || return 0
     git -C "$dir" checkout -q -- .gitignore 2>/dev/null || true
 }
 
-# 받아 둔 origin/main 으로 설치본을 올린다(fetch 는 호출한 쪽이 먼저 한다). $@ 는 git merge 에
-# 그대로 넘긴다(--quiet 등).
+# 방금 받아 온 것(FETCH_HEAD)으로 설치본을 올린다. fetch 는 호출한 쪽이 먼저 한다. $@ 는
+# git merge 에 그대로 넘긴다(--quiet 등).
+#   FETCH_HEAD: origin/main 추적 참조는 클론의 fetch 설정이 main 을 매핑할 때만 갱신된다.
+#              단일 브랜치 클론에서는 낡은 참조로 "이미 최신"이 나온다.
 #   --ff-only: 올릴 수 없으면 트리를 건드리지 않고 실패한다. 병합 충돌이 스크립트에 충돌 표시를
 #              남기면 게이트가 구문 오류로 죽은 채 세션이 뜬다.
 #   merge.autostash=false: 로컬 수정을 치웠다 되돌리는 autostash 를 쓰지 않는다. 되돌리다
@@ -416,7 +419,7 @@ _ml_heal_install_gitignore() {
 # 쪽이 그 사실을 알린다.
 _ml_ff_install() {
     _ml_heal_install_gitignore "$MANGOLOVE_DIR"
-    git -C "$MANGOLOVE_DIR" -c merge.autostash=false merge --ff-only "$@" origin/main
+    git -C "$MANGOLOVE_DIR" -c merge.autostash=false merge --ff-only "$@" FETCH_HEAD
 }
 
 _sync_after_pull() {
@@ -446,9 +449,15 @@ do_update() {
         local before_commit
         before_commit=$(git rev-parse HEAD)
 
-        if ! { git fetch origin main && _ml_ff_install; }; then
+        # 받아 오지 못한 것과 올리지 못한 것은 원인도 할 일도 다르다. 따로 알린다.
+        if ! git fetch origin main; then
             echo ""
-            echo "⚠️  업데이트하지 못했습니다. 설치본 상태: git -C \"$MANGOLOVE_DIR\" status"
+            echo "⚠️  원격에서 받아 오지 못했습니다. 네트워크와 인증을 확인하세요."
+            exit 1
+        fi
+        if ! _ml_ff_install; then
+            echo ""
+            echo "⚠️  받아 온 버전으로 올리지 못했습니다. 설치본 상태: git -C \"$MANGOLOVE_DIR\" status"
             exit 1
         fi
 

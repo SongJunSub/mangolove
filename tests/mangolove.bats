@@ -682,7 +682,7 @@ _run_auto_update() {
     grep -q 'local-edit' "$INST/lib/a.sh"
 }
 
-# 로컬 수정을 치웠다 되돌리는 방식(autostash)은 쓰지 않는다: 되돌리다 충돌하면 pull 은 성공으로
+# 로컬 수정을 치웠다 되돌리는 방식(autostash)은 쓰지 않는다: 되돌리다 충돌하면 병합은 성공으로
 # 끝나는데 파일에 충돌 표시가 남고, 그게 스크립트면 게이트가 죽은 채 세션이 뜬다.
 @test "update: 사용자가 고친 파일을 새 버전이 건드리면 아무것도 바꾸지 않고 알린다" {
     _install_with_origin "$TEST_DIR"
@@ -718,8 +718,8 @@ _run_auto_update() {
     [ "$(cat "$INST/lib/a.sh")" = "$(printf '#!/bin/bash\necho local-edit')" ]
 }
 
-# 실측 사고의 회귀 테스트: pull 이 실패하면 예전에는 그 종료코드로 mangolove 가 끝났다.
-@test "update: pull 이 실패해도 실행을 막지 않고, 한 시간 뒤에 다시 시도한다" {
+# 실측 사고의 회귀 테스트: 올리다 실패하면 예전에는 그 종료코드로 mangolove 가 끝났다.
+@test "update: 올리지 못해도 실행을 막지 않고, 한 시간 뒤에 다시 시도한다" {
     _install_with_origin "$TEST_DIR"
     # 설치본에 로컬 커밋을 둬 fast-forward 가 불가능하게 만든다
     printf 'local\n' > "$INST/local.txt"
@@ -731,7 +731,7 @@ _run_auto_update() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"자동 업데이트에 실패"* ]]
     [[ "$output" == *"AFTER-CHECK"* ]]
-    # 실패한 pull 은 설치본의 추적 파일을 건드리지 않는다(--ff-only)
+    # 실패한 병합은 설치본의 추적 파일을 건드리지 않는다(--ff-only)
     [ "$(git -C "$INST" rev-parse HEAD)" = "$before" ]
     git -C "$INST" diff --quiet
     git -C "$INST" diff --cached --quiet
@@ -760,12 +760,41 @@ _run_auto_update() {
 
 # install.sh 는 설치 전에도 돌아야 해서 bin/mangolove 의 함수를 못 쓰고 같은 판정을 한 벌 더 갖는다.
 # 두 목록이 어긋나면 한쪽만 게이트 줄을 못 알아봐 막힌 설치본을 풀지 못한다.
-@test "update: install.sh 와 bin/mangolove 의 게이트 줄 목록이 같다" {
+@test "update: install.sh 와 bin/mangolove 의 게이트 줄 목록과 치유 함수가 글자 그대로 같다" {
     local repo="$BATS_TEST_DIRNAME/.." a b
     a="$(grep -oE "GATE_IGNORE_LINES='[^']+'" "$repo/bin/mangolove")"
     b="$(grep -oE "GATE_IGNORE_LINES='[^']+'" "$repo/install.sh")"
     [ -n "$a" ]
     [ "$a" = "$b" ]
+    a="$(sed -n '/^_ml_heal_install_gitignore() {/,/^}/p' "$repo/bin/mangolove")"
+    b="$(sed -n '/^_ml_heal_install_gitignore() {/,/^}/p' "$repo/install.sh")"
+    [ -n "$a" ]
+    [ "$a" = "$b" ]
+}
+
+@test "update: 줄을 지운 흔적이 있는 .gitignore 는 게이트 줄이 섞여 있어도 건드리지 않는다" {
+    local inst="$TEST_DIR/inst"
+    _fake_install_repo "$inst"
+    # 사용자가 '*.swp' 줄을 지웠고, 게이트 줄도 붙어 있다
+    printf '# rules\ndod.sh\n.review-skip\n' > "$inst/.gitignore"
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'; _ml_heal_install_gitignore '$inst'"
+    [ "$status" -eq 0 ]
+    run grep -qx '*.swp' "$inst/.gitignore"
+    [ "$status" -eq 1 ]
+    grep -qx 'dod.sh' "$inst/.gitignore"
+}
+
+# 추적 참조(origin/main)는 클론의 fetch 설정이 main 을 매핑할 때만 갱신된다. 그 참조로 올리면
+# 단일 브랜치 클론 같은 설치본에서 낡은 값으로 "이미 최신"이 나온다.
+@test "update: fetch 설정이 main 을 매핑하지 않는 설치본도 방금 받은 것으로 올라간다" {
+    _install_with_origin "$TEST_DIR"
+    git -C "$INST" config remote.origin.fetch '+refs/heads/other:refs/remotes/origin/other'
+    printf '#!/bin/bash\necho v2\n' > "$TEST_DIR/seed/lib/a.sh"
+    git -C "$TEST_DIR/seed" -c user.email=t@example.com -c user.name=t commit -q -am "feat: v2"
+    git -C "$TEST_DIR/seed" push -q origin main
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'; MANGOLOVE_DIR='$INST'; cd '$INST' && git fetch -q origin main && _ml_ff_install --quiet"
+    [ "$status" -eq 0 ]
+    [ "$(git -C "$INST" rev-parse HEAD)" = "$(git -C "$ORIGIN" rev-parse main)" ]
 }
 
 @test "update: 확인 시각이 미래여도 업데이트 확인이 영영 꺼지지 않는다" {

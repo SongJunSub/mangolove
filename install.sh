@@ -56,27 +56,42 @@ fi
 
 echo ""
 
+# 옛 게이트가 설치본의 .gitignore 에 덧붙여 둔 줄을 되돌린다. 남아 있으면 .gitignore 를 바꾸는
+# 버전으로 올라가지 못하고, 자동 업데이트가 막힌 설치본을 푸는 길이 이 스크립트다.
+# 아래 두 정의는 bin/mangolove 의 것과 글자 그대로 같다(이 스크립트는 설치 전에도 돌아 그 파일을
+# 못 쓴다). 같은지는 tests/mangolove.bats 가 고정한다.
+GATE_IGNORE_LINES='\.gitignore|dod\.sh|\.dod-gate-attempts|\.review-ledger|\.review-ledger\.base|\.review-skip|\.review-covered'
+_ml_heal_install_gitignore() {
+    local dir="${1:-$MANGOLOVE_DIR}" changes extra
+    [ -e "$dir/.git" ] && [ -f "$dir/.gitignore" ] || return 0
+    # 수정이 없거나 추적하지 않는 파일이면 diff 가 조용히 0 을 낸다
+    git -C "$dir" diff --quiet -- .gitignore 2>/dev/null && return 0
+    # 로컬 수정이 "게이트 줄이 더해진 것"뿐일 때만 되돌린다. 지워진 줄이 하나라도 있거나, 더해진 줄
+    # 중에 게이트 줄이 아닌 것이 있으면 사용자가 손댄 파일이므로 건드리지 않는다.
+    changes="$(git -C "$dir" diff --unified=0 -- .gitignore 2>/dev/null \
+        | grep -E '^[+-]' | grep -vE '^(\+\+\+ b/|--- a/)' || true)"
+    case $'\n'"$changes" in *$'\n'-*) return 0 ;; esac
+    extra="$(printf '%s\n' "$changes" | sed -n 's/^+//p' | grep -vxE "$GATE_IGNORE_LINES" || true)"
+    [ -z "$(printf '%s' "$extra" | tr -d '[:space:]')" ] || return 0
+    git -C "$dir" checkout -q -- .gitignore 2>/dev/null || true
+}
+
 # ─── Install or Update ───
 if [ -d "$MANGOLOVE_DIR/.git" ]; then
     echo -e "${Y}Existing installation found. Updating...${R}"
     cd "$MANGOLOVE_DIR"
-    # 옛 게이트가 설치본의 .gitignore 에 덧붙여 둔 줄을 먼저 되돌린다. 남아 있으면 .gitignore 를
-    # 바꾸는 버전으로 올라가지 못하고, 자동 업데이트가 막힌 설치본을 푸는 길이 이 스크립트다.
-    # 판정과 줄 목록은 bin/mangolove 의 _ml_heal_install_gitignore 와 같다(이 스크립트는 설치
-    # 전에도 돌아 그 함수를 못 쓴다. 목록이 같은지는 tests/mangolove.bats 가 고정한다).
-    GATE_IGNORE_LINES='\.gitignore|dod\.sh|\.dod-gate-attempts|\.review-ledger|\.review-ledger\.base|\.review-skip|\.review-covered'
-    if [ -f .gitignore ] && ! git diff --quiet -- .gitignore 2>/dev/null; then
-        _work="$(grep -vxE "$GATE_IGNORE_LINES" .gitignore || true)"
-        _head="$(git show HEAD:.gitignore 2>/dev/null | grep -vxE "$GATE_IGNORE_LINES" || true)"
-        if [ "$_work" = "$_head" ]; then
-            git checkout -q -- .gitignore
-        fi
-    fi
+    _ml_heal_install_gitignore "$MANGOLOVE_DIR"
+    # FETCH_HEAD: 추적 참조(origin/main)는 클론 설정에 따라 갱신되지 않을 수 있다.
     # --ff-only: 올릴 수 없으면 설치본을 건드리지 않고 실패한다. autostash 는 전역 설정에 켜져
     # 있어도 끈다: 되돌리다 충돌하면 성공으로 끝나면서 파일에 충돌 표시를 남긴다.
-    if ! { git fetch origin main && git -c merge.autostash=false merge --ff-only origin/main; }; then
+    if ! git fetch origin main; then
         echo ""
-        echo -e "${Y}업데이트하지 못했습니다. 위의 git 메시지가 원인입니다.${R}"
+        echo -e "${Y}원격에서 받아 오지 못했습니다. 네트워크와 인증을 확인하세요.${R}"
+        exit 1
+    fi
+    if ! git -c merge.autostash=false merge --ff-only FETCH_HEAD; then
+        echo ""
+        echo -e "${Y}받아 온 버전으로 올리지 못했습니다. 위의 git 메시지가 원인입니다.${R}"
         echo "  직접 고친 파일이 있으면 옮겨 두거나 되돌린 뒤 다시 실행하세요: git -C \"$MANGOLOVE_DIR\" status"
         exit 1
     fi

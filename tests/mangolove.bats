@@ -672,19 +672,36 @@ _run_auto_update() {
     git -C "$INST" diff --quiet -- .gitignore
 }
 
-@test "update: 사용자가 손댄 줄이 있는 설치본도 그 줄을 지키며 올라간다" {
+@test "update: 새 버전이 건드리지 않는 파일의 로컬 수정은 그대로 둔 채 올라간다" {
     _install_with_origin "$TEST_DIR"
-    printf 'my-notes/\n' >> "$INST/.gitignore"
+    printf '#!/bin/bash\necho local-edit\n' > "$INST/lib/a.sh"
     _origin_changes_gitignore "$TEST_DIR" 's/^# rules$/# rules v2/'
     _run_auto_update
     [ "$status" -eq 0 ]
     [ "$(git -C "$INST" rev-parse HEAD)" = "$(git -C "$ORIGIN" rev-parse main)" ]
-    grep -qx 'my-notes/' "$INST/.gitignore"
-    grep -qx '# rules v2' "$INST/.gitignore"
+    grep -q 'local-edit' "$INST/lib/a.sh"
+}
+
+# 로컬 수정을 치웠다 되돌리는 방식(autostash)은 쓰지 않는다: 되돌리다 충돌하면 pull 은 성공으로
+# 끝나는데 파일에 충돌 표시가 남고, 그게 스크립트면 게이트가 죽은 채 세션이 뜬다.
+@test "update: 사용자가 고친 파일을 새 버전이 건드리면 아무것도 바꾸지 않고 알린다" {
+    _install_with_origin "$TEST_DIR"
+    printf 'my-notes/\n' >> "$INST/.gitignore"
+    local mine; mine="$(cat "$INST/.gitignore")"
+    local before; before="$(git -C "$INST" rev-parse HEAD)"
+    _origin_changes_gitignore "$TEST_DIR" 's/^# rules$/# rules v2/'
+    _run_auto_update
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"자동 업데이트에 실패"* ]]
+    [[ "$output" == *"AFTER-CHECK"* ]]
+    [ "$(git -C "$INST" rev-parse HEAD)" = "$before" ]
+    # 사용자의 파일은 글자 하나 바뀌지 않았다(충돌 표시도 없다)
+    [ "$(cat "$INST/.gitignore")" = "$mine" ]
+    [ -z "$(git -C "$INST" diff --name-only --diff-filter=U)" ]
 }
 
 # 실측 사고의 회귀 테스트: pull 이 실패하면 예전에는 그 종료코드로 mangolove 가 끝났다.
-@test "update: pull 이 실패해도 실행을 막지 않고, 다음 실행에서 다시 시도한다" {
+@test "update: pull 이 실패해도 실행을 막지 않고, 한 시간 뒤에 다시 시도한다" {
     _install_with_origin "$TEST_DIR"
     # 설치본에 로컬 커밋을 둬 fast-forward 가 불가능하게 만든다
     printf 'local\n' > "$INST/local.txt"
@@ -696,19 +713,31 @@ _run_auto_update() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"자동 업데이트에 실패"* ]]
     [[ "$output" == *"AFTER-CHECK"* ]]
-    # 실패한 pull 은 설치본을 건드리지 않는다(--ff-only)
+    # 실패한 pull 은 설치본의 추적 파일을 건드리지 않는다(--ff-only)
     [ "$(git -C "$INST" rev-parse HEAD)" = "$before" ]
-    [ -z "$(git -C "$INST" status --porcelain)" ]
-    # 확인 시각을 남기지 않아 다음 실행에서 다시 시도한다
-    [ ! -e "$INST/.last_update_check" ]
+    git -C "$INST" diff --quiet
+    git -C "$INST" diff --cached --quiet
+    # 하루가 아니라 한 시간 뒤에 다시 시도하도록 확인 시각을 당겨 적는다
+    local stamp now; stamp="$(cat "$INST/.last_update_check")"; now="$(date +%s)"
+    [ "$((now - stamp))" -ge 82000 ]
+    [ "$((now - stamp))" -lt 86400 ]
+    # 그 사이의 실행은 네트워크 확인도 경고도 되풀이하지 않는다
+    _run_auto_update
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"자동 업데이트에 실패"* ]]
 }
 
 @test "update: 확인 시각 파일이 깨져 있어도 실행을 막지 않는다" {
     _install_with_origin "$TEST_DIR"
-    printf 'not-a-number\n' > "$INST/.last_update_check"
-    _run_auto_update
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"AFTER-CHECK"* ]]
+    # 산술을 실제로 오류로 만드는 값들이다. 08 은 8진수로 읽혀서, 1.5 와 공백 섞인 값은 구문
+    # 오류로. (not-a-number 같은 값은 변수 뺄셈으로 평가돼 오류가 나지 않아 회귀를 못 잡는다.)
+    local bad
+    for bad in '08' '1.5' 'abc def'; do
+        printf '%s\n' "$bad" > "$INST/.last_update_check"
+        _run_auto_update
+        [ "$status" -eq 0 ] || { echo "aborted on: $bad"; false; }
+        [[ "$output" == *"AFTER-CHECK"* ]] || { echo "no launch on: $bad"; false; }
+    done
 }
 
 @test "update: 수정이 없거나 git 설치본이 아니면 아무 일도 하지 않는다" {
@@ -769,7 +798,6 @@ _register_demo_project() {
 # pid 자리에 0 을 두면 kill -0 0 이 항상 성공해 10번을 꽉 채웠다. 벽시계 대신 sleep 횟수를 센다.
 @test "exit: 작업 로그가 꺼져 있으면 종료할 때 로거를 기다리지 않는다" {
     _fake_claude_recording
-    mkdir -p "$TEST_DIR/fakebin"
     cat > "$TEST_DIR/fakebin/sleep" <<FAKE
 #!/bin/bash
 echo x >> "$TEST_DIR/sleep-calls"

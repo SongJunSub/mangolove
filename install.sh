@@ -60,10 +60,19 @@ echo ""
 if [ -d "$MANGOLOVE_DIR/.git" ]; then
     echo -e "${Y}Existing installation found. Updating...${R}"
     cd "$MANGOLOVE_DIR"
-    # --ff-only: 실패해도 설치본을 건드리지 않는다. autostash: 설치본에 로컬 수정이 있어도
-    # (옛 게이트가 .gitignore 에 덧붙인 줄, 사용자가 직접 고친 파일) pull 이 거부되지 않는다.
-    # 자동 업데이트가 막힌 설치본을 푸는 길이 이 스크립트이므로 여기서는 반드시 통과해야 한다.
-    git -c merge.autostash=true pull --ff-only origin main
+    # 옛 게이트가 설치본의 .gitignore 에 덧붙여 둔 줄을 먼저 되돌린다. 남아 있으면 .gitignore 를
+    # 바꾸는 버전의 pull 이 거부되고, 자동 업데이트가 막힌 설치본을 푸는 길이 이 스크립트다.
+    # 그 줄을 걷어낸 결과가 HEAD 와 같을 때만 되돌린다(bin/mangolove 의
+    # _ml_heal_install_gitignore 와 같은 판정. 이 스크립트는 설치 전에도 돌아 그 함수를 못 쓴다).
+    if ! git diff --quiet -- .gitignore 2>/dev/null; then
+        _stripped="$(grep -vxE '\.gitignore|dod\.sh|\.dod-gate-attempts|\.review-ledger|\.review-ledger\.base|\.review-skip|\.review-covered' .gitignore || true)"
+        if [ "$_stripped" = "$(git show HEAD:.gitignore 2>/dev/null)" ]; then
+            git checkout -q -- .gitignore
+        fi
+    fi
+    # --ff-only: 실패해도 설치본을 건드리지 않는다. --no-rebase: 전역 pull.rebase 설정이 있으면
+    # 로컬 수정이 있는 설치본에서 git 이 먼저 거부한다.
+    git pull --ff-only --no-rebase origin main
     echo -e "${G}✓${R} Updated to latest version."
 else
     if [ -d "$MANGOLOVE_DIR" ]; then

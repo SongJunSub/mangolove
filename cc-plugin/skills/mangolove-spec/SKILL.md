@@ -14,7 +14,7 @@ Spec 은 세션 대화(메모리)에만 유지하고 레포에 파일로 남기�
 1. 응답 전에 관련 파일을 모두 읽을 것
 2. 전체 호출 체인을 추적 (Controller -> Service -> Repository -> Entity -> DTO)
 3. 영향 받는 모든 파일을 식별
-4. **Medium/Large Track에서는 `/plan` 스킬을 호출**하여 구조화된 계획 모드로 진입한다
+4. **Medium/Large Track에서는 `EnterPlanMode` 도구로** 구조화된 계획 모드에 진입한다
    - Plan 모드에서 분석 결과와 구현 계획을 체계적으로 정리
    - 계획이 확정되면 Plan 모드를 종료하고 다음 단계로 진행
 5. 분석 결과를 자체적으로 확정 (사용자에게 중간 확인 X)

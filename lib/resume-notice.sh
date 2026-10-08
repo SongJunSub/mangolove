@@ -19,7 +19,8 @@
 #   - 세션 시작을 막지 않는다. 입력이 없거나 깨졌거나 타입이 어긋나면 조용히 exit 0.
 #
 # 끄기: MANGOLOVE_RESUME_NOTICE=off (훅 자체가 주입되지 않는다. bin/mangolove 참조)
-# 임계: 재캐시 예상 비용이 MANGOLOVE_RESUME_NOTICE_MIN_USD(기본 1) 달러 미만이면 조용하다.
+# 임계: 재캐시 예상 비용이 1달러 미만이면 조용하다. 설정값이 아니다(config.sh 의 값은 훅
+#       프로세스에 닿지 않는다). MANGOLOVE_RESUME_NOTICE_MIN_USD 는 테스트가 쓰는 자리다.
 # ─────────────────────────────────────────────
 set -uo pipefail
 
@@ -29,9 +30,13 @@ import sys, os, json
 
 try:
     d = json.load(sys.stdin)
-    min_usd = float(os.environ.get("MANGOLOVE_RESUME_NOTICE_MIN_USD", "1"))
 except Exception:
     sys.exit(0)
+# 임계 값이 숫자가 아니어도 안내 자체를 죽이지 않는다.
+try:
+    min_usd = float(os.environ.get("MANGOLOVE_RESUME_NOTICE_MIN_USD", "1"))
+except ValueError:
+    min_usd = 1.0
 if not isinstance(d, dict):
     sys.exit(0)
 
@@ -48,10 +53,9 @@ if d.get("prompt_cache_likely_expired") is not True or usd is None or tokens is 
 if usd < min_usd:
     sys.exit(0)
 
-if tokens >= 1_000_000:
-    size = f"{tokens / 1_000_000:.1f}M"
-else:
-    size = f"{tokens / 1000:.0f}K"
+# 단위는 반올림한 뒤에 고른다: 999,600 토큰은 "1000K" 가 아니라 "1.0M" 이다.
+kilo = round(tokens / 1000)
+size = f"{tokens / 1_000_000:.1f}M" if kilo >= 1000 else f"{kilo}K"
 
 elapsed = ""
 if secs is not None and secs >= 60:
@@ -65,7 +69,9 @@ if secs is not None and secs >= 60:
 
 msg = (f"MangoLove: {elapsed}프롬프트 캐시가 만료됐습니다. "
        f"첫 요청이 컨텍스트 {size} 토큰을 다시 캐시에 씁니다 (예상 ${usd:.2f}).")
-print(json.dumps({"systemMessage": msg}, ensure_ascii=False))
+# ASCII 로 이스케이프해 낸다: 한글을 그대로 쓰면 UTF-8 이 아닌 로케일에서 인코딩 오류로
+# 출력이 통째로 사라진다. 이스케이프한 JSON 은 로케일과 무관하게 같다.
+print(json.dumps({"systemMessage": msg}))
 PY
 )
 

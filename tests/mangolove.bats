@@ -415,27 +415,36 @@ _stub_session_memory() {
 SM
 }
 
-# mangolove resume: 예전에는 게이트(--settings)도 플러그인도 없이 claude 를 따로 띄웠고,
-# 세션 컨텍스트를 --append-system-prompt 로 넘겨 재개 시 통째로 무시됐다.
-@test "launch: mangolove resume 은 게이트를 실은 채 -c 로 잇고 컨텍스트를 첫 메시지로 넘긴다" {
+# mangolove resume: 예전에는 게이트(--settings)도 플러그인도 없이 claude 를 따로 띄웠다.
+# 세션 컨텍스트는 시스템 프롬프트에 싣는다(_ml_resume_context). 위치 인자로 넘기면 재개 즉시
+# 요청이 나가, 캐시가 만료된 큰 대화에서 사용자가 판단하기도 전에 재캐시 비용이 발생한다.
+@test "resume: 세션 메모리를 시스템 프롬프트에 덧붙일 블록으로 낸다" {
+    _stub_session_memory
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'; _ml_resume_context"
+    [ "$status" -eq 0 ]
+    [[ "$output" == "## Previous Session Context"* ]]
+    [[ "$output" == *"branch: feat/x"* ]]
+}
+
+@test "resume: 저장된 세션 메모리가 없으면 아무것도 덧붙이지 않는다" {
+    printf '#!/bin/bash\nexit 0\n' > "$MANGOLOVE_DIR/lib/session-memory.sh"
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'; _ml_resume_context"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "launch: mangolove resume 은 게이트를 실은 채 -c 로 잇고 메시지를 자동 제출하지 않는다" {
     _stub_session_memory
     run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'
       $(_stub_claude 2.1.293)
       CLAUDE_ARGS=(--settings /tmp/s.json --append-system-prompt METHODOLOGY); ML_RESUME=1
       _ml_launch"
     [ "$status" -eq 0 ]
-    [ "$(grep -c '<<END>>' "$TEST_DIR/claude-calls")" -eq 1 ]
-    grep -qx -- '--settings' "$TEST_DIR/claude-calls"
-    grep -qx -- '-c' "$TEST_DIR/claude-calls"
-    grep -qx -- 'off' "$TEST_DIR/claude-calls"
-    # 컨텍스트는 시스템 프롬프트 값이 아니라 마지막 위치 인자(첫 사용자 메시지)다
-    grep -q 'branch: feat/x' "$TEST_DIR/claude-calls"
-    grep -qx 'METHODOLOGY' "$TEST_DIR/claude-calls"
-    [ "$(grep -c 'Previous Session Context' "$TEST_DIR/claude-calls")" -eq 1 ]
+    # 마지막 인자가 -c 다: 위치 인자(자동 제출되는 첫 메시지)가 없다
+    [ "$(tr '\n' '|' < "$TEST_DIR/claude-calls")" = "--settings|/tmp/s.json|--append-system-prompt|METHODOLOGY|--system-prompt-snapshot|off|-c|<<END>>|" ]
 }
 
-@test "launch: 이을 대화가 없어 -c 가 실패하면 새 대화로 같은 컨텍스트를 넘긴다" {
-    _stub_session_memory
+@test "launch: 이을 대화가 없어 -c 가 실패하면 새 대화를 연다 (자동 제출 없이)" {
     # 첫 호출(-c)만 실패시킨다
     run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'
       claude() {
@@ -447,11 +456,16 @@ SM
       CLAUDE_ARGS=(--settings /tmp/s.json); ML_RESUME=1
       _ml_launch"
     [ "$status" -eq 0 ]
-    [ "$(grep -c '<<END>>' "$TEST_DIR/claude-calls")" -eq 2 ]
-    [ "$(grep -cx -- '-c' "$TEST_DIR/claude-calls")" -eq 1 ]
-    # 새 대화에는 스냅샷 플래그가 필요 없다
-    [ "$(grep -cx -- '--system-prompt-snapshot' "$TEST_DIR/claude-calls")" -eq 1 ]
-    [ "$(grep -c 'branch: feat/x' "$TEST_DIR/claude-calls")" -eq 2 ]
+    # 새 대화에는 -c 도 스냅샷 플래그도 없다
+    [ "$(tr '\n' '|' < "$TEST_DIR/claude-calls")" = "--settings|/tmp/s.json|--system-prompt-snapshot|off|-c|<<END>>|--settings|/tmp/s.json|<<END>>|" ]
+}
+
+@test "session-settings: 재개 안내는 환경변수로도 끌 수 있다" {
+    # 기본값을 무조건 대입하면 `MANGOLOVE_RESUME_NOTICE=off mangolove -c` 가 듣지 않는다.
+    local out="$TEST_DIR/env-off.json"
+    run env MANGOLOVE_RESUME_NOTICE=off bash -c "source '$MANGOLOVE_DIR/bin/mangolove'; generate_session_settings '$out'"
+    [ "$status" -eq 0 ]
+    ! grep -q "SessionStart" "$out"
 }
 
 @test "session-settings: 재개 안내 훅은 resume|fork 에만 걸리고 off 면 빠진다" {
@@ -481,7 +495,7 @@ _fake_claude_bin() {
 if [ "\${1:-}" = "--version" ]; then echo "$1 (Claude Code)"; exit 0; fi
 if [ "\${1:-}" = "plugin" ] && [ "\${2:-}" = "validate" ]; then
     [ "${2:-0}" = "0" ] && exit 0
-    echo "plugin.json: name is required" >&2
+    [ -n "\${FAKE_VALIDATE_QUIET:-}" ] || echo "plugin.json: name is required" >&2
     exit ${2:-0}
 fi
 exit 0
@@ -526,6 +540,32 @@ _fake_cc_plugin() {
     cd "$TEST_DIR"
     run env PATH="$TEST_DIR/fakebin:$PATH" bash "$MANGOLOVE_DIR/bin/mangolove" doctor
     [[ "$output" == *"cc-plugin: valid"* ]]
+}
+
+# doctor 는 set -eo pipefail 아래에서 돈다. grep 의 "불일치"가 실패로 번지면 헤더만 찍고 죽는다.
+@test "doctor: 버전 문자열을 못 읽어도 끝까지 점검한다" {
+    _fake_claude_bin dev-build
+    cd "$TEST_DIR"
+    run env PATH="$TEST_DIR/fakebin:$PATH" bash "$MANGOLOVE_DIR/bin/mangolove" doctor
+    [[ "$output" == *"dev-build"* ]]
+    [[ "$output" != *"이상 권장"* ]]
+    [[ "$output" == *"Session gates"* ]]
+}
+
+@test "doctor: cc-plugin 검증이 출력 없이 실패해도 끝까지 점검한다" {
+    _fake_claude_bin 2.1.293 1
+    _fake_cc_plugin
+    cd "$TEST_DIR"
+    run env PATH="$TEST_DIR/fakebin:$PATH" FAKE_VALIDATE_QUIET=1 bash "$MANGOLOVE_DIR/bin/mangolove" doctor
+    [[ "$output" == *"cc-plugin: 검증 실패"* ]]
+    [[ "$output" == *"Session gates"* ]]
+}
+
+@test "doctor: 재개 필드가 없는 낮은 claude 버전에서는 재개 안내가 표시되지 않음을 알린다" {
+    _fake_claude_bin 2.1.240
+    cd "$TEST_DIR"
+    run env PATH="$TEST_DIR/fakebin:$PATH" bash "$MANGOLOVE_DIR/bin/mangolove" doctor
+    [[ "$output" == *"Resume notice: on 이지만 표시되지 않음"* ]]
 }
 
 # ─────────────────────────────────────────────

@@ -57,4 +57,5 @@ MANGOLOVE_REVIEW_GATE=on
 #   claude 가 SessionStart 훅에 넘기는 값(경과 시간, 컨텍스트 토큰, 예상 비용)을 그대로 보여줄
 #   뿐이다. 사용자에게만 보이고 모델에는 닿지 않으며, 무엇을 하라고 권하지 않는다.
 #   예상 비용이 1달러 미만이거나 캐시가 살아 있으면 아무것도 표시하지 않는다.
-MANGOLOVE_RESUME_NOTICE=on
+#   :- 형태로 둔다: `MANGOLOVE_RESUME_NOTICE=off mangolove -c` 처럼 환경변수로도 끌 수 있다.
+MANGOLOVE_RESUME_NOTICE="${MANGOLOVE_RESUME_NOTICE:-on}"

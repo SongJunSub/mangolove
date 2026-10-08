@@ -25,6 +25,12 @@ _payload() {
         "$1" "$2" "$3" "$4" "$5"
 }
 
+# 훅 출력(JSON)에서 사용자에게 보일 문장만 꺼낸다. 출력이 비면 빈 문자열.
+_message() {
+    [ -n "$output" ] || return 0
+    python3 -c 'import json, sys; print(json.loads(sys.argv[1])["systemMessage"])' "$output"
+}
+
 @test "resume-notice: 캐시가 만료된 큰 대화를 재개하면 비용을 한 줄로 알린다" {
     command -v python3 >/dev/null 2>&1 || skip "needs python3"
     run bash -c "printf '%s' '$(_payload resume 5400 182340 true 1.1396)' | bash '$HOOK'"
@@ -43,10 +49,37 @@ assert '1.14' in m and '182K' in m and '1시간 30분' in m, m
     command -v python3 >/dev/null 2>&1 || skip "needs python3"
     run bash -c "printf '%s' '$(_payload resume 86400 800000 true 6.40)' | bash '$HOOK'"
     [ "$status" -eq 0 ]
-    [[ "$output" != *"?"* ]]
-    [[ "$output" != *"/clear"* ]]
-    [[ "$output" != *"/compact"* ]]
-    [[ "$output" != *"권장"* ]]
+    local m; m="$(_message)"
+    [ -n "$m" ]
+    [[ "$m" != *"?"* ]]
+    [[ "$m" != *"/clear"* ]]
+    [[ "$m" != *"/compact"* ]]
+    [[ "$m" != *"권장"* ]]
+}
+
+@test "resume-notice: 출력은 ASCII 뿐이다 (UTF-8 이 아닌 로케일에서도 사라지지 않는다)" {
+    command -v python3 >/dev/null 2>&1 || skip "needs python3"
+    run bash -c "printf '%s' '$(_payload resume 5400 182340 true 1.1396)' | LC_ALL=en_US.ISO8859-1 bash '$HOOK'"
+    [ "$status" -eq 0 ]
+    [ -n "$output" ]
+    ! printf '%s' "$output" | LC_ALL=C grep -q '[^ -~]'
+    [[ "$(_message)" == *"1시간 30분"* ]]
+}
+
+@test "resume-notice: 단위는 반올림한 뒤에 고른다 (999,600 토큰은 1.0M)" {
+    command -v python3 >/dev/null 2>&1 || skip "needs python3"
+    run bash -c "printf '%s' '$(_payload resume 7200 999600 true 8.00)' | bash '$HOOK'"
+    [ "$status" -eq 0 ]
+    local m; m="$(_message)"
+    [[ "$m" == *"1.0M"* ]]
+    [[ "$m" != *"1000K"* ]]
+}
+
+@test "resume-notice: 임계 값이 숫자가 아니어도 안내가 꺼지지 않는다" {
+    command -v python3 >/dev/null 2>&1 || skip "needs python3"
+    run bash -c "printf '%s' '$(_payload resume 5400 182340 true 1.1396)' | MANGOLOVE_RESUME_NOTICE_MIN_USD=abc bash '$HOOK'"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"systemMessage"* ]]
 }
 
 @test "resume-notice: 캐시가 살아 있으면 조용하다" {

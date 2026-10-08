@@ -57,7 +57,7 @@ MANGOLOVE_STATUSLINE=on
 MANGOLOVE_REVIEW_GATE=on
 # 재개 안내 (on / off): 캐시가 만료된 큰 대화를 재개하면 재캐시 예상 비용을 한 줄로 보여준다.
 # 사용자에게만 보이고 모델에는 닿지 않는다. 질문도 권유도 아니다.
-MANGOLOVE_RESUME_NOTICE=on
+MANGOLOVE_RESUME_NOTICE="${MANGOLOVE_RESUME_NOTICE:-on}"
 
 if [ -f "$MANGOLOVE_DIR/config.sh" ]; then
     if bash -n "$MANGOLOVE_DIR/config.sh" 2>/dev/null; then
@@ -98,8 +98,10 @@ ML_CLAUDE_RECOMMENDED="2.1.259"
 ML_SNAPSHOT_FLAG_MIN="2.1.257"
 
 # "2.1.293 (Claude Code)" 같은 문자열에서 버전만 뽑는다. 없으면 빈 출력.
+# 못 찾아도 0 으로 끝난다: 이 스크립트는 set -eo pipefail 이라, grep 의 "불일치(1)"가 그대로
+# 나가면 `v=$(_ml_parse_version ...)` 한 줄이 호출자를 죽인다(버전 없는 래퍼, 개발 빌드).
 _ml_parse_version() {
-    printf '%s\n' "${1:-}" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1
+    printf '%s\n' "${1:-}" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true
 }
 
 # 설치된 claude 의 버전. 못 읽으면 빈 문자열.
@@ -141,30 +143,35 @@ _ml_snapshot_args() {
     ML_SNAPSHOT_ARGS=(--system-prompt-snapshot off)
 }
 
-# 마지막 단계: CLAUDE_ARGS 를 실어 claude 를 띄운다.
+# `mangolove resume` 이 시스템 프롬프트에 덧붙일 MangoLove 세션 메모리. 없으면 빈 출력.
 #
-# `mangolove resume`(ML_RESUME=1)은 직전 대화를 -c 로 잇고, MangoLove 세션 메모리를 **첫
-# 사용자 메시지**로 넘긴다. 시스템 프롬프트로 넘기면 위에 적은 이유로 재개 시 무시된다.
-# 이을 대화가 없으면 -c 가 실패하므로 같은 메시지로 새 대화를 연다.
-_ml_launch() {
-    if [ "${ML_RESUME:-0}" != "1" ]; then
-        _ml_snapshot_args "$@"
-        claude "${CLAUDE_ARGS[@]}" "${ML_SNAPSHOT_ARGS[@]}" "$@"
-        return
-    fi
-
-    local session_context="" first_message=()
+# 첫 사용자 메시지로 넘기지 않는다. 그러면 재개 즉시 요청이 나가고, 캐시가 만료된 큰 대화에서는
+# 사용자가 판단하기도 전에 컨텍스트 전체를 다시 캐시에 쓰는 비용이 발생한다. 시스템 프롬프트에
+# 두면 사용자가 무언가 입력할 때까지 아무 요청도 나가지 않는다. 재개한 대화가 기록된 프롬프트를
+# 쓰는 문제는 _ml_launch 가 스냅샷을 꺼서 푼다.
+_ml_resume_context() {
+    local session_context=""
     session_context=$(bash "$SESSION_MEMORY" load 2>/dev/null) || true
-    if [ -n "$session_context" ]; then
-        first_message=("## Previous Session Context
+    [ -n "$session_context" ] || return 0
+    printf '%s\n' "## Previous Session Context
 ${session_context}
 
-Continue from where you left off. Summarize the previous session state and ask what to work on next.")
-    fi
+Continue from where you left off. Summarize the previous session state and ask what to work on next."
+}
 
-    _ml_snapshot_args -c "$@"
-    claude "${CLAUDE_ARGS[@]}" "${ML_SNAPSHOT_ARGS[@]}" -c "$@" "${first_message[@]}" 2>/dev/null \
-        || claude "${CLAUDE_ARGS[@]}" "$@" "${first_message[@]}"
+# 마지막 단계: CLAUDE_ARGS 를 실어 claude 를 띄운다.
+#
+# `mangolove resume`(ML_RESUME=1)은 직전 대화를 -c 로 잇는다. 이을 대화가 없으면 -c 가
+# 실패하므로 새 대화를 연다(종료코드로 판단하는 것은 예전부터의 동작이다).
+_ml_launch() {
+    if [ "${ML_RESUME:-0}" = "1" ]; then
+        _ml_snapshot_args -c "$@"
+        claude "${CLAUDE_ARGS[@]}" "${ML_SNAPSHOT_ARGS[@]}" -c "$@" 2>/dev/null \
+            || claude "${CLAUDE_ARGS[@]}" "$@"
+        return
+    fi
+    _ml_snapshot_args "$@"
+    claude "${CLAUDE_ARGS[@]}" "${ML_SNAPSHOT_ARGS[@]}" "$@"
 }
 
 check_dependencies() {
@@ -463,8 +470,9 @@ do_doctor() {
     echo -e "\033[2m──────────────────────────────────────\033[0m"
 
     # Check Claude Code
+    local cver=""
     if command -v claude &> /dev/null; then
-        local cv cver
+        local cv
         cv=$(claude --version 2>/dev/null)
         cver=$(_ml_parse_version "$cv")
         # 버전을 못 읽으면 경고하지 않는다(모르는 것을 낮다고 단정하지 않는다).
@@ -548,7 +556,8 @@ do_doctor() {
             echo -e "  \033[38;5;113m✓\033[0m cc-plugin: valid (core.md + skills ready for split)"
         else
             echo -e "  \033[38;5;203m✗\033[0m cc-plugin: 검증 실패 (split 세션에서 스킬이 로드되지 않습니다)"
-            printf '%s\n' "$pv_out" | grep -v '^[[:space:]]*$' | head -5 | sed 's/^/      /'
+            # 출력이 비어도 doctor 는 계속 간다(pipefail 아래에서 grep 의 "없음"은 실패다).
+            printf '%s\n' "$pv_out" | grep -v '^[[:space:]]*$' | head -5 | sed 's/^/      /' || true
         fi
     else
         echo -e "  \033[38;5;220m△\033[0m cc-plugin/core.md: absent (split falls back to monolith)"
@@ -577,7 +586,12 @@ do_doctor() {
 
     # Resume notice
     if ! _ml_is_off "${MANGOLOVE_RESUME_NOTICE:-on}" && [ -f "$MANGOLOVE_DIR/lib/resume-notice.sh" ]; then
-        echo -e "  \033[38;5;113m✓\033[0m Resume notice: on (캐시 만료된 대화 재개 시 재캐시 비용 표시)"
+        # 재개 필드는 claude v2.1.251 부터 온다. 그보다 낮으면 훅은 돌지만 보여줄 값이 없다.
+        if [ -n "$cver" ] && ! _ml_version_ge "$cver" "2.1.251"; then
+            echo -e "  \033[38;5;220m△\033[0m Resume notice: on 이지만 표시되지 않음 (claude 2.1.251 이상 필요)"
+        else
+            echo -e "  \033[38;5;113m✓\033[0m Resume notice: on (캐시 만료된 대화 재개 시 재캐시 비용 표시)"
+        fi
     else
         echo -e "  \033[38;5;220m△\033[0m Resume notice: off (MANGOLOVE_RESUME_NOTICE)"
     fi
@@ -1018,6 +1032,19 @@ main() {
 ---
 
 ${methodology}"
+    fi
+
+    # mangolove resume: 세션 메모리를 시스템 프롬프트 끝에 덧붙인다 (_ml_resume_context 참조)
+    if [ "$ML_RESUME" = "1" ]; then
+        local resume_context=""
+        resume_context=$(_ml_resume_context)
+        if [ -n "$resume_context" ]; then
+            SYSTEM_PROMPT="${SYSTEM_PROMPT}
+
+---
+
+${resume_context}"
+        fi
     fi
 
     # Trap exit to log session end and run plugin hooks

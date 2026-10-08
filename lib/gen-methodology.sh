@@ -142,7 +142,7 @@ FM
   cat <<'FM'
 ---
 name: mangolove-large-review
-description: "MangoLove Large 트랙 구현~완료 단계에서 사용한다. 구현 시 보안(OWASP, ISMS-P)/성능/null/스타일 체크리스트, 셀프 리뷰, 3인 탈상관(정독, 반증, 반례) find→verify 코드 리뷰, Review Readiness Dashboard, 완료 보고 산출물 형식을 제공한다. 최종 승인 후 구현, 리뷰, 커밋 준비 단계에서 호출한다."
+description: "MangoLove Large 트랙 구현~완료 단계에서 사용한다. 구현 시 보안(OWASP, ISMS-P)/성능/에러 처리/스타일 체크리스트, 셀프 리뷰, 3인 탈상관(정독, 반증, 반례) find→verify 코드 리뷰, Review Readiness Dashboard, 완료 보고 산출물 형식을 제공한다. 최종 승인 후 구현, 리뷰, 커밋 준비 단계에서 호출한다."
 ---
 
 # MangoLove: 구현 & 코드 리뷰 (mangolove-large-review)

@@ -62,8 +62,10 @@ _message() {
     [ -n "$output" ]
     [[ "$(_message)" == *"1시간 30분"* ]]
     # bats 에서 `! 명령` 은 마지막 줄이 아니면 실패해도 테스트를 떨어뜨리지 않는다. run 으로 받는다.
-    run bash -c "printf '%s' '$output' | LC_ALL=C grep -q '[^ -~]'"
-    [ "$status" -ne 0 ]
+    # 출력은 환경변수로 넘긴다(명령 문자열에 끼우면 따옴표 하나에 구문 오류가 난다). grep 의
+    # "없음"은 정확히 1 이다: 2(오류)까지 통과시키면 검사가 돌지 않아도 초록이다.
+    run env OUT="$output" LC_ALL=C bash -c 'printf "%s" "$OUT" | grep -q "[^ -~]"'
+    [ "$status" -eq 1 ]
 }
 
 @test "resume-notice: 단위는 반올림한 뒤에 고른다 (999,600 토큰은 1.0M)" {

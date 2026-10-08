@@ -473,13 +473,6 @@ do_doctor() {
         echo -e "  \033[38;5;220m△\033[0m Review gate: off (MANGOLOVE_REVIEW_GATE)"
     fi
 
-    # Session context budget
-    if ! _ml_is_off "${MANGOLOVE_SESSION_BUDGET:-on}" && [ -f "$MANGOLOVE_DIR/lib/session-budget.sh" ]; then
-        echo -e "  \033[38;5;113m✓\033[0m Session budget: on (컨텍스트 ${MANGOLOVE_SESSION_BUDGET_TOKENS:-400000} 토큰에서 안내)"
-    else
-        echo -e "  \033[38;5;220m△\033[0m Session budget: off (MANGOLOVE_SESSION_BUDGET)"
-    fi
-
     # Status line
     if ! _ml_is_off "${MANGOLOVE_STATUSLINE:-on}" && [ -f "$MANGOLOVE_DIR/lib/statusline.sh" ]; then
         echo -e "  \033[38;5;113m✓\033[0m Status line: on (context 사용률, 비용, 모드)"
@@ -982,7 +975,6 @@ generate_session_settings() {
     local guard="${MANGOLOVE_DIR}/lib/irreversible-guard.sh"
     local gate="${MANGOLOVE_DIR}/lib/quality-gate.sh"
     local dod="${MANGOLOVE_DIR}/lib/dod-gate.sh"
-    local budget="${MANGOLOVE_DIR}/lib/session-budget.sh"
     local statusline="${MANGOLOVE_DIR}/lib/statusline.sh"
     local review="${MANGOLOVE_DIR}/lib/review-gate.sh"
 
@@ -1019,13 +1011,6 @@ REVPOSTEOF
     # DoD 게이트: dod.sh 미외부화 시 무비용 통과하므로 idle 오버헤드가 없다.
     if [ "${MANGOLOVE_DOD_GATE:-on}" = "on" ] && [ -f "$dod" ]; then
         stop_entries+=("          { \"type\": \"command\", \"command\": \"bash \\\"${dod}\\\"\" }")
-    fi
-    # 세션 예산: off 면 훅 자체를 싣지 않는다(= 진짜 0 비용). 스크립트 안의 런타임 검사는
-    # 이중 안전장치일 뿐이고, 주 스위치는 여기다.
-    # 임계는 **명령 문자열에 baked** 한다. 훅은 claude 가 띄우므로 mangolove 를 실행한
-    # 셸의 인라인 env 가 그대로 닿지 않는다(statusline 이 같은 이유로 같은 방식을 쓴다).
-    if ! _ml_is_off "${MANGOLOVE_SESSION_BUDGET:-on}" && [ -f "$budget" ]; then
-        stop_entries+=("          { \"type\": \"command\", \"command\": \"MANGOLOVE_SESSION_BUDGET_TOKENS=${MANGOLOVE_SESSION_BUDGET_TOKENS:-400000} bash \\\"${budget}\\\"\" }")
     fi
     local stop_block="" stop_hooks="" e
     for e in ${stop_entries+"${stop_entries[@]}"}; do

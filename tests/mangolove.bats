@@ -178,6 +178,17 @@ teardown() {
     grep -q "quality-gate.sh" "$out"
 }
 
+# 컨텍스트가 커졌다는 이유로 턴을 붙잡아 "이어갈지 /compact 할지 /clear 할지"를 묻게 하던
+# 세션 예산 훅은 사용자 결정으로 없앴다(끊을 시점은 사용자가 상태줄을 보고 판단한다).
+# Stop 에 남는 것은 DoD 게이트뿐이어야 한다.
+@test "session-settings: 컨텍스트 크기로 턴을 붙잡는 훅을 싣지 않는다" {
+    local out="$TEST_DIR/session-settings.json"
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'; generate_session_settings '$out'"
+    [ "$status" -eq 0 ]
+    ! grep -qi "budget" "$out"
+    [ ! -e "$MANGOLOVE_DIR/lib/session-budget.sh" ]
+}
+
 @test "session-settings: review gate injects PreToolUse+PostToolUse pair when on, nothing when off" {
     command -v python3 >/dev/null 2>&1 || skip "needs python3"
     local on="$TEST_DIR/on.json" off="$TEST_DIR/off.json"

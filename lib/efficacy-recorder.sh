@@ -69,10 +69,9 @@ report() {
         rev_miss="$(grep -cE '"type":"block","phase":"review","kind":"missing"' "$lg" 2>/dev/null)"; rev_miss="${rev_miss:-0}"
         rev_scope="$(grep -cE '"type":"block","phase":"review","kind":"scope"' "$lg" 2>/dev/null)"; rev_scope="${rev_scope:-0}"
         rev_stale="$(grep -cE '"type":"block","phase":"review","kind":"stale"' "$lg" 2>/dev/null)"; rev_stale="${rev_stale:-0}"
-        # 세션 예산은 exit 2 를 쓰지만 **차단이 아니라 안내**다(Stop 훅에서 모델에 메시지를
-        # 전달하는 경로가 exit 2 뿐이라 그 턴을 한 번 붙잡을 뿐이다). 별도 버킷으로 빼고
-        # 차단 합계에서 제외한다. 여기 섞으면 장기 세션마다 반복되는 안내가 시크릿/가드
-        # 차단과 한 숫자로 합쳐져 효능이 부푼다(이 파일의 절대원칙).
+        # 세션 예산 훅은 없어졌지만(사용자가 끊을 시점을 직접 판단한다) 과거 원장에는 그
+        # 기록이 남아 있다. 그건 차단이 아니라 안내였으므로 계속 별도 버킷으로 빼고 차단
+        # 합계에서 제외한다. 여기 섞으면 시크릿/가드 차단과 한 숫자로 합쳐져 효능이 부푼다.
         bud="$(grep -cE '"type":"block","phase":"budget"' "$lg" 2>/dev/null)"; bud="${bud:-0}"
         tot="$(grep -c '"type":"block"' "$lg" 2>/dev/null)"; tot="${tot:-0}"
         other=$((tot - sec - dng - lt - rev - bud)); [ "$other" -lt 0 ] && other=0
@@ -88,7 +87,7 @@ report() {
         fi
         [ "$other" -gt 0 ] && printf '  기타 차단:               %s\n' "$other"
         printf '  (총 %s회 게이트/가드 차단, 재시도 포함, 고유 사고 수 아님)\n' "$hard"
-        [ "$bud" -gt 0 ] && printf '  세션 예산 안내:          %s회 (차단 아님, 위 합계에 포함되지 않음)\n' "$bud"
+        [ "$bud" -gt 0 ] && printf '  세션 예산 안내(과거):    %s회 (차단 아님, 위 합계에 포함되지 않음)\n' "$bud"
     else
         echo "  (아직 기록 없음, 막을 게 없었거나 세션 게이트 미활성)"
     fi

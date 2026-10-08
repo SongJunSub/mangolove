@@ -292,11 +292,15 @@ _repo_root_project() {
     # 저장소 루트 기준 경로로 심는다(작업 폴더가 곧 루트라 접두사가 없다)
     run grep -qx '/dod.sh' "$SBOX/.mangolove/.git/info/exclude"
     local seeded="$status"
-    # git 이 아닌 폴더(홈)에서 돌린 세션은 리뷰 상태 파일도 작업 폴더에 쓴다. 같이 가려야 한다.
-    grep -qx '/.review-ledger' "$SBOX/.mangolove/.git/info/exclude"
-    grep -qx '/.review-ledger.base' "$SBOX/.mangolove/.git/info/exclude"
     [ "$tracked_untouched" -eq 0 ]
     [ "$seeded" -eq 0 ]
+    # git 이 아닌 폴더(홈)에서 돌린 세션은 리뷰 상태 파일도 작업 폴더에 쓴다. 이름을 하나씩 적지 않고
+    # 묶어서 가리므로 임시 파일과 옛 버전이 남긴 파일까지 가려진다. 무관한 파일은 가리지 않는다.
+    touch "$SBOX/.mangolove/.review-ledger" "$SBOX/.mangolove/.review-covered.tmp" \
+          "$SBOX/.mangolove/.review-skip.used" "$SBOX/.mangolove/.review-ledger.base" \
+          "$SBOX/.mangolove/unrelated"
+    run git -C "$SBOX/.mangolove" status --porcelain
+    [ "$output" = "?? unrelated" ]
 }
 
 # 두 사본을 맞추다가 review-gate 의 기준 디렉토리를 cwd 상대로 바꿔 버린 적이 있다. 마커는
@@ -527,9 +531,79 @@ _write_marker_script() {
     run _run_gate_in "$SBOX"
     [ "$status" -eq 0 ]
     [[ "$output" == *"추적되고 있습니다"* ]]
+    # 처방은 파일을 지우는 것이다. 인덱스에서만 빼라고 하면 파일이 남아 다음 턴에 실행된다.
+    [[ "$output" == *"지우세요: rm ./.mangolove/dod.sh"* ]]
     [ ! -e "$SBOX/PWNED" ]
     [ -f "$SBOX/.mangolove/dod.sh" ]
     [ ! -e "$SBOX/.mangolove/.dod-gate-attempts" ]
+}
+
+# 재현된 구멍: macOS 기본 파일 시스템은 이름의 대소문자를 가리지 않고, 몇몇 유니코드 문자도 같은
+# 글자로 접는다(긴 s 는 s 로). 그렇게 실어 온 파일은 dod.sh 로 열리는데 git 은 경로를 글자 그대로
+# 비교해 모른다고 답했다. 대소문자를 가리는 파일 시스템에서는 애초에 dod.sh 로 열리지 않으므로
+# "실행되지 않는다"는 어디서나 성립한다.
+@test "위조: 이름만 달리 적어 실어 온 dod.sh 도 실행하지 않는다 (대소문자, 긴 s)" {
+    local name
+    for name in "DOD.sh" "dod.$(printf '\xc5\xbf')h"; do
+        _git_project
+        mkdir -p "$SBOX/.mangolove"
+        _write_marker_script "$SBOX/.mangolove/$name"
+        git -C "$SBOX" add -f .mangolove
+        git -C "$SBOX" commit -qm forged
+        run _run_gate_in "$SBOX"
+        [ "$status" -eq 0 ]
+        [ ! -e "$SBOX/PWNED" ] || { echo "executed: $name"; false; }
+        # 이 파일 시스템이 그 이름을 dod.sh 로 연다면, 게이트는 왜 실행하지 않았는지 말해야 한다
+        if [ -f "$SBOX/.mangolove/dod.sh" ]; then
+            [[ "$output" == *"추적되고 있습니다"* ]] || { echo "silent: $name"; false; }
+        fi
+        rm -rf "$SBOX"
+    done
+}
+
+@test "위조: 이름만 달리 적어 실어 온 폴더 링크(.Mangolove)도 따라가지 않는다" {
+    _git_project
+    mkdir -p "$SBOX.victim"
+    _write_marker_script "$SBOX.victim/dod.sh"
+    ln -s "../$(basename "$SBOX.victim")" "$SBOX/.Mangolove"
+    git -C "$SBOX" add -A
+    git -C "$SBOX" commit -qm "renamed link out of the repo"
+    run _run_gate_in "$SBOX"
+    [ "$status" -eq 0 ]
+    [ ! -e "$SBOX/PWNED" ]
+    [ ! -e "$SBOX.victim/.dod-gate-attempts" ]
+    [ ! -e "$SBOX.victim/.gitignore" ]
+}
+
+# 재현된 구멍: git 은 훅을 부를 때 GIT_DIR 을 내보낸다(링크드 worktree 의 pre-push 등). 그 값이 남은
+# 채 폴더를 옮겨 물으면 옮겨 간 자리가 작업 트리로 잡혀, 추적 파일을 모른다고 답했다.
+@test "위조: GIT_DIR 이 내보내진 환경에서도 추적된 dod.sh 를 알아본다" {
+    _git_project
+    mkdir -p "$SBOX/.mangolove"
+    _write_marker_script "$SBOX/.mangolove/dod.sh"
+    git -C "$SBOX" add -f .mangolove/dod.sh
+    git -C "$SBOX" commit -qm forged
+    run env GIT_DIR="$SBOX/.git" bash -c \
+        "printf '{\"hook_event_name\":\"Stop\",\"session_id\":\"S\",\"cwd\":\"%s\"}' '$SBOX' | '$GATE'"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"추적되고 있습니다"* ]]
+    [ ! -e "$SBOX/PWNED" ]
+}
+
+# 곁의 추적 파일 하나가 디스크에 없으면 ls 가 실패한다. 그 종료코드를 "추적 안 됨"으로 읽으면
+# 작업 트리가 조금만 어질러져 있어도 위조본이 통과한다.
+@test "위조: 곁의 추적 파일이 디스크에서 지워져 있어도 추적된 dod.sh 를 알아본다" {
+    _git_project
+    mkdir -p "$SBOX/.mangolove"
+    _write_marker_script "$SBOX/.mangolove/dod.sh"
+    echo keep > "$SBOX/.mangolove/notes"
+    git -C "$SBOX" add -f .mangolove
+    git -C "$SBOX" commit -qm forged
+    rm "$SBOX/.mangolove/notes"
+    run _run_gate_in "$SBOX"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"추적되고 있습니다"* ]]
+    [ ! -e "$SBOX/PWNED" ]
 }
 
 @test "위조: 브랜치가 실어 온 폴더 링크 너머의 dod.sh 는 실행하지 않는다" {
@@ -542,6 +616,8 @@ _write_marker_script() {
     run _run_gate_in "$SBOX"
     [ "$status" -eq 0 ]
     [[ "$output" == *"심볼릭 링크"* ]]
+    # 처방은 링크를 지우는 것이다. 인덱스에서만 빼라고 하면 링크가 남아 다음부터는 믿게 된다.
+    [[ "$output" == *"지우세요: rm .mangolove"* ]]
     [ ! -e "$SBOX/PWNED" ]
     # 링크 너머에 아무것도 쓰거나 지우지 않는다
     [ -f "$SBOX/payload/dod.sh" ]
@@ -577,6 +653,36 @@ _write_marker_script() {
     [ ! -e "$SBOX.state/dod.sh" ]
 }
 
+# 오탐 방지: 같은 항목인지는 inode 로 가린다. 이름이나 경로가 겹친다는 이유만으로 세션이 쓴 DoD 를
+# 위조본으로 몰지 않는다.
+@test "링크: dod.sh 를 가리키는 추적 링크가 곁에 있어도 세션이 쓴 DoD 는 실행한다" {
+    _git_project
+    mkdir -p "$SBOX/.mangolove"
+    ln -s dod.sh "$SBOX/.mangolove/decoy"
+    git -C "$SBOX" add -f .mangolove/decoy
+    git -C "$SBOX" commit -qm "decoy link"
+    printf '#!/usr/bin/env bash\ntouch "%s/RAN"\nexit 0\n' "$SBOX" > "$SBOX/.mangolove/dod.sh"
+    run _run_gate_in "$SBOX"
+    [ "$status" -eq 0 ]
+    [ -e "$SBOX/RAN" ]
+}
+
+# 예전에 추적하던 작업 폴더를 사용자가 링크로 바꾸면 인덱스에는 그 아래 경로가 남는다. 폴더 이름으로
+# 물으면 그 경로들 때문에 "추적된다"는 답이 돌아와, 사용자의 링크를 실어 온 링크로 몰았다.
+@test "링크: 추적하던 작업 폴더를 사용자가 링크로 바꿔도 실어 온 링크로 보지 않는다" {
+    _git_project
+    mkdir -p "$SBOX/.mangolove/hooks" "$SBOX.state"
+    echo x > "$SBOX/.mangolove/hooks/check"
+    git -C "$SBOX" add -f .mangolove
+    git -C "$SBOX" commit -qm "tracked hooks"
+    rm -rf "$SBOX/.mangolove"
+    ln -s "$SBOX.state" "$SBOX/.mangolove"
+    printf '#!/usr/bin/env bash\ntouch "%s/RAN"\nexit 0\n' "$SBOX" > "$SBOX.state/dod.sh"
+    run _run_gate_in "$SBOX"
+    [ "$status" -eq 0 ]
+    [ -e "$SBOX/RAN" ]
+}
+
 @test "seed: 브랜치가 실어 온 폴더 링크 너머에는 무시 줄을 심지 않는다" {
     _git_project
     mkdir -p "$SBOX.victim"
@@ -586,6 +692,8 @@ _write_marker_script() {
     printf '{"hook_event_name":"PostToolUse","session_id":"S","cwd":"%s","tool_input":{"skill":"simplify"}}' "$SBOX" \
         | bash "$REPO/lib/review-gate.sh" record >/dev/null 2>&1 || true
 
+    # 기록 자체는 돌았어야 한다. 훅이 중간에 죽어서 아무것도 안 쓴 것과 구분한다.
+    grep -qx simplify "$SBOX/.git/mangolove/.review-ledger"
     [ -z "$(ls -A "$SBOX.victim")" ]
 }
 

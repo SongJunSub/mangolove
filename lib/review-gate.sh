@@ -89,26 +89,45 @@ _ml_state_dir() {
 # 엉뚱한 레포의 .git 을 가리킨다. 여기서는 기본값만 두고 _ml_init_state 로 다시 잡는다.
 STATE_DIR=""
 
-# 추적되는 게이트 상태는 브랜치가 실어 온 위조본이다. 이 파일들은 일시 상태라 절대
-# 추적되지 않으며, 추적된 사본이 있다는 것 자체가 변조 신호다.
-# git 에게는 그 파일을 실제로 담고 있는 폴더 안에서 묻는다. 경로 그대로 물으면, 작업 폴더가
-# 추적 파일이 든 다른 폴더로 가는 심볼릭 링크일 때 "링크 너머의 경로는 모른다"는 답이 돌아와
-# 위조본이 통과한다(재현됨: 그렇게 실어 온 dod.sh 가 실행됐다). 폴더가 서브모듈이어도 걸린다.
+# 경로 $1 의 디렉토리 항목이 git 인덱스에 올라 있는가. $2 를 주면 그 모드로 올라 있는 것만 본다.
+# 추적되는 게이트 상태는 브랜치가 실어 온 위조본이다. 이 파일들은 세션이 만드는 일시 상태라
+# 추적될 수 없고, 추적된 사본이 있다는 것 자체가 변조 신호다.
+#
+# 이름을 문자열로 비교하지 않는다. 같은 항목인지는 파일 시스템에게 묻는다(inode 비교).
+# 문자열 비교는 네 가지로 뚫렸다(전부 재현됨):
+#   - 앞쪽 폴더가 심볼릭 링크면 git 은 "링크 너머는 모른다"고 답해 위조본이 통과했다
+#   - macOS 기본 파일 시스템은 DOD.sh 도 dod.ſh(긴 s)도 dod.sh 로 연다. git 의 경로 비교는
+#     core.ignorecase 와 무관하게 글자 그대로라, 그렇게 실어 온 파일을 모른다고 답했다
+#   - pre-push 훅처럼 git 이 GIT_DIR 을 내보낸 환경에서는 옮겨 간 자리가 작업 트리로 잡혀
+#     경로가 어긋났다
+#   - 폴더 이름으로 물으면 그 아래 추적 파일 때문에 폴더 자체가 추적된다고 답했다
+# 그래서 그 항목을 담은 실제 폴더로 들어가, 그 폴더 바로 아래의 인덱스 항목 가운데 같은 inode 를
+# 가리키는 것이 있는지 본다. 마지막 요소의 링크는 따라가지 않는다(링크 자체를 묻는다).
 _ml_tracked() {
-    local dir="${1%/*}" base="${1##*/}"
+    local dir="${1%/*}" base="${1##*/}" want="${2:-}"
     [ "$dir" != "$1" ] || dir="."
-    git -C "$dir" ls-files --error-unmatch -- "$base" >/dev/null 2>&1
+    [ -n "$dir" ] || dir="/"
+    (
+        CDPATH='' cd -P -- "$dir" 2>/dev/null || exit 1
+        unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
+        export LC_ALL=C
+        read -r ino _ <<< "$(ls -di -- "./$base" 2>/dev/null)"
+        [ -n "$ino" ] || exit 1
+        # ls 의 종료코드는 보지 않는다. 추적 파일 하나가 디스크에서 지워져 있기만 해도 실패하고,
+        # 그걸 "추적 안 됨"으로 읽으면 위조본이 통과한다.
+        seen="$(git ls-files -s -z 2>/dev/null | tr '\0' '\n' | awk -v m="$want" '
+            { t = index($0, "\t"); p = substr($0, t + 1) }
+            t && index(p, "/") == 0 && (m == "" || substr($0, 1, 6) == m) { print "./" p }
+        ' | tr '\n' '\0' | xargs -0 ls -di -- 2>/dev/null)"
+        awk -v i="$ino" '$1 == i { f = 1 } END { exit !f }' <<< "$seen"
+    )
 }
 
-# 작업 폴더($1)가 브랜치가 실어 온 심볼릭 링크인가. git 이 추적하는 링크만 그렇게 본다:
+# 작업 폴더($1)가 git 이 실어 온 심볼릭 링크인가. 인덱스에 링크로 올라 있는 것만 그렇게 본다:
 # 사용자가 직접 만든 링크(dotfiles 로 관리하는 설치본 등)는 추적되지 않으므로 그대로 쓴다.
 # 실어 온 링크는 읽지도 쓰지도 않는다. 그 너머는 브랜치가 고른 자리다.
 _ml_state_dir_hijacked() {
-    local d="${1%/}" parent base
-    [ -L "$d" ] || return 1
-    parent="${d%/*}"; base="${d##*/}"
-    [ "$parent" != "$d" ] || parent="."
-    git -C "$parent" ls-files --error-unmatch -- "$base" >/dev/null 2>&1
+    [ -L "${1%/}" ] && _ml_tracked "${1%/}" 120000
 }
 
 LEDGER_REL=".mangolove/.review-ledger"
@@ -204,10 +223,10 @@ _ml_seed_gitignore() {
         prefix="${prefix//\*/\\*}"
         prefix="${prefix//\?/\\?}"
         prefix="/$prefix"
-        # 리뷰 상태 파일도 넣는다. git 프로젝트에서는 .git 아래에 쓰이지만, git 이 아닌 폴더(홈
+        # 리뷰 상태 파일은 이름을 하나씩 적지 않고 묶어서 가린다(원장, 커버리지, 임시 파일, 옛
+        # 버전이 남긴 것까지). git 프로젝트에서는 .git 아래에 쓰이지만, git 이 아닌 폴더(홈
         # 디렉토리)에서 돌린 세션은 작업 폴더에 쓴다. 그 작업 폴더가 곧 설치본이다.
-        patterns=(dod.sh .dod-gate-attempts .review-skip .review-skip.used
-                  .review-ledger .review-ledger.base .review-covered .review-noscope)
+        patterns=(dod.sh .dod-gate-attempts ".review-*")
         mkdir -p "${f%/*}" 2>/dev/null || return 0
         # f 가 exclude 경로로 바뀌었다. 그 파일도 링크일 수 있으므로 다시 본다.
         [ -L "$f" ] && return 0
@@ -1246,7 +1265,8 @@ _bypassed() {
     if [ -f "$SKIP_REL" ] && _ml_state_dir_hijacked "${SKIP_REL%/*}"; then
         echo "MangoLove review gate: .mangolove 가 git 에 추적되는 심볼릭 링크입니다." >&2
         echo "  브랜치가 실어 온 작업 폴더로 보고 그 안의 우회 파일을 무시합니다." >&2
-        echo "  걷어내려면: git rm --cached .mangolove" >&2
+        echo "  실어 온 링크면 링크를 지우세요: rm .mangolove" >&2
+        echo "  (인덱스에서만 빼면 링크가 남아 다음부터는 믿게 됩니다. 직접 만든 링크를 실수로 stage 한 경우에만 git rm --cached)" >&2
     elif [ -f "$SKIP_REL" ] && _ml_tracked "$SKIP_REL"; then
         echo "MangoLove review gate: .mangolove/.review-skip 이 git 에 추적되고 있습니다." >&2
         echo "  우회 파일은 추적될 수 없습니다. 브랜치가 실어 온 위조본으로 보고 무시합니다." >&2

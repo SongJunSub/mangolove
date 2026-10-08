@@ -119,6 +119,7 @@ mangolove impact [sha]        # 변경의 결정적 트랙/영향도 (워킹트�
 mangolove efficacy            # 게이트/가드가 막은 것 + 강제하지 않고 넘긴 것 + 트랙 under-triage
 mangolove eval                # 자가평가: impact-score 보정도 + 가드 정밀도/재현율 (정직한 known-gap 포함)
 mangolove ab                  # A/B 하니스 (방법론 vs 맨 claude): 게이트 보호 + 채점 엔진
+mangolove ab live             # cc-plugin eval 을 플러그인 있는/없는 arm 으로 실세션 실행 (과금, 상한 $3)
 mangolove audit-methodology   # 방법론 파일 감사: 섹션별 부피, 강제표현 밀도, 발동 0건 (삭제 후보)
 ```
 세션 중 타이핑하는 명령이 아니라, 프로젝트에서 시스템을 점검할 때 쓰는 ops/CI용 명령입니다.

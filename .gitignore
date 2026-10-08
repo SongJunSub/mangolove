@@ -17,6 +17,9 @@ efficacy/
 .mangolove/.review-ledger
 .mangolove/.review-ledger.base
 
+# claude plugin eval 실행 결과 (mangolove ab live). 실행마다 달라지는 산출물이다.
+cc-plugin/evals/results/
+
 # OS
 .DS_Store
 Thumbs.db

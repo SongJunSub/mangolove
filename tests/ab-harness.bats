@@ -41,10 +41,84 @@ AB() { echo "$MANGOLOVE_DIR/lib/ab-harness.sh"; }
     [[ "$output" == *"실제 모델 출력 아님"* ]]
 }
 
-@test "ab: report honestly states no live-model numbers without wired arms" {
+@test "ab: report 는 실모델 수치가 없음을 밝히고 내는 방법을 가리킨다" {
     run bash "$(AB)" report
-    [[ "$output" == *"live arm 미연결"* ]]
     [[ "$output" == *"실모델 A/B 수치 없음"* ]]
+    [[ "$output" == *"mangolove ab live"* ]]
+}
+
+# ── live arm: claude plugin eval (실세션 = 과금, opt-in) ──
+# 직접 짠 실행기 대신 Claude Code 의 플러그인 eval 을 쓴다: 플러그인이 있는 arm 과 없는 arm 을
+# 같은 프롬프트로 돌려 점수 차를 낸다. 여기서는 실세션을 띄우지 않고 배선과 케이스 무결성만 본다.
+
+PLUGIN() { echo "$BATS_TEST_DIRNAME/../cc-plugin"; }
+
+# PATH 앞에 가짜 claude 를 두고 받은 인자를 기록한다.
+_fake_claude_for_eval() {
+    mkdir -p "$TEST_DIR/fakebin"
+    cat > "$TEST_DIR/fakebin/claude" <<FAKE
+#!/bin/bash
+[ "\${3:-}" = "--help" ] || printf '%s\n' "\$@" > "$TEST_DIR/eval-args"
+exit 0
+FAKE
+    chmod +x "$TEST_DIR/fakebin/claude"
+}
+
+@test "ab live: 게시하지 않고 대조군과 함께 돌리며 비용 상한을 건다" {
+    _fake_claude_for_eval
+    run env PATH="$TEST_DIR/fakebin:$PATH" MANGOLOVE_AB_PLUGIN_DIR="$(PLUGIN)" bash "$(AB)" live --runs 1
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"과금"* ]]
+    local a; a="$(tr '\n' ' ' < "$TEST_DIR/eval-args")"
+    [[ "$a" == "plugin eval $(PLUGIN) "* ]]
+    # 리포트는 기본이 claude.ai 게시다. 요청 없이 외부로 내보내지 않는다.
+    [[ "$a" == *"--no-publish"* ]]
+    [[ "$a" == *"--ablation with-without"* ]]
+    [[ "$a" == *"--max-cost-usd 3"* ]]
+    # 사용자가 준 인자는 그대로 뒤에 붙는다
+    [[ "$a" == *"--runs 1 " ]]
+}
+
+@test "ab live: 비용 상한은 환경변수로 바꿀 수 있다" {
+    _fake_claude_for_eval
+    run env PATH="$TEST_DIR/fakebin:$PATH" MANGOLOVE_AB_PLUGIN_DIR="$(PLUGIN)" AB_LIVE_MAX_COST_USD=0.5 bash "$(AB)" live
+    [ "$status" -eq 0 ]
+    grep -qx -- '0.5' "$TEST_DIR/eval-args"
+}
+
+@test "ab live: eval 케이스가 없으면 실세션을 띄우지 않는다" {
+    _fake_claude_for_eval
+    mkdir -p "$TEST_DIR/empty-plugin"
+    run env PATH="$TEST_DIR/fakebin:$PATH" MANGOLOVE_AB_PLUGIN_DIR="$TEST_DIR/empty-plugin" bash "$(AB)" live
+    [ "$status" -eq 2 ]
+    [ ! -e "$TEST_DIR/eval-args" ]
+}
+
+@test "evals: 모든 케이스가 프롬프트와 타입이 있는 grader 를 갖는다" {
+    local d n=0
+    for d in "$(PLUGIN)"/evals/*/; do
+        [ -f "${d}prompt.md" ] || { echo "no prompt.md: $d"; false; }
+        ls "${d}graders/"*.md >/dev/null 2>&1 || { echo "no graders: $d"; false; }
+        local g
+        for g in "${d}graders/"*.md; do
+            grep -qE '^type: (regex|tool_used|tool_order|file_exists|llm|baseline)$' "$g" || { echo "bad type: $g"; false; }
+        done
+        n=$((n + 1))
+    done
+    [ "$n" -ge 1 ]
+}
+
+@test "evals: Skill grader 가 가리키는 스킬이 실제로 플러그인에 있다" {
+    # 스킬 이름을 바꾸면 eval 은 조용히 0 점이 된다(스킬이 안 불린 것처럼 보인다).
+    local g name n=0
+    for g in "$(PLUGIN)"/evals/*/graders/*.md; do
+        grep -q '^tool: Skill$' "$g" || continue
+        name="$(grep -oE 'mangolove-[a-z-]+' "$g" | head -1)"
+        [ -n "$name" ] || { echo "no skill name: $g"; false; }
+        [ -f "$(PLUGIN)/skills/$name/SKILL.md" ] || { echo "missing skill $name: $g"; false; }
+        n=$((n + 1))
+    done
+    [ "$n" -ge 1 ]
 }
 
 # ── teeth: 안전망이 무너지면 하니스가 잡는가 ──

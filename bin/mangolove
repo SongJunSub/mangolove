@@ -301,6 +301,7 @@ show_help() {
     echo "  mangolove audit-methodology   Audit the methodology file: volume, dead rules, delete candidates"
     echo "  mangolove eval                Self-eval: deterministic component scores (impact calibration, guard P/R)"
     echo "  mangolove ab                  A/B harness (Phase 4 v2): methodology vs bare claude (gate protection + scorer)"
+    echo "  mangolove ab live             Run cc-plugin evals with and without the plugin (real sessions, billed)"
     echo "  mangolove switch <project>    Switch to project directory and launch claude"
     echo "  mangolove projects            List project profiles"
     echo "  mangolove profile add         Add a new project profile"
@@ -856,8 +857,10 @@ main() {
             ;;
         ab)
             shift
-            bash "$AB_SCRIPT" "${1:-report}"
-            exit 0
+            [ $# -eq 0 ] && set -- report
+            # `ab live` 는 뒤 인자를 claude plugin eval 에 그대로 넘긴다(--runs, --model, --case ...)
+            bash "$AB_SCRIPT" "$@"
+            exit $?
             ;;
         switch)
             shift

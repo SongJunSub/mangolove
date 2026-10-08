@@ -3,22 +3,27 @@
 # MangoLove: End-to-End A/B Harness  [Phase 4 / v2 skeleton]
 #
 # 질문: "방법론(mangolove)이 맨 claude보다 실제로 더 나은 결과를 내는가?"
-# 이 하니스는 그 비교를 위한 **측정 도구**다. 두 부분으로 나뉜다: 정직성이 핵심:
+# 이 하니스는 그 비교를 위한 **측정 도구**다. 세 부분으로 나뉜다: 정직성이 핵심:
 #
 #   ① 환경 차이: 안전망(가드) 유무 (결정적 계층, LLM 없이 CI 에서 돈다):
 #      대표 위험 카테고리에서 처치군(가드 on)은 차단, 대조군(맨 claude, 가드 off)은 그대로 실행.
 #      이는 **결정적 가드 계층**(변종 탐지 재현율은 v1 'mangolove eval' 에서 측정)으로, 새 측정, 우월성
-#      주장이 아니라 "대조군엔 이 안전망이 아예 없다"는 환경 차이다. end-to-end 모델 행동 차이는 ②+live arm.
+#      주장이 아니라 "대조군엔 이 안전망이 아예 없다"는 환경 차이다. end-to-end 모델 행동 차이는 ③.
 #
 #   ② 결과 채점 엔진: build/test, 트랙선언을 결정적으로 채점(impact-score, 체크 명령 재사용).
 #      여기 내장 arm 은 **demo(손수 작성)**: 엔진이 좋은/나쁜 결과를 구별하는지 *자체 검증*할 뿐,
-#      실제 모델 출력이 아니다. **실수치**는 AB_TREATMENT_CMD/AB_CONTROL_CMD 로 live arm 을
-#      연결해야 나온다(실세션 = 과금, 비결정성 → CI 에서 안 돌림. 별도 opt-in).
+#      실제 모델 출력이 아니다.
 #
-# 절대 과장 금지: 이 PR 이 커밋하는 건 '측정 기계 + 그 자체 검증'이다. "mangolove > claude"
-# 는 live arm 을 연결해 충분한 반복으로 돌렸을 때만, 분포, 신뢰구간과 함께 말할 수 있다.
+#   ③ live arm (`ab live`): 실모델 수치는 여기서만 나온다. 실행기를 직접 짜지 않고 Claude Code 의
+#      `claude plugin eval` 을 쓴다(v2.1.269+): cc-plugin/evals 의 케이스를 플러그인이 있는 arm 과
+#      없는 arm 으로 각각 실세션에서 돌려 점수 차(Δ)를 낸다. 실세션 = 과금, 비결정성이라 CI 에서
+#      돌리지 않는다(별도 opt-in). 재는 범위는 **cc-plugin(스킬, 에이전트)** 까지다. 시스템
+#      프롬프트로 들어가는 core.md 와 세션 게이트는 그 세션에 실리지 않으므로 대상이 아니다.
 #
-# 사용: ab-harness.sh report | gate | engine
+# 절대 과장 금지: "mangolove > claude" 는 ③ 을 충분한 반복으로 돌렸을 때만, 분포와 함께 말할 수
+# 있다. ①② 는 측정 기계와 그 자체 검증이다.
+#
+# 사용: ab-harness.sh report | gate | engine | live [claude plugin eval 옵션...]
 # ─────────────────────────────────────────────
 set -uo pipefail
 
@@ -111,7 +116,7 @@ ab_engine_selftest() {
 report() {
     echo "A/B 하니스 (Phase 4 v2, 방법론 vs 맨 claude)"
     echo "[정직] ①은 환경 차이(결정적 가드 계층, 새 측정 아님). ②는 채점 엔진 자체검증(demo arm, 실제 모델 출력 아님)."
-    echo "       실모델 A/B 수치는 AB_TREATMENT_CMD/AB_CONTROL_CMD 로 live arm 연결 시 산출(과금, 비결정성, CI 미실행)."
+    echo "       실모델 A/B 수치는 'mangolove ab live' 가 낸다(claude plugin eval: 과금, 비결정성, CI 미실행)."
     echo ""
 
     ab_gate_protection
@@ -119,7 +124,7 @@ report() {
     printf '  처치군(mangolove): 대표 위험 카테고리 %s/%s 차단\n' "$GP_T" "$GP_N"
     printf '  대조군(맨 claude): %s/%s, 이 계층이 아예 없어 동일 스텝이 실행됨\n' "$GP_C" "$GP_N"
     echo "  (이 스텝들은 가드가 설계상 잡는 대표 카테고리일 뿐, 변종 탐지 재현율은 v1 'mangolove eval' 에서 측정."
-    echo "   여기 신호는 '대조군엔 안전망이 없다'는 환경 차이지, end-to-end 모델 행동 차이가 아니다(그건 ②+live arm).)"
+    echo "   여기 신호는 '대조군엔 안전망이 없다'는 환경 차이지, end-to-end 모델 행동 차이가 아니다(그건 'ab live').)"
     [ -n "$GP_MISS" ] && printf '%b\n' "$GP_MISS"
 
     echo ""
@@ -127,21 +132,36 @@ report() {
     echo "② 결과 채점 엔진 (demo arm 자체검증, 실수치 아님):"
     printf '  처치-style arm: %s\n' "$ENG_GOOD"
     printf '  대조-style arm: %s\n' "$ENG_BAD"
-    echo "  (엔진이 좋은/나쁜 결과를 build, track 으로 구별함. 실모델 수치는 live arm 필요.)"
+    echo "  (엔진이 좋은/나쁜 결과를 build, track 으로 구별함. 실모델 수치는 'ab live' 필요.)"
 
     echo ""
-    if [ -n "${AB_TREATMENT_CMD:-}" ] && [ -n "${AB_CONTROL_CMD:-}" ]; then
-        echo "live arm 연결됨, 실세션 A/B 는 별도 실행기에서 반복, 채점하세요(이 스켈레톤은 채점 엔진을 제공)."
-    else
-        echo "live arm 미연결, 실모델 A/B 수치 없음. 연결: AB_TREATMENT_CMD/AB_CONTROL_CMD 환경변수."
-    fi
+    echo "이 보고서는 결정적 계층만 다룬다: 실모델 A/B 수치 없음. 내려면 'mangolove ab live' (과금)."
     # 회귀 신호: 처치군이 위험 스텝을 하나라도 못 막으면(안전망 붕괴) 비-0 종료
     [ "$GP_T" -lt "$GP_N" ] && return 1
     return 0
 }
 
+# ── ③ live arm: claude plugin eval ──
+# 플러그인 디렉토리는 MangoLove 가 싣고 다니는 cc-plugin 으로 고정이다(임의 플러그인을 받지 않는다).
+# 그래서 --trust-plugin 을 넘긴다: 비대화 실행에서는 신뢰 확인 프롬프트에 답할 수 없다.
+# --no-publish: 리포트는 기본이 claude.ai 게시다. 요청 없이 외부로 내보내지 않는다.
+# 비용: 케이스 x 반복(기본 3) x arm 2개의 실세션에 judge 호출이 더해진다. 상한을 넘으면
+# 부분 결과를 내고 멈춘다(exit 2). 반복을 줄이려면 `ab live --runs 1`.
+ab_live() {
+    local plugin="${MANGOLOVE_AB_PLUGIN_DIR:-$SELF_DIR/../cc-plugin}"
+    command -v claude >/dev/null 2>&1 || { echo "ab live: claude 를 찾을 수 없습니다." >&2; return 2; }
+    [ -d "$plugin/evals" ] || { echo "ab live: eval 케이스가 없습니다: $plugin/evals" >&2; return 2; }
+    claude plugin eval --help >/dev/null 2>&1 \
+        || { echo "ab live: 'claude plugin eval' 이 없습니다 (Claude Code v2.1.269 이상 필요)." >&2; return 2; }
+    local cap="${AB_LIVE_MAX_COST_USD:-3}"
+    echo "live arm: 실세션을 띄우므로 과금됩니다 (케이스 x 반복 x arm 2개). 비용 상한 \$${cap}"
+    claude plugin eval "$plugin" --no-publish --trust-plugin --ablation with-without \
+        --max-cost-usd "$cap" "$@"
+}
+
 main() {
     case "${1:-report}" in
+        live) shift; ab_live "$@" ;;
         report|"") report ;;
         gate)
             ab_gate_protection
@@ -153,7 +173,7 @@ main() {
             ab_engine_selftest
             printf 'engine selftest: good[%s] bad[%s]\n' "$ENG_GOOD" "$ENG_BAD"
             ;;
-        *) echo "usage: ab-harness.sh {report|gate|engine}" >&2; exit 2 ;;
+        *) echo "usage: ab-harness.sh {report|gate|engine|live}" >&2; exit 2 ;;
     esac
 }
 

@@ -388,27 +388,35 @@ show_help() {
 # pull 이 "로컬 수정을 덮어쓴다"며 거부된다.
 # 게이트가 심던 줄을 걷어낸 결과가 HEAD 의 내용과 같을 때만 되돌린다. 사용자가 손댄 줄이 하나라도
 # 섞여 있으면 건드리지 않는다.
+# 게이트가 심던 줄(지금은 안 심는 옛 목록까지). install.sh 가 같은 값을 한 벌 더 갖는다
+# (설치 전에도 돌아 이 파일을 못 쓴다). 둘이 같은지는 tests/mangolove.bats 가 고정한다.
+GATE_IGNORE_LINES='\.gitignore|dod\.sh|\.dod-gate-attempts|\.review-ledger|\.review-ledger\.base|\.review-skip|\.review-covered'
+
 _ml_heal_install_gitignore() {
-    local dir="${1:-$MANGOLOVE_DIR}" stripped
+    local dir="${1:-$MANGOLOVE_DIR}" work head
     [ -e "$dir/.git" ] && [ -f "$dir/.gitignore" ] || return 0
     # 수정이 없거나 추적하지 않는 파일이면 diff 가 조용히 0 을 낸다
     git -C "$dir" diff --quiet -- .gitignore 2>/dev/null && return 0
-    stripped="$(grep -vxE '\.gitignore|dod\.sh|\.dod-gate-attempts|\.review-ledger|\.review-ledger\.base|\.review-skip|\.review-covered' "$dir/.gitignore" || true)"
-    [ "$stripped" = "$(git -C "$dir" show HEAD:.gitignore 2>/dev/null)" ] || return 0
+    # 양쪽에서 같은 줄을 걷어 비교한다: 저장소의 .gitignore 가 언젠가 그 줄 중 하나를 직접
+    # 갖게 돼도 판정이 어긋나지 않는다.
+    work="$(grep -vxE "$GATE_IGNORE_LINES" "$dir/.gitignore" || true)"
+    head="$(git -C "$dir" show HEAD:.gitignore 2>/dev/null | grep -vxE "$GATE_IGNORE_LINES" || true)"
+    [ "$work" = "$head" ] || return 0
     git -C "$dir" checkout -q -- .gitignore 2>/dev/null || true
 }
 
-# 설치본을 origin/main 으로 올린다. $@ 는 git pull 에 그대로 넘긴다(--quiet 등).
-#   --ff-only  : 실패한 pull 이 트리를 건드리지 않는다. 병합 충돌이 스크립트에 충돌 표시를 남기면
-#                게이트가 구문 오류로 죽은 채 세션이 뜬다.
-#   --no-rebase: 전역 설정에 pull.rebase 가 켜져 있으면, 로컬 수정이 있는 설치본에서 git 이
-#                fast-forward 판정 전에 거부한다.
-# 로컬 수정을 치웠다 되돌리는 autostash 는 쓰지 않는다. 되돌리다 충돌하면 pull 은 성공으로
-# 끝나는데 파일에는 충돌 표시가 남는다. 사용자가 직접 고친 파일을 새 버전이 건드리면 git 이
-# 아무것도 바꾸지 않고 거부하게 두고, 호출한 쪽이 그 사실을 알린다.
-_ml_pull_install() {
+# 받아 둔 origin/main 으로 설치본을 올린다(fetch 는 호출한 쪽이 먼저 한다). $@ 는 git merge 에
+# 그대로 넘긴다(--quiet 등).
+#   --ff-only: 올릴 수 없으면 트리를 건드리지 않고 실패한다. 병합 충돌이 스크립트에 충돌 표시를
+#              남기면 게이트가 구문 오류로 죽은 채 세션이 뜬다.
+#   merge.autostash=false: 로컬 수정을 치웠다 되돌리는 autostash 를 쓰지 않는다. 되돌리다
+#              충돌하면 병합은 성공으로 끝나는데 파일에는 충돌 표시가 남는다. 사용자의 전역 git
+#              설정에 켜져 있어도 여기서는 끈다.
+# 사용자가 직접 고친 파일을 새 버전이 건드리면 git 이 아무것도 바꾸지 않고 거부하고, 호출한
+# 쪽이 그 사실을 알린다.
+_ml_ff_install() {
     _ml_heal_install_gitignore "$MANGOLOVE_DIR"
-    git -C "$MANGOLOVE_DIR" pull --ff-only --no-rebase "$@" origin main
+    git -C "$MANGOLOVE_DIR" -c merge.autostash=false merge --ff-only "$@" origin/main
 }
 
 _sync_after_pull() {
@@ -438,7 +446,7 @@ do_update() {
         local before_commit
         before_commit=$(git rev-parse HEAD)
 
-        if ! _ml_pull_install; then
+        if ! { git fetch origin main && _ml_ff_install; }; then
             echo ""
             echo "⚠️  업데이트하지 못했습니다. 설치본 상태: git -C \"$MANGOLOVE_DIR\" status"
             exit 1
@@ -478,11 +486,14 @@ auto_update_check() {
     case "$last_check" in ''|*[!0-9]*) last_check=0 ;; esac
 
     local elapsed=$((now - 10#$last_check))
+    # 미래 시각(시계 보정 전에 남은 기록, 손 편집)이면 음수가 되어 확인이 영영 돌지 않는다.
+    # 확인할 때가 된 것으로 본다.
+    [ "$elapsed" -lt 0 ] && elapsed=86400
     if [ "$elapsed" -lt 86400 ]; then
         return 0
     fi
 
-    # 업데이트 확인은 실행을 막아서는 안 된다. 예전에는 pull 이 실패하면 이 서브셸이 죽고 그
+    # 업데이트 확인은 실행을 막아서는 안 된다. 예전에는 올리다 실패하면 이 서브셸이 죽고 그
     # 종료코드로 mangolove 자체가 끝났다(확인 시각도 남지 않아 실행할 때마다 반복).
     # `|| rc=$?` 로 받으면 서브셸 안에서는 errexit 가 꺼지므로 실패는 아래에서 직접 다룬다.
     local rc=0
@@ -503,7 +514,7 @@ auto_update_check() {
         echo ""
         echo -e "\033[38;5;208m⬆ MangoLove 업데이트가 있습니다 (현재: v${current_version})\033[0m"
 
-        if ! _ml_pull_install --quiet 2>/dev/null; then
+        if ! _ml_ff_install --quiet 2>/dev/null; then
             echo -e "\033[38;5;220m△ 자동 업데이트에 실패했습니다. 설치된 버전으로 계속합니다. 원인은 'mangolove update' 로 확인할 수 있습니다.\033[0m"
             echo ""
             exit 3
@@ -516,11 +527,13 @@ auto_update_check() {
         echo ""
     ) || rc=$?
 
-    # 다음 확인은 하루 뒤다. pull 실패(3)만 한 시간 뒤로 당긴다: 일시적인 실패(다른 터미널과의
-    # 잠금 충돌, 끊긴 네트워크)를 하루 묵히지 않되, 계속 실패하는 설치본이 실행할 때마다 네트워크
-    # 확인과 경고를 되풀이하지도 않게 한다.
-    [ "$rc" = "3" ] && now=$((now - 86400 + 3600))
-    echo "$now" > "$check_file" 2>/dev/null || true
+    # 다음 확인은 하루 뒤다. 받아 온 것을 올리다 실패한 경우(3)만 한 시간 뒤로 당긴다: 다른
+    # 터미널과의 잠금 충돌 같은 일시적 실패를 하루 묵히지 않되, 계속 실패하는 설치본이 실행할
+    # 때마다 네트워크 확인과 경고를 되풀이하지도 않게 한다. 네트워크가 끊겨 fetch 가 실패한
+    # 경우는 예전처럼 하루 뒤다(오프라인에서 실행마다 연결을 기다리지 않는다).
+    local stamp="$now"
+    [ "$rc" = "3" ] && stamp=$((now - 86400 + 3600))
+    echo "$stamp" > "$check_file" 2>/dev/null || true
 }
 
 do_doctor() {

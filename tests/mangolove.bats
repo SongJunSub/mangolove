@@ -700,6 +700,24 @@ _run_auto_update() {
     [ -z "$(git -C "$INST" diff --name-only --diff-filter=U)" ]
 }
 
+# 사용자의 전역 git 설정에 autostash 가 켜져 있으면 옵션을 안 줘도 git 이 autostash 를 돌린다.
+# 되돌리다 충돌하면 병합은 성공으로 끝나고 스크립트에 충돌 표시가 남는다. 명시적으로 꺼야 한다.
+@test "update: 전역 설정에 autostash 가 켜져 있어도 스크립트에 충돌 표시를 남기지 않는다" {
+    _install_with_origin "$TEST_DIR"
+    printf '#!/bin/bash\necho local-edit\n' > "$INST/lib/a.sh"
+    printf '#!/bin/bash\necho upstream-edit\n' > "$TEST_DIR/seed/lib/a.sh"
+    git -C "$TEST_DIR/seed" -c user.email=t@example.com -c user.name=t commit -q -am "feat: upstream edit"
+    git -C "$TEST_DIR/seed" push -q origin main
+    printf '[merge]\n\tautoStash = true\n[rebase]\n\tautoStash = true\n[pull]\n\trebase = true\n' > "$TEST_DIR/gitconfig"
+    local before; before="$(git -C "$INST" rev-parse HEAD)"
+    run env GIT_CONFIG_GLOBAL="$TEST_DIR/gitconfig" bash -c "source '$MANGOLOVE_DIR/bin/mangolove'; MANGOLOVE_DIR='$INST'; auto_update_check; echo AFTER-CHECK"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"자동 업데이트에 실패"* ]]
+    [[ "$output" == *"AFTER-CHECK"* ]]
+    [ "$(git -C "$INST" rev-parse HEAD)" = "$before" ]
+    [ "$(cat "$INST/lib/a.sh")" = "$(printf '#!/bin/bash\necho local-edit')" ]
+}
+
 # 실측 사고의 회귀 테스트: pull 이 실패하면 예전에는 그 종료코드로 mangolove 가 끝났다.
 @test "update: pull 이 실패해도 실행을 막지 않고, 한 시간 뒤에 다시 시도한다" {
     _install_with_origin "$TEST_DIR"
@@ -738,6 +756,25 @@ _run_auto_update() {
         [ "$status" -eq 0 ] || { echo "aborted on: $bad"; false; }
         [[ "$output" == *"AFTER-CHECK"* ]] || { echo "no launch on: $bad"; false; }
     done
+}
+
+# install.sh 는 설치 전에도 돌아야 해서 bin/mangolove 의 함수를 못 쓰고 같은 판정을 한 벌 더 갖는다.
+# 두 목록이 어긋나면 한쪽만 게이트 줄을 못 알아봐 막힌 설치본을 풀지 못한다.
+@test "update: install.sh 와 bin/mangolove 의 게이트 줄 목록이 같다" {
+    local repo="$BATS_TEST_DIRNAME/.." a b
+    a="$(grep -oE "GATE_IGNORE_LINES='[^']+'" "$repo/bin/mangolove")"
+    b="$(grep -oE "GATE_IGNORE_LINES='[^']+'" "$repo/install.sh")"
+    [ -n "$a" ]
+    [ "$a" = "$b" ]
+}
+
+@test "update: 확인 시각이 미래여도 업데이트 확인이 영영 꺼지지 않는다" {
+    _install_with_origin "$TEST_DIR"
+    printf '9999999999\n' > "$INST/.last_update_check"
+    _run_auto_update
+    [ "$status" -eq 0 ]
+    # 확인이 돌았으면 시각이 지금으로 다시 적힌다
+    [ "$(cat "$INST/.last_update_check")" -le "$(date +%s)" ]
 }
 
 @test "update: 수정이 없거나 git 설치본이 아니면 아무 일도 하지 않는다" {

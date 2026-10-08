@@ -296,6 +296,24 @@ teardown() {
 }
 
 # ─────────────────────────────────────────────
+# AI 저작 표기: 방법론의 금지를 설정으로 닫는다
+# ─────────────────────────────────────────────
+
+@test "session-settings: 커밋 트레일러와 PR 푸터 attribution 을 비운다 (객체형)" {
+    command -v python3 >/dev/null 2>&1 || skip "needs python3"
+    local out="$TEST_DIR/session-settings.json"
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'; generate_session_settings '$out'"
+    [ "$status" -eq 0 ]
+    # false 단축형이 아니라 객체형이어야 한다: 구버전 CLI 는 false 를 든 설정 파일을 통째로
+    # 건너뛰고, 그러면 이 파일이 싣는 게이트 훅까지 함께 빠진다.
+    python3 -c "
+import json
+a = json.load(open('$out'))['attribution']
+assert a == {'commit': '', 'pr': ''}, a
+"
+}
+
+# ─────────────────────────────────────────────
 # 재개 경로: claude v2.1.265 부터 대화 첫 요청의 시스템 프롬프트가 세션에 기록되고
 # --continue / --resume 뒤에도 압축 전까지 재사용된다. 실측(v2.1.293): 재개하며 넘긴 새
 # --append-system-prompt 는 무시되고 --system-prompt-snapshot off 에서만 반영된다.

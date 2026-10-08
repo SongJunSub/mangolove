@@ -1097,8 +1097,12 @@ SLEOF
 )
     fi
 
+    # AI 저작 표기 금지(방법론)를 설정으로 닫는다: 커밋 트레일러와 PR 푸터를 비운다.
+    # "attribution": false 단축형(v2.1.281+)은 쓰지 않는다. 구버전 CLI 는 그 값을 든 설정
+    # 파일을 통째로 건너뛰고, 그러면 이 파일이 싣는 게이트 훅까지 함께 빠진다.
     cat > "$out" << SESSIONEOF
 {
+  "attribution": { "commit": "", "pr": "" },
   "permissions": {
     "allow": ["Bash(mangolove review skip:*)"]
   },

@@ -186,7 +186,16 @@ teardown() {
     run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'; generate_session_settings '$out'"
     [ "$status" -eq 0 ]
     ! grep -qi "budget" "$out"
-    [ ! -e "$MANGOLOVE_DIR/lib/session-budget.sh" ]
+}
+
+# 제거 전에 뜬 세션은 설정에 남은 경로로 이 스크립트를 계속 부른다. 파일이 없으면 턴마다 훅
+# 오류 알림이 뜨므로 빈 껍데기를 남긴다. 무엇이 들어와도 조용히 0 으로 끝나야 한다.
+@test "session-budget: 남겨 둔 껍데기는 큰 컨텍스트 payload 에도 아무것도 하지 않는다" {
+    local tr="$TEST_DIR/t.jsonl"
+    printf '{"message":{"usage":{"input_tokens":900000,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}\n' > "$tr"
+    run bash -c "printf '{\"session_id\":\"s1\",\"transcript_path\":\"%s\",\"stop_hook_active\":false}' '$tr' | MANGOLOVE_SESSION_BUDGET_TOKENS=400000 bash '$MANGOLOVE_DIR/lib/session-budget.sh'"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
 }
 
 @test "session-settings: review gate injects PreToolUse+PostToolUse pair when on, nothing when off" {

@@ -1020,6 +1020,48 @@ _block_kinds() { grep -o '"kind":"[a-z]*"' "$MANGOLOVE_DIR/efficacy/proj.jsonl" 
     [ -f "$REPO_DIR/.mangolove/.review-skip" ]
 }
 
+# 재현된 구멍: 우회 파일이 든 폴더를 가리키는 심볼릭 링크로 .mangolove 를 실어 오면, 추적 여부를
+# 링크 너머에서 묻지 않아 위조 마커가 우회로 받아들여졌다.
+@test "위조: 브랜치가 실어 온 폴더 링크 너머의 .review-skip 도 우회로 인정하지 않는다" {
+    _commit_external_api
+    rm -rf "$REPO_DIR/.mangolove"
+    mkdir -p "$REPO_DIR/x"
+    touch "$REPO_DIR/x/.review-skip"
+    ln -s x "$REPO_DIR/.mangolove"
+    git -C "$REPO_DIR" add -f x/.review-skip .mangolove
+    git -C "$REPO_DIR" commit -qm "forged skip behind a link"
+    _gate "git push"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"심볼릭 링크"* ]]
+    [ -f "$REPO_DIR/x/.review-skip" ]
+}
+
+@test "위조: 사용자가 만든 링크라도 그 너머의 .review-skip 이 추적 파일이면 인정하지 않는다" {
+    _commit_external_api
+    rm -rf "$REPO_DIR/.mangolove"
+    mkdir -p "$REPO_DIR/x"
+    touch "$REPO_DIR/x/.review-skip"
+    git -C "$REPO_DIR" add -f x/.review-skip
+    git -C "$REPO_DIR" commit -qm "tracked marker elsewhere"
+    ln -s x "$REPO_DIR/.mangolove"
+    _gate "git push"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"추적되고 있습니다"* ]]
+    [ -f "$REPO_DIR/x/.review-skip" ]
+}
+
+@test "review skip: 브랜치가 실어 온 폴더 링크 너머에는 마커를 쓰지 않는다" {
+    rm -rf "$REPO_DIR/.mangolove"
+    mkdir -p "$TEST_DIR/victim"
+    ln -s ../victim "$REPO_DIR/.mangolove"
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm "link out of the repo"
+    run bash -c "cd '$REPO_DIR' && bash '$GATE' skip '근거'"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"심볼릭 링크"* ]]
+    [ -z "$(ls -A "$TEST_DIR/victim")" ]
+}
+
 # ── heredoc 오탐 (실사용을 막고 있었다) ────────────────────────
 #
 # 게이트는 셸을 파싱하지 않고 명령 문자열을 본다. 스크립트를 heredoc 으로 넘기는

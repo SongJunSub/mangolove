@@ -77,6 +77,28 @@ _json_str() {
     return 0
 }
 
+# 추적되는 게이트 상태는 브랜치가 실어 온 위조본이다. 이 파일들은 일시 상태라 절대
+# 추적되지 않으며, 추적된 사본이 있다는 것 자체가 변조 신호다.
+# git 에게는 그 파일을 실제로 담고 있는 폴더 안에서 묻는다. 경로 그대로 물으면, 작업 폴더가
+# 추적 파일이 든 다른 폴더로 가는 심볼릭 링크일 때 "링크 너머의 경로는 모른다"는 답이 돌아와
+# 위조본이 통과한다(재현됨: 그렇게 실어 온 dod.sh 가 실행됐다). 폴더가 서브모듈이어도 걸린다.
+_ml_tracked() {
+    local dir="${1%/*}" base="${1##*/}"
+    [ "$dir" != "$1" ] || dir="."
+    git -C "$dir" ls-files --error-unmatch -- "$base" >/dev/null 2>&1
+}
+
+# 작업 폴더($1)가 브랜치가 실어 온 심볼릭 링크인가. git 이 추적하는 링크만 그렇게 본다:
+# 사용자가 직접 만든 링크(dotfiles 로 관리하는 설치본 등)는 추적되지 않으므로 그대로 쓴다.
+# 실어 온 링크는 읽지도 쓰지도 않는다. 그 너머는 브랜치가 고른 자리다.
+_ml_state_dir_hijacked() {
+    local d="${1%/}" parent base
+    [ -L "$d" ] || return 1
+    parent="${d%/*}"; base="${d##*/}"
+    [ "$parent" != "$d" ] || parent="."
+    git -C "$parent" ls-files --error-unmatch -- "$base" >/dev/null 2>&1
+}
+
 # 훅은 다른 cwd 에서 실행될 수 있으므로 stdin 의 cwd 로 이동해 프로젝트를 정확히 식별한다.
 # read -d '' 는 builtin 이라 cat 의 포크를 없앤다. NUL 이 없으면 1 을 반환하나
 # 그때도 읽은 내용은 input 에 담긴다.
@@ -89,6 +111,28 @@ fi
 # DoD 가 외부화되지 않았으면 게이트 비활성: 즉시 통과(무비용).
 # 이 아래로는 DoD 가 실재할 때만 도는 코드다. 매 턴 발화하는 훅이므로 위쪽을 얇게 유지한다.
 [ -f "$DOD" ] || exit 0
+
+# 브랜치가 실어 온 것은 실행하지 않는다. 이 훅은 dod.sh 를 그대로 실행하므로, 적대적 브랜치를
+# checkout 한 사람이 임의 코드를 실행하게 되는 길을 여기서 막는다. 상태를 쓰기 전에 본다.
+#   - 작업 폴더가 추적되는 심볼릭 링크: 브랜치가 고른 자리로 읽기, 쓰기, 실행이 전부 넘어간다
+#   - dod.sh 가 추적 파일: 세션이 만드는 일시 파일이라 추적될 수 없다(.gitignore 는 git add -f 를
+#     막지 못한다)
+if _ml_state_dir_hijacked ./.mangolove; then
+    {
+        echo "MangoLove DoD gate: .mangolove 가 git 에 추적되는 심볼릭 링크입니다. 그 안의 dod.sh 를 실행하지 않습니다."
+        echo "  작업 폴더는 세션이 만드는 일시 상태라 추적될 수 없습니다. 브랜치가 실어 온 것으로 보입니다."
+        echo "  걷어내려면: git rm --cached .mangolove"
+    } >&2
+    exit 0
+fi
+if _ml_tracked "$DOD"; then
+    {
+        echo "MangoLove DoD gate: ${DOD} 가 git 에 추적되고 있습니다. 실행하지 않습니다."
+        echo "  DoD 스크립트는 세션이 만드는 일시 파일이라 추적될 수 없습니다."
+        echo "  브랜치가 실어 온 것으로 보입니다: git rm --cached 로 걷어내세요."
+    } >&2
+    exit 0
+fi
 
 # 감사되는 우회구: strict.md 는 우회를 금지하나 물리적으로는 존재한다.
 if [ "${MANGOLOVE_SKIP_DOD:-}" = "1" ]; then
@@ -110,11 +154,12 @@ _ml_seed_gitignore() {
     local d="${1:-./.mangolove}" f p loc prefix=""
     local patterns=(.gitignore dod.sh .dod-gate-attempts .review-skip)
     [ -d "$d" ] || return 0
+    # 브랜치가 실어 온 폴더 링크 너머에는 쓰지 않는다(_ml_state_dir_hijacked). 사용자가 직접
+    # 링크해 둔 폴더는 그대로 따라간다.
+    _ml_state_dir_hijacked "$d" && return 0
     f="$d/.gitignore"
-    # 링크를 따라 쓰지 않는다. 브랜치가 이 파일을 레포 밖을 가리키는 심볼릭 링크로 실어 오면
-    # 아래 쓰기가 그 대상(예: 설정 JSON)에 줄을 덧붙여 깨뜨린다. 작업 폴더 자체가 링크인
-    # 경우는 가리지 않고 따라간다: 사용자가 일부러 링크해 둔 폴더(dotfiles 로 관리하는 설치본
-    # 등)가 있다. 브랜치가 실어 온 폴더 링크를 가려내는 검사는 아직 어디에도 없다(알려진 빈칸).
+    # 파일 링크도 따라 쓰지 않는다. 브랜치가 이 파일을 레포 밖을 가리키는 심볼릭 링크로 실어 오면
+    # 아래 쓰기가 그 대상(예: 설정 JSON)에 줄을 덧붙여 깨뜨린다.
     [ -L "$f" ] && return 0
     # 그 .gitignore 를 git 이 추적하고 있으면 거기에 덧붙이지 않는다. 덧붙이면 작업 트리가
     # "로컬 수정 있음"이 된다. 프로젝트가 .mangolove/.gitignore 를 버전관리하는 경우가 그렇고,
@@ -135,7 +180,10 @@ _ml_seed_gitignore() {
         prefix="${prefix//\*/\\*}"
         prefix="${prefix//\?/\\?}"
         prefix="/$prefix"
-        patterns=(dod.sh .dod-gate-attempts .review-skip)
+        # 리뷰 상태 파일도 넣는다. git 프로젝트에서는 .git 아래에 쓰이지만, git 이 아닌 폴더(홈
+        # 디렉토리)에서 돌린 세션은 작업 폴더에 쓴다. 그 작업 폴더가 곧 설치본이다.
+        patterns=(dod.sh .dod-gate-attempts .review-skip .review-skip.used
+                  .review-ledger .review-ledger.base .review-covered .review-noscope)
         mkdir -p "${f%/*}" 2>/dev/null || return 0
         # f 가 exclude 경로로 바뀌었다. 그 파일도 링크일 수 있으므로 다시 본다.
         [ -L "$f" ] && return 0
@@ -256,17 +304,6 @@ fi
 #    그 사이 다른 세션의 Stop 이 발화하면 같은 빌드를 한 번 더 돌린 뒤 소유권까지 가져간다
 #    (그러면 정작 DoD 를 쓴 세션이 자기 DoD 를 남의 것으로 보고 영영 건너뛴다).
 _write_state "$ATTEMPTS" "$TOTAL"
-# 추적되는 dod.sh 는 브랜치가 실어 온 것이다. 이 파일은 세션이 만드는 일시 상태라 절대
-# 추적되지 않으며, 추적된 사본은 곧 **적대적 브랜치를 checkout 한 사람이 이 훅으로
-# 임의 코드를 실행하게 되는 것**을 뜻한다(.gitignore 는 git add -f 를 막지 못한다).
-if git ls-files --error-unmatch -- "$DOD" >/dev/null 2>&1; then
-    {
-        echo "MangoLove DoD gate: ${DOD} 가 git 에 추적되고 있습니다. 실행하지 않습니다."
-        echo "  DoD 스크립트는 세션이 만드는 일시 파일이라 추적될 수 없습니다."
-        echo "  브랜치가 실어 온 것으로 보입니다: git rm --cached '${DOD}' 로 걷어내세요."
-    } >&2
-    exit 0
-fi
 out="$(bash "$DOD" 2>&1)"; rc=$?
 if [ "$rc" -eq 0 ]; then
     rm -f "$DOD" "$STATE"

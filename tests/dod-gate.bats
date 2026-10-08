@@ -19,7 +19,7 @@ setup() {
 
 teardown() {
     [ -n "${PROJ:-}" ] && rm -rf "$PROJ" "$PROJ.ml"
-    [ -n "${SBOX:-}" ] && rm -rf "$SBOX"
+    [ -n "${SBOX:-}" ] && rm -rf "$SBOX" "$SBOX.state" "$SBOX.victim"
     return 0
 }
 
@@ -292,6 +292,9 @@ _repo_root_project() {
     # 저장소 루트 기준 경로로 심는다(작업 폴더가 곧 루트라 접두사가 없다)
     run grep -qx '/dod.sh' "$SBOX/.mangolove/.git/info/exclude"
     local seeded="$status"
+    # git 이 아닌 폴더(홈)에서 돌린 세션은 리뷰 상태 파일도 작업 폴더에 쓴다. 같이 가려야 한다.
+    grep -qx '/.review-ledger' "$SBOX/.mangolove/.git/info/exclude"
+    grep -qx '/.review-ledger.base' "$SBOX/.mangolove/.git/info/exclude"
     [ "$tracked_untouched" -eq 0 ]
     [ "$seeded" -eq 0 ]
 }
@@ -489,4 +492,108 @@ _repo_root_project() {
 
     run git -C "$SBOX" status --porcelain
     [ -z "$output" ]
+}
+
+# ── 브랜치가 실어 온 것은 실행하지 않는다 ───────────────────────
+# 이 훅은 dod.sh 를 그대로 실행한다. 적대적 브랜치를 checkout 한 사람이 임의 코드를 실행하게
+# 되는 길을 막는 검사들이다. 재현된 구멍: .mangolove 를 추적 파일이 든 폴더로 가는 심볼릭
+# 링크로 실어 오면 "추적되는 dod.sh" 검사가 링크 너머를 못 봐 그 스크립트가 실행됐다.
+
+# 커밋 하나를 가진 레포를 만든다. SBOX 를 남긴다.
+_git_project() {
+    SBOX="$(mktemp -d)"
+    git -C "$SBOX" init -q
+    git -C "$SBOX" config user.email t@example.com
+    git -C "$SBOX" config user.name t
+    git -C "$SBOX" commit -q --allow-empty -m init
+}
+
+_run_gate_in() {
+    printf '{"hook_event_name":"Stop","session_id":"S","cwd":"%s"}' "$1" | "$GATE"
+}
+
+# 실행되면 흔적(PWNED)을 남기는 스크립트를 $1 에 쓴다.
+_write_marker_script() {
+    printf '#!/usr/bin/env bash\ntouch "%s/PWNED"\nexit 0\n' "$SBOX" > "$1"
+}
+
+@test "위조: 추적된 dod.sh 는 실행하지 않고 상태도 남기지 않는다" {
+    _git_project
+    mkdir -p "$SBOX/.mangolove"
+    _write_marker_script "$SBOX/.mangolove/dod.sh"
+    git -C "$SBOX" add -f .mangolove/dod.sh
+    git -C "$SBOX" commit -qm forged
+    run _run_gate_in "$SBOX"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"추적되고 있습니다"* ]]
+    [ ! -e "$SBOX/PWNED" ]
+    [ -f "$SBOX/.mangolove/dod.sh" ]
+    [ ! -e "$SBOX/.mangolove/.dod-gate-attempts" ]
+}
+
+@test "위조: 브랜치가 실어 온 폴더 링크 너머의 dod.sh 는 실행하지 않는다" {
+    _git_project
+    mkdir -p "$SBOX/payload"
+    _write_marker_script "$SBOX/payload/dod.sh"
+    ln -s payload "$SBOX/.mangolove"
+    git -C "$SBOX" add -A
+    git -C "$SBOX" commit -qm "forged behind a link"
+    run _run_gate_in "$SBOX"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"심볼릭 링크"* ]]
+    [ ! -e "$SBOX/PWNED" ]
+    # 링크 너머에 아무것도 쓰거나 지우지 않는다
+    [ -f "$SBOX/payload/dod.sh" ]
+    [ ! -e "$SBOX/payload/.dod-gate-attempts" ]
+    run git -C "$SBOX" status --porcelain
+    [ -z "$output" ]
+}
+
+@test "위조: 사용자가 만든 링크라도 그 너머의 dod.sh 가 추적 파일이면 실행하지 않는다" {
+    _git_project
+    mkdir -p "$SBOX/payload"
+    _write_marker_script "$SBOX/payload/dod.sh"
+    git -C "$SBOX" add -A
+    git -C "$SBOX" commit -qm "tracked payload"
+    ln -s payload "$SBOX/.mangolove"
+    run _run_gate_in "$SBOX"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"추적되고 있습니다"* ]]
+    [ ! -e "$SBOX/PWNED" ]
+    [ -f "$SBOX/payload/dod.sh" ]
+}
+
+# 오탐 방지: 사용자가 일부러 링크해 둔 작업 폴더(dotfiles 로 관리하는 설치본 등)는 막지 않는다.
+@test "링크: 사용자가 직접 링크해 둔 작업 폴더에서는 예전처럼 DoD 를 실행하고 소비한다" {
+    _git_project
+    mkdir -p "$SBOX.state"
+    ln -s "$SBOX.state" "$SBOX/.mangolove"
+    printf '#!/usr/bin/env bash\ntouch "%s/RAN"\nexit 0\n' "$SBOX" > "$SBOX.state/dod.sh"
+    run _run_gate_in "$SBOX"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"통과"* ]]
+    [ -e "$SBOX/RAN" ]
+    [ ! -e "$SBOX.state/dod.sh" ]
+}
+
+@test "seed: 브랜치가 실어 온 폴더 링크 너머에는 무시 줄을 심지 않는다" {
+    _git_project
+    mkdir -p "$SBOX.victim"
+    ln -s "../$(basename "$SBOX.victim")" "$SBOX/.mangolove"
+    git -C "$SBOX" add -A
+    git -C "$SBOX" commit -qm "link out of the repo"
+    printf '{"hook_event_name":"PostToolUse","session_id":"S","cwd":"%s","tool_input":{"skill":"simplify"}}' "$SBOX" \
+        | bash "$REPO/lib/review-gate.sh" record >/dev/null 2>&1 || true
+
+    [ -z "$(ls -A "$SBOX.victim")" ]
+}
+
+@test "boundary: 두 게이트의 위조 판정 함수가 바이트 동일하다" {
+    local fn a b
+    for fn in _ml_tracked _ml_state_dir_hijacked; do
+        a="$(sed -n "/^${fn}() {/,/^}/p" "$REPO/lib/dod-gate.sh")"
+        b="$(sed -n "/^${fn}() {/,/^}/p" "$REPO/lib/review-gate.sh")"
+        [ -n "$a" ] || { echo "missing: $fn"; false; }
+        [ "$a" = "$b" ] || { echo "diverged: $fn"; false; }
+    done
 }

@@ -91,7 +91,25 @@ STATE_DIR=""
 
 # 추적되는 게이트 상태는 브랜치가 실어 온 위조본이다. 이 파일들은 일시 상태라 절대
 # 추적되지 않으며, 추적된 사본이 있다는 것 자체가 변조 신호다.
-_ml_tracked() { git ls-files --error-unmatch -- "$1" >/dev/null 2>&1; }
+# git 에게는 그 파일을 실제로 담고 있는 폴더 안에서 묻는다. 경로 그대로 물으면, 작업 폴더가
+# 추적 파일이 든 다른 폴더로 가는 심볼릭 링크일 때 "링크 너머의 경로는 모른다"는 답이 돌아와
+# 위조본이 통과한다(재현됨: 그렇게 실어 온 dod.sh 가 실행됐다). 폴더가 서브모듈이어도 걸린다.
+_ml_tracked() {
+    local dir="${1%/*}" base="${1##*/}"
+    [ "$dir" != "$1" ] || dir="."
+    git -C "$dir" ls-files --error-unmatch -- "$base" >/dev/null 2>&1
+}
+
+# 작업 폴더($1)가 브랜치가 실어 온 심볼릭 링크인가. git 이 추적하는 링크만 그렇게 본다:
+# 사용자가 직접 만든 링크(dotfiles 로 관리하는 설치본 등)는 추적되지 않으므로 그대로 쓴다.
+# 실어 온 링크는 읽지도 쓰지도 않는다. 그 너머는 브랜치가 고른 자리다.
+_ml_state_dir_hijacked() {
+    local d="${1%/}" parent base
+    [ -L "$d" ] || return 1
+    parent="${d%/*}"; base="${d##*/}"
+    [ "$parent" != "$d" ] || parent="."
+    git -C "$parent" ls-files --error-unmatch -- "$base" >/dev/null 2>&1
+}
 
 LEDGER_REL=".mangolove/.review-ledger"
 # 원장과 커버리지는 세션이나 HEAD 로 무효화하지 않는다. 세션으로 무효화하던 시절, 같은 worktree 에서
@@ -160,11 +178,12 @@ _ml_seed_gitignore() {
     local d="${1:-./.mangolove}" f p loc prefix=""
     local patterns=(.gitignore dod.sh .dod-gate-attempts .review-skip)
     [ -d "$d" ] || return 0
+    # 브랜치가 실어 온 폴더 링크 너머에는 쓰지 않는다(_ml_state_dir_hijacked). 사용자가 직접
+    # 링크해 둔 폴더는 그대로 따라간다.
+    _ml_state_dir_hijacked "$d" && return 0
     f="$d/.gitignore"
-    # 링크를 따라 쓰지 않는다. 브랜치가 이 파일을 레포 밖을 가리키는 심볼릭 링크로 실어 오면
-    # 아래 쓰기가 그 대상(예: 설정 JSON)에 줄을 덧붙여 깨뜨린다. 작업 폴더 자체가 링크인
-    # 경우는 가리지 않고 따라간다: 사용자가 일부러 링크해 둔 폴더(dotfiles 로 관리하는 설치본
-    # 등)가 있다. 브랜치가 실어 온 폴더 링크를 가려내는 검사는 아직 어디에도 없다(알려진 빈칸).
+    # 파일 링크도 따라 쓰지 않는다. 브랜치가 이 파일을 레포 밖을 가리키는 심볼릭 링크로 실어 오면
+    # 아래 쓰기가 그 대상(예: 설정 JSON)에 줄을 덧붙여 깨뜨린다.
     [ -L "$f" ] && return 0
     # 그 .gitignore 를 git 이 추적하고 있으면 거기에 덧붙이지 않는다. 덧붙이면 작업 트리가
     # "로컬 수정 있음"이 된다. 프로젝트가 .mangolove/.gitignore 를 버전관리하는 경우가 그렇고,
@@ -185,7 +204,10 @@ _ml_seed_gitignore() {
         prefix="${prefix//\*/\\*}"
         prefix="${prefix//\?/\\?}"
         prefix="/$prefix"
-        patterns=(dod.sh .dod-gate-attempts .review-skip)
+        # 리뷰 상태 파일도 넣는다. git 프로젝트에서는 .git 아래에 쓰이지만, git 이 아닌 폴더(홈
+        # 디렉토리)에서 돌린 세션은 작업 폴더에 쓴다. 그 작업 폴더가 곧 설치본이다.
+        patterns=(dod.sh .dod-gate-attempts .review-skip .review-skip.used
+                  .review-ledger .review-ledger.base .review-covered .review-noscope)
         mkdir -p "${f%/*}" 2>/dev/null || return 0
         # f 가 exclude 경로로 바뀌었다. 그 파일도 링크일 수 있으므로 다시 본다.
         [ -L "$f" ] && return 0
@@ -1221,7 +1243,11 @@ _bypassed() {
     # 환경변수 우회는 mangolove 실행 **전에** export 돼 있어야 한다. 훅은 Claude Code
     # 프로세스의 환경에서 뜨므로, 명령 앞에 붙인 VAR=1 은 훅에 닿지 않는다. 세션 도중
     # 우회해야 할 때를 위해 에이전트가 직접 쓸 수 있는 파일 경로를 둔다(1회용, 감사됨).
-    if [ -f "$SKIP_REL" ] && _ml_tracked "$SKIP_REL"; then
+    if [ -f "$SKIP_REL" ] && _ml_state_dir_hijacked "${SKIP_REL%/*}"; then
+        echo "MangoLove review gate: .mangolove 가 git 에 추적되는 심볼릭 링크입니다." >&2
+        echo "  브랜치가 실어 온 작업 폴더로 보고 그 안의 우회 파일을 무시합니다." >&2
+        echo "  걷어내려면: git rm --cached .mangolove" >&2
+    elif [ -f "$SKIP_REL" ] && _ml_tracked "$SKIP_REL"; then
         echo "MangoLove review gate: .mangolove/.review-skip 이 git 에 추적되고 있습니다." >&2
         echo "  우회 파일은 추적될 수 없습니다. 브랜치가 실어 온 위조본으로 보고 무시합니다." >&2
         echo "  의도한 우회라면 git rm --cached 후 다시 touch 하세요." >&2
@@ -1419,6 +1445,10 @@ do_skip() {
     git rev-parse --git-dir >/dev/null 2>&1 || { echo "review-gate: git 저장소가 아닙니다" >&2; exit 1; }
     _ml_init_state
     [ -n "$reason" ] || { echo "usage: mangolove review skip \"<근거>\"" >&2; exit 2; }
+    if _ml_state_dir_hijacked "${SKIP_REL%/*}"; then
+        echo "review-gate: .mangolove 가 git 에 추적되는 심볼릭 링크입니다. 브랜치가 실어 온 작업 폴더에는 쓰지 않습니다." >&2
+        exit 1
+    fi
     mkdir -p "$(dirname "$SKIP_REL")" 2>/dev/null || true
     # 워킹트리에 남는 유일한 상태 파일이라 브랜치가 심볼릭 링크를 실어 올 수 있다.
     # 링크를 따라가면 레포 밖 파일을 덮어쓴다(이 명령은 권한까지 자동 허용돼 있다).

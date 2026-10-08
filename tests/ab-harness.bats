@@ -53,10 +53,14 @@ AB() { echo "$MANGOLOVE_DIR/lib/ab-harness.sh"; }
 
 PLUGIN() { echo "$BATS_TEST_DIRNAME/../cc-plugin"; }
 
-# PATH 앞에 가짜 claude 를 두고 받은 인자를 기록한다.
+# PATH 앞에 가짜 claude 를 두고 받은 인자를 기록한다. `plugin eval --help` 에는 eval 이 있는
+# CLI 처럼 --ablation 이 든 도움말을 낸다($1=old 면 eval 이 없는 CLI 처럼 plugin 도움말만 낸다).
 _fake_claude_for_eval() {
+    local help_line="  --ablation <mode>"
+    [ "${1:-}" = "old" ] && help_line="Usage: claude plugin [options] [command]"
     install_fake_claude <<FAKE
-[ "\${3:-}" = "--help" ] || printf '%s\n' "\$@" > "$TEST_DIR/eval-args"
+if [ "\${3:-}" = "--help" ]; then echo "$help_line"; exit 0; fi
+printf '%s\n' "\$@" > "$TEST_DIR/eval-args"
 exit 0
 FAKE
 }
@@ -91,18 +95,47 @@ FAKE
     [ ! -e "$TEST_DIR/eval-args" ]
 }
 
-@test "evals: 모든 케이스가 프롬프트와 타입이 있는 grader 를 갖는다" {
-    local d n=0
-    for d in "$(PLUGIN)"/evals/*/; do
-        [ -f "${d}prompt.md" ] || { echo "no prompt.md: $d"; false; }
-        ls "${d}graders/"*.md >/dev/null 2>&1 || { echo "no graders: $d"; false; }
-        local g
+@test "ab live: eval 이 없는 낮은 claude 에서는 과금 안내 전에 멈춘다" {
+    # 종료코드로는 못 가린다: 없는 서브커맨드에 --help 를 붙여도 claude 는 0 을 낸다.
+    _fake_claude_for_eval old
+    run env PATH="$TEST_DIR/fakebin:$PATH" MANGOLOVE_AB_PLUGIN_DIR="$(PLUGIN)" bash "$(AB)" live
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"2.1.269"* ]]
+    [[ "$output" != *"과금"* ]]
+    [ ! -e "$TEST_DIR/eval-args" ]
+}
+
+# $1=evals 디렉토리. 케이스(prompt.md 나 case.yaml 이 있는 디렉토리)마다 타입이 있는 grader 가
+# 있는지 보고, 케이스 수를 낸다. results/ 나 mocks/ 는 케이스가 아니므로 건너뛴다.
+_check_eval_cases() {
+    local d g n=0
+    for d in "$1"/*/; do
+        [ -f "${d}prompt.md" ] || [ -f "${d}case.yaml" ] || continue
+        ls "${d}graders/"*.md >/dev/null 2>&1 || { echo "no graders: $d"; return 1; }
         for g in "${d}graders/"*.md; do
-            grep -qE '^type: (regex|tool_used|tool_order|file_exists|llm|baseline)$' "$g" || { echo "bad type: $g"; false; }
+            grep -qE '^type: (regex|tool_used|tool_order|file_exists|llm|baseline)$' "$g" || { echo "bad type: $g"; return 1; }
         done
         n=$((n + 1))
     done
-    [ "$n" -ge 1 ]
+    echo "$n"
+}
+
+@test "evals: 모든 케이스가 타입이 있는 grader 를 갖는다" {
+    run _check_eval_cases "$(PLUGIN)/evals"
+    [ "$status" -eq 0 ]
+    [ "$output" -ge 3 ]
+}
+
+@test "evals: ab live 가 남긴 results/ 는 케이스로 세지 않는다" {
+    # 결과 디렉토리는 gitignore 대상이라 눈에 안 띈다. 케이스로 세면 한 번 돌린 뒤 이 테스트가 깨진다.
+    cp -R "$(PLUGIN)/evals" "$TEST_DIR/evals"
+    mkdir -p "$TEST_DIR/evals/results/2026-10-08T00-00-00"
+    echo '{}' > "$TEST_DIR/evals/results/2026-10-08T00-00-00/aggregate-result.json"
+    local before
+    before="$(_check_eval_cases "$(PLUGIN)/evals")"
+    run _check_eval_cases "$TEST_DIR/evals"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$before" ]
 }
 
 @test "evals: Skill grader 가 가리키는 스킬이 실제로 플러그인에 있다" {

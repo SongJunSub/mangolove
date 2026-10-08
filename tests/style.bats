@@ -184,7 +184,8 @@ setup() {
         {
             if (held != "" && $0 !~ /^}/) print held
             held = ""
-            if ($0 ~ /^[[:space:]]+! / && $0 !~ /\|\|/) held = FILENAME ":" FNR ": " $0
+            if ($0 ~ /^[[:space:]]+! / && $0 !~ /\|\|[[:space:]]*\{.*false;[[:space:]]*\}[[:space:]]*$/)
+                held = FILENAME ":" FNR ": " $0
         }
     ' "$REPO"/tests/*.bats
     [ "$status" -eq 0 ]

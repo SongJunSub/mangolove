@@ -90,21 +90,3 @@ assert '1.14' in m and '182K' in m and '1시간 30분' in m, m
     [ "$status" -eq 0 ]
     [ -z "$output" ]
 }
-
-@test "session-settings: 재개 안내 훅은 resume|fork 에만 걸리고 off 면 빠진다" {
-    command -v python3 >/dev/null 2>&1 || skip "needs python3"
-    cp "$BATS_TEST_DIRNAME/../bin/mangolove" "$MANGOLOVE_DIR/bin/mangolove"
-    local on="$TEST_DIR/on.json" off="$TEST_DIR/off.json"
-    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'
-      MANGOLOVE_RESUME_NOTICE=on  generate_session_settings '$on'
-      MANGOLOVE_RESUME_NOTICE=off generate_session_settings '$off'"
-    [ "$status" -eq 0 ]
-    python3 -c "
-import json
-on = json.load(open('$on'))['hooks']['SessionStart']
-assert len(on) == 1 and on[0]['matcher'] == 'resume|fork', on
-assert 'resume-notice.sh' in on[0]['hooks'][0]['command'], on
-off = json.load(open('$off'))['hooks']
-assert 'SessionStart' not in off, off
-"
-}

@@ -407,13 +407,18 @@ STUB
     [ "$(tr '\n' '|' < "$TEST_DIR/claude-calls")" = "--settings|/tmp/s.json|--system-prompt-snapshot|off|-c|<<END>>|" ]
 }
 
-# mangolove resume: 예전에는 게이트(--settings)도 플러그인도 없이 claude 를 따로 띄웠고,
-# 세션 컨텍스트를 --append-system-prompt 로 넘겨 재개 시 통째로 무시됐다.
-@test "launch: mangolove resume 은 게이트를 실은 채 -c 로 잇고 컨텍스트를 첫 메시지로 넘긴다" {
+# 세션 메모리 load 가 고정된 컨텍스트 한 줄을 내게 한다.
+_stub_session_memory() {
     cat > "$MANGOLOVE_DIR/lib/session-memory.sh" <<'SM'
 #!/bin/bash
 [ "$1" = "load" ] && echo "branch: feat/x"
 SM
+}
+
+# mangolove resume: 예전에는 게이트(--settings)도 플러그인도 없이 claude 를 따로 띄웠고,
+# 세션 컨텍스트를 --append-system-prompt 로 넘겨 재개 시 통째로 무시됐다.
+@test "launch: mangolove resume 은 게이트를 실은 채 -c 로 잇고 컨텍스트를 첫 메시지로 넘긴다" {
+    _stub_session_memory
     run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'
       $(_stub_claude 2.1.293)
       CLAUDE_ARGS=(--settings /tmp/s.json --append-system-prompt METHODOLOGY); ML_RESUME=1
@@ -430,10 +435,7 @@ SM
 }
 
 @test "launch: 이을 대화가 없어 -c 가 실패하면 새 대화로 같은 컨텍스트를 넘긴다" {
-    cat > "$MANGOLOVE_DIR/lib/session-memory.sh" <<'SM'
-#!/bin/bash
-[ "$1" = "load" ] && echo "branch: feat/x"
-SM
+    _stub_session_memory
     # 첫 호출(-c)만 실패시킨다
     run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'
       claude() {
@@ -452,15 +454,30 @@ SM
     [ "$(grep -c 'branch: feat/x' "$TEST_DIR/claude-calls")" -eq 2 ]
 }
 
+@test "session-settings: 재개 안내 훅은 resume|fork 에만 걸리고 off 면 빠진다" {
+    command -v python3 >/dev/null 2>&1 || skip "needs python3"
+    local on="$TEST_DIR/on.json" off="$TEST_DIR/off.json"
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'
+      MANGOLOVE_RESUME_NOTICE=on  generate_session_settings '$on'
+      MANGOLOVE_RESUME_NOTICE=off generate_session_settings '$off'"
+    [ "$status" -eq 0 ]
+    python3 -c "
+import json
+on = json.load(open('$on'))['hooks']['SessionStart']
+assert len(on) == 1 and on[0]['matcher'] == 'resume|fork', on
+assert 'resume-notice.sh' in on[0]['hooks'][0]['command'], on
+off = json.load(open('$off'))['hooks']
+assert 'SessionStart' not in off, off
+"
+}
+
 # ─────────────────────────────────────────────
 # doctor: claude 버전과 플러그인 검증 사유
 # ─────────────────────────────────────────────
 
 # PATH 앞에 가짜 claude 를 둔다. $1=버전, $2=plugin validate 의 종료코드(기본 0).
 _fake_claude_bin() {
-    mkdir -p "$TEST_DIR/fakebin"
-    cat > "$TEST_DIR/fakebin/claude" <<FAKE
-#!/bin/bash
+    install_fake_claude <<FAKE
 if [ "\${1:-}" = "--version" ]; then echo "$1 (Claude Code)"; exit 0; fi
 if [ "\${1:-}" = "plugin" ] && [ "\${2:-}" = "validate" ]; then
     [ "${2:-0}" = "0" ] && exit 0
@@ -469,7 +486,13 @@ if [ "\${1:-}" = "plugin" ] && [ "\${2:-}" = "validate" ]; then
 fi
 exit 0
 FAKE
-    chmod +x "$TEST_DIR/fakebin/claude"
+}
+
+# doctor 가 cc-plugin 검증까지 가도록 최소 플러그인과 core.md 를 둔다.
+_fake_cc_plugin() {
+    mkdir -p "$MANGOLOVE_DIR/cc-plugin/.claude-plugin" "$MANGOLOVE_DIR/methodology"
+    echo '{}' > "$MANGOLOVE_DIR/cc-plugin/.claude-plugin/plugin.json"
+    echo '# core' > "$MANGOLOVE_DIR/methodology/core.md"
 }
 
 @test "doctor: 게이트가 의존하는 수정보다 낮은 claude 버전을 경고한다" {
@@ -490,9 +513,7 @@ FAKE
 
 @test "doctor: cc-plugin 검증이 실패하면 사유를 보여준다" {
     _fake_claude_bin 2.1.293 1
-    mkdir -p "$MANGOLOVE_DIR/cc-plugin/.claude-plugin" "$MANGOLOVE_DIR/methodology"
-    echo '{}' > "$MANGOLOVE_DIR/cc-plugin/.claude-plugin/plugin.json"
-    echo '# core' > "$MANGOLOVE_DIR/methodology/core.md"
+    _fake_cc_plugin
     cd "$TEST_DIR"
     run env PATH="$TEST_DIR/fakebin:$PATH" bash "$MANGOLOVE_DIR/bin/mangolove" doctor
     [[ "$output" == *"cc-plugin: 검증 실패"* ]]
@@ -501,9 +522,7 @@ FAKE
 
 @test "doctor: cc-plugin 검증이 통과하면 valid 로 보고한다" {
     _fake_claude_bin 2.1.293 0
-    mkdir -p "$MANGOLOVE_DIR/cc-plugin/.claude-plugin" "$MANGOLOVE_DIR/methodology"
-    echo '{}' > "$MANGOLOVE_DIR/cc-plugin/.claude-plugin/plugin.json"
-    echo '# core' > "$MANGOLOVE_DIR/methodology/core.md"
+    _fake_cc_plugin
     cd "$TEST_DIR"
     run env PATH="$TEST_DIR/fakebin:$PATH" bash "$MANGOLOVE_DIR/bin/mangolove" doctor
     [[ "$output" == *"cc-plugin: valid"* ]]

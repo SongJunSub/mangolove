@@ -55,13 +55,10 @@ PLUGIN() { echo "$BATS_TEST_DIRNAME/../cc-plugin"; }
 
 # PATH 앞에 가짜 claude 를 두고 받은 인자를 기록한다.
 _fake_claude_for_eval() {
-    mkdir -p "$TEST_DIR/fakebin"
-    cat > "$TEST_DIR/fakebin/claude" <<FAKE
-#!/bin/bash
+    install_fake_claude <<FAKE
 [ "\${3:-}" = "--help" ] || printf '%s\n' "\$@" > "$TEST_DIR/eval-args"
 exit 0
 FAKE
-    chmod +x "$TEST_DIR/fakebin/claude"
 }
 
 @test "ab live: 게시하지 않고 대조군과 함께 돌리며 비용 상한을 건다" {

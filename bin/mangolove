@@ -39,10 +39,6 @@ MANGOLOVE_MODEL=""
 MANGOLOVE_EFFORT=""
 MANGOLOVE_MODE=""
 MANGOLOVE_SESSION_GATES=true
-ML_RESUME=0   # `mangolove resume` 서브커맨드가 1 로 올린다 (_ml_launch 참조)
-# doctor 가 경고하는 claude 최소 권장 버전. v2.1.259 는 Stop 훅이 턴을 막은 직후 그 턴의
-# 추론이 유실되고 일부 모델에서 프롬프트 캐시를 놓치던 문제를 고쳤다(DoD 게이트가 쓰는 경로).
-ML_CLAUDE_RECOMMENDED="2.1.259"
 # Methodology delivery: split (lean core.md + on-demand cc-plugin skills) | monolith (full strict.md).
 # Default split: context 는 가장 비싼 자원이고, 상시 주입이 길수록 개별 지시의 효력이 희석된다.
 # 트랙 판정, 승인 게이트, 안전 절차는 코어에 상주하고 무거운 절차만 온디맨드로 내려간다.
@@ -94,9 +90,21 @@ _ml_instructions_file() {
     fi
 }
 
-# 설치된 claude 의 버전("2.1.293 (Claude Code)" → 2.1.293). 못 읽으면 빈 문자열.
+# MangoLove 가 claude 버전에 기대는 두 지점. 사용자 설정이 아니라 사실이다.
+#   권장 하한: v2.1.259 는 Stop 훅이 턴을 막은 직후 그 턴의 추론이 유실되고 일부 모델에서
+#             프롬프트 캐시를 놓치던 문제를 고쳤다(DoD 게이트가 쓰는 경로). doctor 가 경고한다.
+#   스냅샷 플래그: --system-prompt-snapshot 은 v2.1.257 에 생겼다(_ml_snapshot_args 참조).
+ML_CLAUDE_RECOMMENDED="2.1.259"
+ML_SNAPSHOT_FLAG_MIN="2.1.257"
+
+# "2.1.293 (Claude Code)" 같은 문자열에서 버전만 뽑는다. 없으면 빈 출력.
+_ml_parse_version() {
+    printf '%s\n' "${1:-}" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1
+}
+
+# 설치된 claude 의 버전. 못 읽으면 빈 문자열.
 _ml_claude_version() {
-    claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1
+    _ml_parse_version "$(claude --version 2>/dev/null)"
 }
 
 # $1 >= $2 인가. 점으로 나눈 세 자리를 수로 비교한다(문자열 비교는 2.1.99 를 2.1.257 보다 크게 본다).
@@ -115,8 +123,8 @@ _ml_version_ge() {
 #
 # 새 대화에는 넘기지 않는다. 스냅샷은 프롬프트 캐시를 안정시키려고 생긴 것이고, 새 대화의
 # 기록은 어차피 지금 넘기는 프롬프트다.
-# 플래그는 v2.1.257 에 생겼다. 그보다 낮은 CLI 는 모르는 옵션으로 실행을 거부하므로 넘기지
-# 않는다(그 버전대는 프롬프트 플래그를 주면 기록이 꺼졌으므로 필요도 없다).
+# 플래그가 없는 낮은 CLI(ML_SNAPSHOT_FLAG_MIN 미만)는 모르는 옵션으로 실행을 거부하므로
+# 넘기지 않는다(그 버전대는 프롬프트 플래그를 주면 기록이 꺼졌으므로 필요도 없다).
 # 결과는 전역 배열로 돌려준다: 명령치환은 빈 결과와 요소 경계를 잃는다.
 ML_SNAPSHOT_ARGS=()
 _ml_snapshot_args() {
@@ -129,7 +137,7 @@ _ml_snapshot_args() {
         esac
     done
     [ "$resume" = "1" ] || return 0
-    _ml_version_ge "$(_ml_claude_version)" "2.1.257" || return 0
+    _ml_version_ge "$(_ml_claude_version)" "$ML_SNAPSHOT_FLAG_MIN" || return 0
     ML_SNAPSHOT_ARGS=(--system-prompt-snapshot off)
 }
 
@@ -458,7 +466,7 @@ do_doctor() {
     if command -v claude &> /dev/null; then
         local cv cver
         cv=$(claude --version 2>/dev/null)
-        cver=$(_ml_claude_version)
+        cver=$(_ml_parse_version "$cv")
         # 버전을 못 읽으면 경고하지 않는다(모르는 것을 낮다고 단정하지 않는다).
         if [ -n "$cver" ] && ! _ml_version_ge "$cver" "$ML_CLAUDE_RECOMMENDED"; then
             echo -e "  \033[38;5;220m△\033[0m Claude Code: ${cv} (${ML_CLAUDE_RECOMMENDED} 이상 권장: Stop 훅이 턴을 막은 뒤 추론이 유실되던 문제의 수정)"
@@ -533,7 +541,7 @@ do_doctor() {
     if [ -f "$CORE_METHODOLOGY_FILE" ] && [ -f "$CC_PLUGIN_DIR/.claude-plugin/plugin.json" ]; then
         # "건너뜀"과 "실패"는 다른 상태다. 한 줄로 뭉개면 깨진 플러그인이 claude 미설치처럼
         # 보이고, claude 는 깨진 --plugin-dir 를 조용히 미로드한다. 실패면 사유를 보여준다.
-        local pv_out=""
+        local pv_out
         if ! command -v claude &> /dev/null; then
             echo -e "  \033[38;5;220m△\033[0m cc-plugin: present (claude 가 없어 검증 건너뜀)"
         elif pv_out=$(claude plugin validate "$CC_PLUGIN_DIR" 2>&1); then
@@ -790,6 +798,9 @@ detect_multi_project_root() {
 # ─────────────────────────────────────────────
 main() {
     export MANGOLOVE_DIR
+    # `mangolove resume` 서브커맨드만 1 로 올린다(_ml_launch 참조). 설정값이 아니므로 여기서
+    # 0 으로 시작한다: config.sh 나 환경변수가 재개를 켜지 못한다.
+    ML_RESUME=0
 
     case "${1:-}" in
         help|--help|-h)

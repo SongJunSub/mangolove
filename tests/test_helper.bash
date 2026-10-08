@@ -29,6 +29,14 @@ MANGOLOVE_LOG_REPO="disabled"
 EOF
 }
 
+# PATH 앞에 둘 가짜 claude 를 만든다. 스크립트 본문(셔뱅 제외)은 stdin 으로 받는다.
+# 쓰는 쪽: run env PATH="$TEST_DIR/fakebin:$PATH" ...
+install_fake_claude() {
+    mkdir -p "$TEST_DIR/fakebin"
+    { echo '#!/bin/bash'; cat; } > "$TEST_DIR/fakebin/claude"
+    chmod +x "$TEST_DIR/fakebin/claude"
+}
+
 # Cleanup test environment
 teardown_test_env() {
     [ -d "$TEST_DIR" ] && rm -rf "$TEST_DIR"

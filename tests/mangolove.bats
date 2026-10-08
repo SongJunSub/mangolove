@@ -634,6 +634,83 @@ _fake_install_repo() {
     grep -qx 'dod.sh' "$inst/.gitignore"
 }
 
+# origin 을 가진 가짜 설치본을 만든다. $1=작업 디렉토리. ORIGIN, INST 를 남긴다.
+_install_with_origin() {
+    local seed="$1/seed"
+    ORIGIN="$1/origin.git"; INST="$1/inst"
+    git init -q -b main "$seed"
+    mkdir -p "$seed/bin" "$seed/lib"
+    printf '# rules\n*.swp\n\n# tail\n.DS_Store\n' > "$seed/.gitignore"
+    printf 'MANGOLOVE_VERSION="9.9.9"\n' > "$seed/bin/mangolove"
+    printf '#!/bin/bash\n' > "$seed/lib/a.sh"
+    git -C "$seed" add -A
+    git -C "$seed" -c user.email=t@example.com -c user.name=t commit -q -m init
+    git clone -q --bare "$seed" "$ORIGIN"
+    git clone -q "$ORIGIN" "$INST"
+    git -C "$seed" remote add origin "$ORIGIN"
+}
+
+# origin 에 커밋 하나를 더한다. $1=작업 디렉토리 $2=sed 식(.gitignore 에 적용)
+_origin_changes_gitignore() {
+    sed -i.bak "$2" "$1/seed/.gitignore" && rm -f "$1/seed/.gitignore.bak"
+    git -C "$1/seed" -c user.email=t@example.com -c user.name=t commit -q -am "chore: gitignore"
+    git -C "$1/seed" push -q origin main
+}
+
+_run_auto_update() {
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'; MANGOLOVE_DIR='$INST'; auto_update_check; echo AFTER-CHECK"
+}
+
+@test "update: 게이트 줄이 남은 설치본도 .gitignore 를 바꾸는 버전으로 올라간다" {
+    _install_with_origin "$TEST_DIR"
+    printf '.gitignore\ndod.sh\n.dod-gate-attempts\n.review-skip\n' >> "$INST/.gitignore"
+    _origin_changes_gitignore "$TEST_DIR" 's/^# rules$/# rules v2/'
+    _run_auto_update
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"AFTER-CHECK"* ]]
+    [ "$(git -C "$INST" rev-parse HEAD)" = "$(git -C "$ORIGIN" rev-parse main)" ]
+    git -C "$INST" diff --quiet -- .gitignore
+}
+
+@test "update: 사용자가 손댄 줄이 있는 설치본도 그 줄을 지키며 올라간다" {
+    _install_with_origin "$TEST_DIR"
+    printf 'my-notes/\n' >> "$INST/.gitignore"
+    _origin_changes_gitignore "$TEST_DIR" 's/^# rules$/# rules v2/'
+    _run_auto_update
+    [ "$status" -eq 0 ]
+    [ "$(git -C "$INST" rev-parse HEAD)" = "$(git -C "$ORIGIN" rev-parse main)" ]
+    grep -qx 'my-notes/' "$INST/.gitignore"
+    grep -qx '# rules v2' "$INST/.gitignore"
+}
+
+# 실측 사고의 회귀 테스트: pull 이 실패하면 예전에는 그 종료코드로 mangolove 가 끝났다.
+@test "update: pull 이 실패해도 실행을 막지 않고, 다음 실행에서 다시 시도한다" {
+    _install_with_origin "$TEST_DIR"
+    # 설치본에 로컬 커밋을 둬 fast-forward 가 불가능하게 만든다
+    printf 'local\n' > "$INST/local.txt"
+    git -C "$INST" add local.txt
+    git -C "$INST" -c user.email=t@example.com -c user.name=t commit -q -m local
+    local before; before="$(git -C "$INST" rev-parse HEAD)"
+    _origin_changes_gitignore "$TEST_DIR" 's/^# rules$/# rules v2/'
+    _run_auto_update
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"자동 업데이트에 실패"* ]]
+    [[ "$output" == *"AFTER-CHECK"* ]]
+    # 실패한 pull 은 설치본을 건드리지 않는다(--ff-only)
+    [ "$(git -C "$INST" rev-parse HEAD)" = "$before" ]
+    [ -z "$(git -C "$INST" status --porcelain)" ]
+    # 확인 시각을 남기지 않아 다음 실행에서 다시 시도한다
+    [ ! -e "$INST/.last_update_check" ]
+}
+
+@test "update: 확인 시각 파일이 깨져 있어도 실행을 막지 않는다" {
+    _install_with_origin "$TEST_DIR"
+    printf 'not-a-number\n' > "$INST/.last_update_check"
+    _run_auto_update
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"AFTER-CHECK"* ]]
+}
+
 @test "update: 수정이 없거나 git 설치본이 아니면 아무 일도 하지 않는다" {
     local inst="$TEST_DIR/inst"
     _fake_install_repo "$inst"
@@ -677,17 +754,34 @@ _register_demo_project() {
     _fake_claude_recording
     _register_demo_project
     cd "$TEST_DIR"
-    local started=$SECONDS
     run env HOME="$TEST_DIR" PATH="$TEST_DIR/fakebin:$PATH" bash "$MANGOLOVE_DIR/bin/mangolove" switch demo </dev/null
-    local elapsed=$((SECONDS - started))
     [ "$status" -eq 0 ]
     [ "$(head -1 "$TEST_DIR/switch-calls")" = "$(cd "$TEST_DIR/demoproj" && pwd -P)" ]
     grep -qx -- '--append-system-prompt' "$TEST_DIR/switch-calls"
     grep -qx -- '--settings' "$TEST_DIR/switch-calls"
     # 프로젝트 이름이 claude 의 프롬프트 인자로 새지 않는다
-    ! grep -qx 'demo' "$TEST_DIR/switch-calls"
-    # 작업 로그가 꺼져 있을 때 종료 대기가 10초를 꽉 채우던 문제(kill -0 0 은 항상 성공한다)
-    [ "$elapsed" -lt 7 ]
+    # (bats 에서 `! 명령` 은 마지막 줄이 아니면 실패해도 통과한다. run 으로 받는다.)
+    run grep -qx 'demo' "$TEST_DIR/switch-calls"
+    [ "$status" -ne 0 ]
+}
+
+# 종료 trap 은 플러그인 훅과 작업 로거를 최대 10번(1초씩) 기다린다. 로거를 띄우지 않았을 때
+# pid 자리에 0 을 두면 kill -0 0 이 항상 성공해 10번을 꽉 채웠다. 벽시계 대신 sleep 횟수를 센다.
+@test "exit: 작업 로그가 꺼져 있으면 종료할 때 로거를 기다리지 않는다" {
+    _fake_claude_recording
+    mkdir -p "$TEST_DIR/fakebin"
+    cat > "$TEST_DIR/fakebin/sleep" <<FAKE
+#!/bin/bash
+echo x >> "$TEST_DIR/sleep-calls"
+exec /bin/sleep 0.1
+FAKE
+    chmod +x "$TEST_DIR/fakebin/sleep"
+    mkdir -p "$TEST_DIR/plain" && cd "$TEST_DIR/plain"
+    run env HOME="$TEST_DIR" PATH="$TEST_DIR/fakebin:$PATH" bash "$MANGOLOVE_DIR/bin/mangolove" "hi" </dev/null
+    [ "$status" -eq 0 ]
+    local n=0
+    [ -f "$TEST_DIR/sleep-calls" ] && n="$(wc -l < "$TEST_DIR/sleep-calls" | tr -d ' ')"
+    [ "$n" -lt 8 ]
 }
 
 @test "switch: 없는 프로젝트면 세션을 띄우지 않고 실패한다" {

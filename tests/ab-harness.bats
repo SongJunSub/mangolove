@@ -149,6 +149,13 @@ _check_eval_cases() {
     [ "$output" = "$before" ]
 }
 
+@test "evals: 실행 결과 디렉토리는 git 이 무시한다" {
+    # 무시 규칙은 루트 .gitignore 가 아니라 cc-plugin/evals/.gitignore 에 있다(루트 파일을 바꾸면
+    # 옛 게이트가 줄을 덧붙여 둔 설치본의 업데이트가 막힌다).
+    run git -C "$BATS_TEST_DIRNAME/.." check-ignore -q cc-plugin/evals/results/2026-01-01/aggregate-result.json
+    [ "$status" -eq 0 ]
+}
+
 @test "evals: Skill grader 가 가리키는 스킬이 실제로 플러그인에 있다" {
     # 스킬 이름을 바꾸면 eval 은 조용히 0 점이 된다(스킬이 안 불린 것처럼 보인다).
     local g name n=0

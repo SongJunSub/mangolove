@@ -60,7 +60,10 @@ echo ""
 if [ -d "$MANGOLOVE_DIR/.git" ]; then
     echo -e "${Y}Existing installation found. Updating...${R}"
     cd "$MANGOLOVE_DIR"
-    git pull origin main
+    # --ff-only: 실패해도 설치본을 건드리지 않는다. autostash: 설치본에 로컬 수정이 있어도
+    # (옛 게이트가 .gitignore 에 덧붙인 줄, 사용자가 직접 고친 파일) pull 이 거부되지 않는다.
+    # 자동 업데이트가 막힌 설치본을 푸는 길이 이 스크립트이므로 여기서는 반드시 통과해야 한다.
+    git -c merge.autostash=true pull --ff-only origin main
     echo -e "${G}✓${R} Updated to latest version."
 else
     if [ -d "$MANGOLOVE_DIR" ]; then

@@ -107,7 +107,8 @@ _ml_tracked() {
             { t = index($0, "\t"); p = substr($0, t + 1) }
             t && index(p, "/") == 0 && (m == "" || substr($0, 1, 6) == m) { print "./" p }
         ' | tr '\n' '\0' | xargs -0 ls -di -- 2>/dev/null)"
-        awk -v i="$ino" '$1 == i { f = 1 } END { exit !f }' <<< "$seen"
+        # 문자열로 비교한다. 숫자로 비교하면 2^53 을 넘는 inode 둘이 같은 값으로 뭉개진다.
+        awk -v i="$ino" '$1 "" == i "" { f = 1 } END { exit !f }' <<< "$seen"
     )
 }
 
@@ -140,8 +141,9 @@ if _ml_state_dir_hijacked ./.mangolove; then
     {
         echo "MangoLove DoD gate: .mangolove 가 git 에 추적되는 심볼릭 링크입니다. 그 안의 dod.sh 를 실행하지 않습니다."
         echo "  작업 폴더는 세션이 만드는 일시 상태라 추적될 수 없습니다. 브랜치가 실어 온 것으로 보입니다."
-        echo "  실어 온 링크면 링크를 지우세요: rm .mangolove"
+        echo "  실어 온 링크면 링크를 지우세요: git rm -f .mangolove"
         echo "  (인덱스에서만 빼면 링크가 남아 다음부터는 믿게 됩니다. 직접 만든 링크를 실수로 stage 한 경우에만 git rm --cached)"
+        echo "  (git rm 이 못 찾으면 이름을 달리 적어 실어 온 것입니다. git ls-files 로 실제 이름을 확인하세요)"
     } >&2
     exit 0
 fi
@@ -149,8 +151,9 @@ if _ml_tracked "$DOD"; then
     {
         echo "MangoLove DoD gate: ${DOD} 가 git 에 추적되고 있습니다. 실행하지 않습니다."
         echo "  DoD 스크립트는 세션이 만드는 일시 파일이라 추적될 수 없습니다."
-        echo "  브랜치가 실어 온 것이면 파일을 지우세요: rm ${DOD}"
+        echo "  브랜치가 실어 온 것이면 파일을 지우세요: git rm -f ${DOD}"
         echo "  (인덱스에서만 빼면 파일이 남아 다음 턴에 그대로 실행됩니다. 직접 쓴 DoD 를 실수로 stage 한 경우에만 git rm --cached)"
+        echo "  (git rm 이 못 찾으면 이름을 달리 적어 실어 온 것입니다. git ls-files 로 실제 이름을 확인하세요)"
     } >&2
     exit 0
 fi

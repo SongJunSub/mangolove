@@ -532,10 +532,27 @@ _write_marker_script() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"추적되고 있습니다"* ]]
     # 처방은 파일을 지우는 것이다. 인덱스에서만 빼라고 하면 파일이 남아 다음 턴에 실행된다.
-    [[ "$output" == *"지우세요: rm ./.mangolove/dod.sh"* ]]
+    [[ "$output" == *"지우세요: git rm -f ./.mangolove/dod.sh"* ]]
     [ ! -e "$SBOX/PWNED" ]
     [ -f "$SBOX/.mangolove/dod.sh" ]
     [ ! -e "$SBOX/.mangolove/.dod-gate-attempts" ]
+}
+
+# 안내대로 지운 뒤에는 그 자리에 세션이 쓴 DoD 가 다시 돌아야 한다. 디스크에서만 지우면 인덱스에
+# 항목이 남아, 새로 쓴 DoD 까지 추적 파일로 보고 계속 거부한다.
+@test "위조: 안내대로 지운 뒤에는 세션이 새로 쓴 DoD 를 실행한다" {
+    _git_project
+    mkdir -p "$SBOX/.mangolove"
+    _write_marker_script "$SBOX/.mangolove/dod.sh"
+    git -C "$SBOX" add -f .mangolove/dod.sh
+    git -C "$SBOX" commit -qm forged
+    git -C "$SBOX" rm -qf ./.mangolove/dod.sh
+    mkdir -p "$SBOX/.mangolove"
+    printf '#!/usr/bin/env bash\ntouch "%s/RAN"\nexit 0\n' "$SBOX" > "$SBOX/.mangolove/dod.sh"
+    run _run_gate_in "$SBOX"
+    [ "$status" -eq 0 ]
+    [ -e "$SBOX/RAN" ]
+    [ ! -e "$SBOX/PWNED" ]
 }
 
 # 재현된 구멍: macOS 기본 파일 시스템은 이름의 대소문자를 가리지 않고, 몇몇 유니코드 문자도 같은
@@ -617,7 +634,7 @@ _write_marker_script() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"심볼릭 링크"* ]]
     # 처방은 링크를 지우는 것이다. 인덱스에서만 빼라고 하면 링크가 남아 다음부터는 믿게 된다.
-    [[ "$output" == *"지우세요: rm .mangolove"* ]]
+    [[ "$output" == *"지우세요: git rm -f .mangolove"* ]]
     [ ! -e "$SBOX/PWNED" ]
     # 링크 너머에 아무것도 쓰거나 지우지 않는다
     [ -f "$SBOX/payload/dod.sh" ]

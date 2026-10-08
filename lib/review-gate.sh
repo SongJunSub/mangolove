@@ -119,7 +119,8 @@ _ml_tracked() {
             { t = index($0, "\t"); p = substr($0, t + 1) }
             t && index(p, "/") == 0 && (m == "" || substr($0, 1, 6) == m) { print "./" p }
         ' | tr '\n' '\0' | xargs -0 ls -di -- 2>/dev/null)"
-        awk -v i="$ino" '$1 == i { f = 1 } END { exit !f }' <<< "$seen"
+        # 문자열로 비교한다. 숫자로 비교하면 2^53 을 넘는 inode 둘이 같은 값으로 뭉개진다.
+        awk -v i="$ino" '$1 "" == i "" { f = 1 } END { exit !f }' <<< "$seen"
     )
 }
 
@@ -1265,12 +1266,15 @@ _bypassed() {
     if [ -f "$SKIP_REL" ] && _ml_state_dir_hijacked "${SKIP_REL%/*}"; then
         echo "MangoLove review gate: .mangolove 가 git 에 추적되는 심볼릭 링크입니다." >&2
         echo "  브랜치가 실어 온 작업 폴더로 보고 그 안의 우회 파일을 무시합니다." >&2
-        echo "  실어 온 링크면 링크를 지우세요: rm .mangolove" >&2
+        echo "  실어 온 링크면 링크를 지우세요: git rm -f .mangolove" >&2
         echo "  (인덱스에서만 빼면 링크가 남아 다음부터는 믿게 됩니다. 직접 만든 링크를 실수로 stage 한 경우에만 git rm --cached)" >&2
+        echo "  (git rm 이 못 찾으면 이름을 달리 적어 실어 온 것입니다. git ls-files 로 실제 이름을 확인하세요)" >&2
     elif [ -f "$SKIP_REL" ] && _ml_tracked "$SKIP_REL"; then
         echo "MangoLove review gate: .mangolove/.review-skip 이 git 에 추적되고 있습니다." >&2
         echo "  우회 파일은 추적될 수 없습니다. 브랜치가 실어 온 위조본으로 보고 무시합니다." >&2
-        echo "  의도한 우회라면 git rm --cached 후 다시 touch 하세요." >&2
+        echo "  우회하려면 그 파일을 지우고 다시 남기세요: git rm -f .mangolove/.review-skip 후 mangolove review skip \"<근거>\"" >&2
+        echo "  (인덱스에서만 빼면 실어 온 내용이 남아 그 근거 그대로 우회에 쓰입니다)" >&2
+        echo "  (git rm 이 못 찾으면 이름을 달리 적어 실어 온 것입니다. git ls-files 로 실제 이름을 확인하세요)" >&2
     elif [ -f "$SKIP_REL" ]; then
         local why; why="$(head -c 400 "$SKIP_REL" 2>/dev/null | tr '\n' ' ')"
         # 소비는 항상 여기서 한다. 뒤 게이트는 위 USED_REL 주석의 시간 창으로 이어받는다.

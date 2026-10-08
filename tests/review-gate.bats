@@ -1022,6 +1022,27 @@ _block_kinds() { grep -o '"kind":"[a-z]*"' "$MANGOLOVE_DIR/efficacy/proj.jsonl" 
     [ -f "$REPO_DIR/.mangolove/.review-skip" ]
 }
 
+# 안내대로 했을 때 실어 온 내용이 우회 근거로 쓰이면 안 된다. 예전 안내(git rm --cached 후 touch)는
+# 파일을 비우지 않아, 브랜치가 적어 온 근거가 그대로 감사 기록에 남는 우회가 됐다(재현됨).
+@test "위조: 안내대로 지우고 다시 남기면 실어 온 근거가 아니라 새 근거로 우회한다" {
+    _commit_external_api
+    mkdir -p "$REPO_DIR/.mangolove"
+    echo "FORGED-REASON" > "$REPO_DIR/.mangolove/.review-skip"
+    git -C "$REPO_DIR" add -f .mangolove/.review-skip
+    git -C "$REPO_DIR" commit -qm "forged skip"
+    _gate "git push"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"git rm -f .mangolove/.review-skip"* ]]
+    [[ "$output" != *"touch"* ]]
+    git -C "$REPO_DIR" rm -qf .mangolove/.review-skip
+    run bash -c "cd '$REPO_DIR' && bash '$GATE' skip '직접 남긴 근거'"
+    [ "$status" -eq 0 ]
+    _gate "git push"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"직접 남긴 근거"* ]]
+    [[ "$output" != *"FORGED-REASON"* ]]
+}
+
 # 재현된 구멍: 우회 파일이 든 폴더를 가리키는 심볼릭 링크로 .mangolove 를 실어 오면, 추적 여부를
 # 링크 너머에서 묻지 않아 위조 마커가 우회로 받아들여졌다.
 @test "위조: 브랜치가 실어 온 폴더 링크 너머의 .review-skip 도 우회로 인정하지 않는다" {

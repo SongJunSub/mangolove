@@ -52,3 +52,9 @@ MANGOLOVE_STATUSLINE=on
 #   않았으면 커밋을 차단한다. Trivial/Small 은 아무 것도 요구하지 않으므로 사소한
 #   작업에는 무비용. 기본 on. 우회(감사됨): MANGOLOVE_SKIP_REVIEW=1
 MANGOLOVE_REVIEW_GATE=on
+
+# Resume notice (on / off): 캐시가 만료된 큰 대화를 재개할 때 재캐시 예상 비용을 한 줄로 보여준다
+#   claude 가 SessionStart 훅에 넘기는 값(경과 시간, 컨텍스트 토큰, 예상 비용)을 그대로 보여줄
+#   뿐이다. 사용자에게만 보이고 모델에는 닿지 않으며, 무엇을 하라고 권하지 않는다.
+#   예상 비용이 1달러 미만이거나 캐시가 살아 있으면 아무것도 표시하지 않는다.
+MANGOLOVE_RESUME_NOTICE=on

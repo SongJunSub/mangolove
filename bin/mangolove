@@ -59,6 +59,9 @@ MANGOLOVE_STATUSLINE=on
 # 트랙별 필수 리뷰(/simplify, /code-review, /security-review) 실행 여부를 대조하고 미실행이면
 # 커밋을 차단. Trivial/Small 은 아무 것도 요구하지 않아 사소한 작업엔 무비용. 기본 on.
 MANGOLOVE_REVIEW_GATE=on
+# 재개 안내 (on / off): 캐시가 만료된 큰 대화를 재개하면 재캐시 예상 비용을 한 줄로 보여준다.
+# 사용자에게만 보이고 모델에는 닿지 않는다. 질문도 권유도 아니다.
+MANGOLOVE_RESUME_NOTICE=on
 
 if [ -f "$MANGOLOVE_DIR/config.sh" ]; then
     if bash -n "$MANGOLOVE_DIR/config.sh" 2>/dev/null; then
@@ -563,6 +566,13 @@ do_doctor() {
         echo -e "  \033[38;5;220m△\033[0m Review gate: off (MANGOLOVE_REVIEW_GATE)"
     fi
 
+    # Resume notice
+    if ! _ml_is_off "${MANGOLOVE_RESUME_NOTICE:-on}" && [ -f "$MANGOLOVE_DIR/lib/resume-notice.sh" ]; then
+        echo -e "  \033[38;5;113m✓\033[0m Resume notice: on (캐시 만료된 대화 재개 시 재캐시 비용 표시)"
+    else
+        echo -e "  \033[38;5;220m△\033[0m Resume notice: off (MANGOLOVE_RESUME_NOTICE)"
+    fi
+
     # Status line
     if ! _ml_is_off "${MANGOLOVE_STATUSLINE:-on}" && [ -f "$MANGOLOVE_DIR/lib/statusline.sh" ]; then
         echo -e "  \033[38;5;113m✓\033[0m Status line: on (context 사용률, 비용, 모드)"
@@ -1055,6 +1065,7 @@ generate_session_settings() {
     local dod="${MANGOLOVE_DIR}/lib/dod-gate.sh"
     local statusline="${MANGOLOVE_DIR}/lib/statusline.sh"
     local review="${MANGOLOVE_DIR}/lib/review-gate.sh"
+    local resume_notice="${MANGOLOVE_DIR}/lib/resume-notice.sh"
 
     # 리뷰 게이트는 훅 두 개가 짝을 이룬다: PostToolUse(Skill) 로 "실제 실행된 스킬"을 원장에
     # 남기고, PreToolUse(Bash) 로 git push 시점에 코드가 계산한 트랙과 대조한다.
@@ -1110,6 +1121,24 @@ STOPEOF
 )
     fi
 
+    # 재개 안내: 캐시가 만료된 큰 대화를 재개할 때 재캐시 예상 비용을 사용자에게만 한 줄로
+    # 보여준다(모델에는 닿지 않는다. lib/resume-notice.sh 참조). 재개 필드는 resume, fork 에만 온다.
+    local resume_block=""
+    if ! _ml_is_off "${MANGOLOVE_RESUME_NOTICE:-on}" && [ -f "$resume_notice" ]; then
+        resume_block=$(cat << RNEOF
+,
+    "SessionStart": [
+      {
+        "matcher": "resume|fork",
+        "hooks": [
+          { "type": "command", "command": "bash \\"${resume_notice}\\"" }
+        ]
+      }
+    ]
+RNEOF
+)
+    fi
+
     # 상태줄: context 사용률, 비용, 모드 노출. MANGOLOVE_STATUSLINE=off 로 비활성(사용자 statusLine 보존).
     local statusline_block=""
     if ! _ml_is_off "${MANGOLOVE_STATUSLINE:-on}" && [ -f "$statusline" ]; then
@@ -1140,7 +1169,7 @@ ${statusline_block}
           { "type": "command", "command": "GATE_SECRET=block bash \\"${gate}\\" pretooluse" }${review_pre}
         ]
       }
-    ]${review_post}${stop_block}
+    ]${review_post}${stop_block}${resume_block}
   }
 }
 SESSIONEOF

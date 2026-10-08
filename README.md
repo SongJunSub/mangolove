@@ -137,6 +137,9 @@ mangolove audit-methodology   # 방법론 파일 감사: 섹션별 부피, 강�
 ### 상태줄 (기본 on)
 모든 `mangolove` 세션의 상태줄에 **context 사용률, 세션 비용, 메서드러지 모드**를 노출합니다(`🥭 · Opus · proj · ctx 42% · $0.12 · split`). context window 가 가장 중요한 자원이라, 사용률을 상시 눈으로 확인해 `/clear` 나 `/compact` 시점을 잡을 수 있습니다. 자체 statusLine 을 쓰면 `MANGOLOVE_STATUSLINE=off`.
 
+### 재개 안내 (기본 on)
+프롬프트 캐시가 만료된 큰 대화를 `-c`/`-r` 로 재개하면 첫 요청이 컨텍스트 전체를 다시 캐시에 씁니다. 그 예상 비용이 1달러 이상이면 재개 직후 한 줄로 보여줍니다(`MangoLove: 마지막 응답 후 1시간 30분, 프롬프트 캐시가 만료됐습니다. 첫 요청이 컨텍스트 182K 토큰을 다시 캐시에 씁니다 (예상 $1.14).`). Claude Code 가 SessionStart 훅에 넘기는 값을 그대로 보여줄 뿐이고, 사용자에게만 보이며 모델에는 닿지 않습니다. 이어갈지 끊을지는 묻지도 권하지도 않습니다. 끄기: `MANGOLOVE_RESUME_NOTICE=off`. Claude Code v2.1.251 이상에서 동작합니다.
+
 ### 커밋 트레일러: `Change-Track:`
 방법론은 에이전트가 사용한 트랙을 커밋 footer에 기록하도록 요청합니다:
 ```

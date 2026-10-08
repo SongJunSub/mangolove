@@ -442,3 +442,60 @@ SM
     [ "$(grep -cx -- '--system-prompt-snapshot' "$TEST_DIR/claude-calls")" -eq 1 ]
     [ "$(grep -c 'branch: feat/x' "$TEST_DIR/claude-calls")" -eq 2 ]
 }
+
+# ─────────────────────────────────────────────
+# doctor: claude 버전과 플러그인 검증 사유
+# ─────────────────────────────────────────────
+
+# PATH 앞에 가짜 claude 를 둔다. $1=버전, $2=plugin validate 의 종료코드(기본 0).
+_fake_claude_bin() {
+    mkdir -p "$TEST_DIR/fakebin"
+    cat > "$TEST_DIR/fakebin/claude" <<FAKE
+#!/bin/bash
+if [ "\${1:-}" = "--version" ]; then echo "$1 (Claude Code)"; exit 0; fi
+if [ "\${1:-}" = "plugin" ] && [ "\${2:-}" = "validate" ]; then
+    [ "${2:-0}" = "0" ] && exit 0
+    echo "plugin.json: name is required" >&2
+    exit ${2:-0}
+fi
+exit 0
+FAKE
+    chmod +x "$TEST_DIR/fakebin/claude"
+}
+
+@test "doctor: 게이트가 의존하는 수정보다 낮은 claude 버전을 경고한다" {
+    _fake_claude_bin 2.1.240
+    cd "$TEST_DIR"
+    run env PATH="$TEST_DIR/fakebin:$PATH" bash "$MANGOLOVE_DIR/bin/mangolove" doctor
+    [[ "$output" == *"2.1.240"* ]]
+    [[ "$output" == *"2.1.259 이상 권장"* ]]
+}
+
+@test "doctor: 권장 버전 이상이면 버전 경고가 없다" {
+    _fake_claude_bin 2.1.293
+    cd "$TEST_DIR"
+    run env PATH="$TEST_DIR/fakebin:$PATH" bash "$MANGOLOVE_DIR/bin/mangolove" doctor
+    [[ "$output" == *"2.1.293"* ]]
+    [[ "$output" != *"이상 권장"* ]]
+}
+
+@test "doctor: cc-plugin 검증이 실패하면 사유를 보여준다" {
+    _fake_claude_bin 2.1.293 1
+    mkdir -p "$MANGOLOVE_DIR/cc-plugin/.claude-plugin" "$MANGOLOVE_DIR/methodology"
+    echo '{}' > "$MANGOLOVE_DIR/cc-plugin/.claude-plugin/plugin.json"
+    echo '# core' > "$MANGOLOVE_DIR/methodology/core.md"
+    cd "$TEST_DIR"
+    run env PATH="$TEST_DIR/fakebin:$PATH" bash "$MANGOLOVE_DIR/bin/mangolove" doctor
+    [[ "$output" == *"cc-plugin: 검증 실패"* ]]
+    [[ "$output" == *"name is required"* ]]
+}
+
+@test "doctor: cc-plugin 검증이 통과하면 valid 로 보고한다" {
+    _fake_claude_bin 2.1.293 0
+    mkdir -p "$MANGOLOVE_DIR/cc-plugin/.claude-plugin" "$MANGOLOVE_DIR/methodology"
+    echo '{}' > "$MANGOLOVE_DIR/cc-plugin/.claude-plugin/plugin.json"
+    echo '# core' > "$MANGOLOVE_DIR/methodology/core.md"
+    cd "$TEST_DIR"
+    run env PATH="$TEST_DIR/fakebin:$PATH" bash "$MANGOLOVE_DIR/bin/mangolove" doctor
+    [[ "$output" == *"cc-plugin: valid"* ]]
+}

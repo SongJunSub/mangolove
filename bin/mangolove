@@ -40,6 +40,9 @@ MANGOLOVE_EFFORT=""
 MANGOLOVE_MODE=""
 MANGOLOVE_SESSION_GATES=true
 ML_RESUME=0   # `mangolove resume` 서브커맨드가 1 로 올린다 (_ml_launch 참조)
+# doctor 가 경고하는 claude 최소 권장 버전. v2.1.259 는 Stop 훅이 턴을 막은 직후 그 턴의
+# 추론이 유실되고 일부 모델에서 프롬프트 캐시를 놓치던 문제를 고쳤다(DoD 게이트가 쓰는 경로).
+ML_CLAUDE_RECOMMENDED="2.1.259"
 # Methodology delivery: split (lean core.md + on-demand cc-plugin skills) | monolith (full strict.md).
 # Default split: context 는 가장 비싼 자원이고, 상시 주입이 길수록 개별 지시의 효력이 희석된다.
 # 트랙 판정, 승인 게이트, 안전 절차는 코어에 상주하고 무거운 절차만 온디맨드로 내려간다.
@@ -440,9 +443,15 @@ do_doctor() {
 
     # Check Claude Code
     if command -v claude &> /dev/null; then
-        local cv
+        local cv cver
         cv=$(claude --version 2>/dev/null)
-        echo -e "  \033[38;5;113m✓\033[0m Claude Code: ${cv}"
+        cver=$(_ml_claude_version)
+        # 버전을 못 읽으면 경고하지 않는다(모르는 것을 낮다고 단정하지 않는다).
+        if [ -n "$cver" ] && ! _ml_version_ge "$cver" "$ML_CLAUDE_RECOMMENDED"; then
+            echo -e "  \033[38;5;220m△\033[0m Claude Code: ${cv} (${ML_CLAUDE_RECOMMENDED} 이상 권장: Stop 훅이 턴을 막은 뒤 추론이 유실되던 문제의 수정)"
+        else
+            echo -e "  \033[38;5;113m✓\033[0m Claude Code: ${cv}"
+        fi
     else
         echo -e "  \033[38;5;203m✗\033[0m Claude Code: not found"
     fi
@@ -509,10 +518,16 @@ do_doctor() {
     # Methodology delivery (monolith / split) + cc-plugin health
     echo -e "  \033[38;5;113m✓\033[0m Methodology mode: ${MANGOLOVE_METHODOLOGY_MODE:-split}"
     if [ -f "$CORE_METHODOLOGY_FILE" ] && [ -f "$CC_PLUGIN_DIR/.claude-plugin/plugin.json" ]; then
-        if command -v claude &> /dev/null && claude plugin validate "$CC_PLUGIN_DIR" &> /dev/null; then
+        # "건너뜀"과 "실패"는 다른 상태다. 한 줄로 뭉개면 깨진 플러그인이 claude 미설치처럼
+        # 보이고, claude 는 깨진 --plugin-dir 를 조용히 미로드한다. 실패면 사유를 보여준다.
+        local pv_out=""
+        if ! command -v claude &> /dev/null; then
+            echo -e "  \033[38;5;220m△\033[0m cc-plugin: present (claude 가 없어 검증 건너뜀)"
+        elif pv_out=$(claude plugin validate "$CC_PLUGIN_DIR" 2>&1); then
             echo -e "  \033[38;5;113m✓\033[0m cc-plugin: valid (core.md + skills ready for split)"
         else
-            echo -e "  \033[38;5;220m△\033[0m cc-plugin: present (validate skipped/failed)"
+            echo -e "  \033[38;5;203m✗\033[0m cc-plugin: 검증 실패 (split 세션에서 스킬이 로드되지 않습니다)"
+            printf '%s\n' "$pv_out" | grep -v '^[[:space:]]*$' | head -5 | sed 's/^/      /'
         fi
     else
         echo -e "  \033[38;5;220m△\033[0m cc-plugin/core.md: absent (split falls back to monolith)"

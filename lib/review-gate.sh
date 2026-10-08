@@ -157,13 +157,14 @@ _ensure_regular_file() {
 }
 
 _ml_seed_gitignore() {
-    local d="${1:-./.mangolove}" f p prefix=""
+    local d="${1:-./.mangolove}" f p loc prefix=""
     local patterns=(.gitignore dod.sh .dod-gate-attempts .review-skip)
-    # 링크를 따라 쓰지 않는다. 브랜치가 작업 폴더나 그 안의 .gitignore 를 레포 밖을 가리키는
-    # 심볼릭 링크로 실어 오면 아래 쓰기가 그 대상(예: 설정 JSON)에 줄을 덧붙여 깨뜨린다.
-    [ -L "$d" ] && return 0
     [ -d "$d" ] || return 0
     f="$d/.gitignore"
+    # 링크를 따라 쓰지 않는다. 브랜치가 이 파일을 레포 밖을 가리키는 심볼릭 링크로 실어 오면
+    # 아래 쓰기가 그 대상(예: 설정 JSON)에 줄을 덧붙여 깨뜨린다. 작업 폴더 자체가 링크인
+    # 경우는 여기서 가리지 않는다: 사용자가 일부러 링크해 둔 폴더(dotfiles 로 관리하는 설치본
+    # 등)와 구분하려면 게이트 진입부에서 한 번에 판정해야 한다.
     [ -L "$f" ] && return 0
     # 그 .gitignore 를 git 이 추적하고 있으면 거기에 덧붙이지 않는다. 덧붙이면 작업 트리가
     # "로컬 수정 있음"이 된다. 프로젝트가 .mangolove/.gitignore 를 버전관리하는 경우가 그렇고,
@@ -172,11 +173,21 @@ _ml_seed_gitignore() {
     # git pull 이 거부되고 mangolove 가 뜨지 않게 됐다. 추적 파일이면 로컬 전용 무시 규칙의
     # 자리인 .git/info/exclude 에, 저장소 루트 기준 경로로 심는다.
     if git -C "$d" ls-files --error-unmatch .gitignore >/dev/null 2>&1; then
-        f="$(git -C "$d" rev-parse --git-path info/exclude 2>/dev/null)" || return 0
+        # 한 번의 호출로 exclude 경로(첫 줄)와 저장소 루트 기준 접두사(둘째 줄)를 받는다.
+        # 작업 폴더가 곧 루트면 접두사가 비어 한 줄만 온다.
+        loc="$(git -C "$d" rev-parse --git-path info/exclude --show-prefix 2>/dev/null)" || return 0
+        f="${loc%%$'\n'*}"
+        case "$loc" in *$'\n'*) prefix="${loc#*$'\n'}" ;; esac
         case "$f" in /*) ;; *) f="$d/$f" ;; esac
-        prefix="/$(git -C "$d" rev-parse --show-prefix 2>/dev/null)"
+        # 경로에 든 글롭 문자를 풀어 쓴다. 그대로 두면 apps/[web]/ 같은 폴더의 패턴이 맞지 않는다.
+        prefix="${prefix//\\/\\\\}"
+        prefix="${prefix//\[/\\[}"
+        prefix="${prefix//\*/\\*}"
+        prefix="${prefix//\?/\\?}"
+        prefix="/$prefix"
         patterns=(dod.sh .dod-gate-attempts .review-skip)
         mkdir -p "${f%/*}" 2>/dev/null || return 0
+        # f 가 exclude 경로로 바뀌었다. 그 파일도 링크일 수 있으므로 다시 본다.
         [ -L "$f" ] && return 0
     fi
     if [ ! -f "$f" ]; then

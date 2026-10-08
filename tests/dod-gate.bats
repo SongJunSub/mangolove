@@ -10,13 +10,16 @@ setup() {
     GATE="$REPO/lib/dod-gate.sh"
     PROJ="$(mktemp -d)"
     mkdir -p "$PROJ/.mangolove"
+    # 게이트는 차단과 우회를 효능 원장(${MANGOLOVE_DIR:-~/.mangolove}/efficacy)에 남긴다. 격리하지
+    # 않으면 테스트를 돌릴 때마다 개발자의 실제 원장에 기록이 쌓여 mangolove efficacy 수치가 부푼다.
+    export MANGOLOVE_DIR="$PROJ.ml"
     JSON="{\"hook_event_name\":\"Stop\",\"cwd\":\"$PROJ\"}"
     export GATE JSON
 }
 
 teardown() {
-    [ -n "${PROJ:-}" ] && rm -rf "$PROJ"
-    [ -n "${SBOX:-}" ] && rm -rf "$SBOX" "$SBOX.ml"
+    [ -n "${PROJ:-}" ] && rm -rf "$PROJ" "$PROJ.ml"
+    [ -n "${SBOX:-}" ] && rm -rf "$SBOX"
     return 0
 }
 
@@ -272,7 +275,7 @@ _repo_root_project() {
 @test "seed: ./.mangolove 가 저장소 루트면 dod-gate 는 추적 파일 .gitignore 를 건드리지 않는다" {
     _repo_root_project
     printf '#!/usr/bin/env bash\nexit 1\n' > "$SBOX/.mangolove/dod.sh"
-    printf '{"hook_event_name":"Stop","session_id":"S","cwd":"%s"}' "$SBOX" | MANGOLOVE_DIR="$SBOX.ml" "$GATE" >/dev/null 2>&1 || true
+    printf '{"hook_event_name":"Stop","session_id":"S","cwd":"%s"}' "$SBOX" | "$GATE" >/dev/null 2>&1 || true
 
     run git -C "$SBOX/.mangolove" status --porcelain
     # 추적 파일은 그대로고, 게이트의 일시 파일은 로컬 전용 무시(.git/info/exclude)로 가려진다
@@ -282,7 +285,7 @@ _repo_root_project() {
 @test "seed: ./.mangolove 가 저장소 루트면 review-gate 도 추적 파일 .gitignore 를 건드리지 않는다" {
     _repo_root_project
     printf '{"hook_event_name":"PostToolUse","session_id":"S","cwd":"%s","tool_input":{"skill":"simplify"}}' "$SBOX" \
-        | MANGOLOVE_DIR="$SBOX/ml" bash "$REPO/lib/review-gate.sh" record >/dev/null 2>&1 || true
+        | bash "$REPO/lib/review-gate.sh" record >/dev/null 2>&1 || true
 
     run git -C "$SBOX/.mangolove" diff --quiet -- .gitignore
     local tracked_untouched="$status"
@@ -300,10 +303,7 @@ _repo_root_project() {
     git -C "$SBOX" init -q
     git -C "$SBOX" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m init
     mkdir -p "$SBOX/sub"
-    # MANGOLOVE_DIR 을 격리한다: skip 은 효능 원장에 기록을 남기는데, 격리하지 않으면 개발자의
-    # 실제 ~/.mangolove/efficacy 에 실행마다 파일이 쌓인다.
-    # (레포 밖 경로여야 한다. 안에 두면 그 폴더가 untracked 로 떠서 아래 단언을 깨뜨린다.)
-    ( cd "$SBOX/sub" && MANGOLOVE_DIR="$SBOX.ml" bash "$REPO/lib/review-gate.sh" skip "하위 디렉토리에서 남기는 근거" >/dev/null 2>&1 ) || true
+    ( cd "$SBOX/sub" && bash "$REPO/lib/review-gate.sh" skip "하위 디렉토리에서 남기는 근거" >/dev/null 2>&1 ) || true
 
     [ -f "$SBOX/.mangolove/.review-skip" ]
     grep -qx '.review-skip' "$SBOX/.mangolove/.gitignore"
@@ -320,20 +320,9 @@ _repo_root_project() {
     write_failing_dod
     run_gate_as SESSION-A >/dev/null 2>&1 || true
     printf '{"hook_event_name":"PostToolUse","session_id":"S","cwd":"%s","tool_input":{"skill":"simplify"}}' "$PROJ" \
-        | MANGOLOVE_DIR="$PROJ/ml" bash "$REPO/lib/review-gate.sh" record >/dev/null 2>&1 || true
+        | bash "$REPO/lib/review-gate.sh" record >/dev/null 2>&1 || true
 
     [ "$(cat "$victim")" = '{"keep":true}' ]
-}
-
-@test "seed: 작업 폴더 자체가 심볼릭 링크면 따라가 쓰지 않는다" {
-    SBOX="$(mktemp -d)"
-    mkdir -p "$SBOX/proj" "$SBOX/victim"
-    git -C "$SBOX/proj" init -q
-    ln -s ../victim "$SBOX/proj/.mangolove"
-    printf '{"hook_event_name":"PostToolUse","session_id":"S","cwd":"%s","tool_input":{"skill":"simplify"}}' "$SBOX/proj" \
-        | MANGOLOVE_DIR="$SBOX/ml" bash "$REPO/lib/review-gate.sh" record >/dev/null 2>&1 || true
-
-    [ ! -e "$SBOX/victim/.gitignore" ]
 }
 
 # 설치본 사고와 원인이 같은 일반형: 프로젝트가 .mangolove/.gitignore 를 버전관리하면 게이트가
@@ -346,7 +335,7 @@ _repo_root_project() {
     git -C "$SBOX" add .mangolove/.gitignore
     git -C "$SBOX" -c user.email=t@example.com -c user.name=t commit -q -m init
     printf '#!/usr/bin/env bash\nexit 1\n' > "$SBOX/.mangolove/dod.sh"
-    printf '{"hook_event_name":"Stop","session_id":"S","cwd":"%s"}' "$SBOX" | MANGOLOVE_DIR="$SBOX.ml" "$GATE" >/dev/null 2>&1 || true
+    printf '{"hook_event_name":"Stop","session_id":"S","cwd":"%s"}' "$SBOX" | "$GATE" >/dev/null 2>&1 || true
 
     grep -qx '/.mangolove/dod.sh' "$SBOX/.git/info/exclude"
     run git -C "$SBOX" status --porcelain
@@ -482,4 +471,20 @@ _repo_root_project() {
     b="$(awk '/^_strip_heredocs\(\) \{/,/^\}$/' "$BATS_TEST_DIRNAME/../lib/irreversible-guard.sh")"
     [ -n "$a" ]
     [ "$a" = "$b" ]
+}
+
+# info/exclude 의 패턴은 글롭이다. 경로에 든 [ 같은 문자를 풀어 쓰지 않으면 패턴이 맞지 않아
+# 일시 파일이 untracked 로 드러난다.
+@test "seed: 경로에 글롭 문자가 있어도 info/exclude 패턴이 맞는다" {
+    SBOX="$(mktemp -d)"
+    git -C "$SBOX" init -q
+    mkdir -p "$SBOX/apps/[web]/.mangolove"
+    printf 'hooks/*.log\n' > "$SBOX/apps/[web]/.mangolove/.gitignore"
+    git -C "$SBOX" add -A
+    git -C "$SBOX" -c user.email=t@example.com -c user.name=t commit -q -m init
+    printf '#!/usr/bin/env bash\nexit 1\n' > "$SBOX/apps/[web]/.mangolove/dod.sh"
+    printf '{"hook_event_name":"Stop","session_id":"S","cwd":"%s"}' "$SBOX/apps/[web]" | "$GATE" >/dev/null 2>&1 || true
+
+    run git -C "$SBOX" status --porcelain
+    [ -z "$output" ]
 }

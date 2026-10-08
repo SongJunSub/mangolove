@@ -462,11 +462,13 @@ _other_repo() {
     grep -qx '.review-skip' "$REPO_DIR/.mangolove/.gitignore"
     grep -qx 'dod.sh' "$REPO_DIR/.mangolove/.gitignore"
     # 원장과 커버리지는 이제 .git/ 아래라 무시 목록에 없어야 한다(브랜치가 실어 올 수 없다).
-    ! grep -qx '.review-ledger' "$REPO_DIR/.mangolove/.gitignore"
+    run grep -qx '.review-ledger' "$REPO_DIR/.mangolove/.gitignore"
+    [ "$status" -eq 1 ]
     # 자기 자신도 무시해야 사용자 레포에 요청하지 않은 파일이 생기지 않는다.
     grep -qx '.gitignore' "$REPO_DIR/.mangolove/.gitignore"
     # 통째 무시(*)는 안 된다: .mangolove/hooks/ 는 버전관리 감사 대상이다.
-    ! grep -qx '\*' "$REPO_DIR/.mangolove/.gitignore"
+    run grep -qx '\*' "$REPO_DIR/.mangolove/.gitignore"
+    [ "$status" -eq 1 ]
     [ -z "$(git -C "$REPO_DIR" status --porcelain -- .mangolove)" ]
 }
 

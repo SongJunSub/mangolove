@@ -12,12 +12,17 @@ setup() {
 @test "docs: README has no stale fixed-phase workflow claims (methodology is 4-track)" {
     # 방법론은 이미 Change Impact Score 기반 4트랙으로 이동했다.
     # "5-phase"/"4-phase"/"5단계 품질 워크플로우"는 옛 모델의 드리프트 잔재다.
-    ! grep -qi "5-phase" "$REPO/README.md"
-    ! grep -qi "4-phase" "$REPO/README.md"
-    ! grep -q "5단계 품질 워크플로우" "$REPO/README.md"
+    run grep -qi "5-phase" "$REPO/README.md"
+    [ "$status" -eq 1 ]
+    run grep -qi "4-phase" "$REPO/README.md"
+    [ "$status" -eq 1 ]
+    run grep -q "5단계 품질 워크플로우" "$REPO/README.md"
+    [ "$status" -eq 1 ]
     # 3인 리뷰는 Large 트랙 전용: '자동으로 ... 3인 병렬 리뷰' 무조건 흐름 표현은 드리프트다.
-    ! grep -qE 'automatically follows.*3-agent parallel review' "$REPO/README.md"
-    ! grep -qE '자동으로.*3인 병렬 리뷰' "$REPO/README.md"
+    run grep -qE 'automatically follows.*3-agent parallel review' "$REPO/README.md"
+    [ "$status" -eq 1 ]
+    run grep -qE '자동으로.*3인 병렬 리뷰' "$REPO/README.md"
+    [ "$status" -eq 1 ]
     # 옛 고정 5-Phase 리뷰 루프 헤더의 재발 방지 (방법론은 4-track)
     ! grep -qE '^### (Phase|[0-9]단계)' "$REPO/README.md"
 }
@@ -99,8 +104,10 @@ setup() {
     # F1 회귀: 실행 불가능한 의무는 "돌리지 않았습니다" 보고로 귀결된다.
     # 실존 이름은 simplify / code-review / security-review 이고, 계획은 EnterPlanMode 도구다.
     local sp="$REPO/prompts/system-prompt.md"
-    ! grep -qE 'Skill\("plan"\)|Skill\("review"\)' "$sp"
-    ! grep -qE '^\| *[0-9]?단계?:? *분석 *\| *`/plan`' "$sp"
+    run grep -qE 'Skill\("plan"\)|Skill\("review"\)' "$sp"
+    [ "$status" -eq 1 ]
+    run grep -qE '^\| *[0-9]?단계?:? *분석 *\| *`/plan`' "$sp"
+    [ "$status" -eq 1 ]
     grep -q 'EnterPlanMode' "$sp"
     grep -q 'Skill("code-review")' "$sp"
 }

@@ -123,8 +123,10 @@ _mirror() {
 }
 
 @test "split: heavy procedures moved OUT of core into skills" {
-    ! grep -q '#### API 변경 (신규/수정) 템플릿' "$REPO/methodology/core.md"
-    ! grep -q '### 8단계: 병렬 독립 코드 리뷰' "$REPO/methodology/core.md"
+    run grep -q '#### API 변경 (신규/수정) 템플릿' "$REPO/methodology/core.md"
+    [ "$status" -eq 1 ]
+    run grep -q '### 8단계: 병렬 독립 코드 리뷰' "$REPO/methodology/core.md"
+    [ "$status" -eq 1 ]
     grep -q '#### API 변경 (신규/수정) 템플릿' "$REPO/cc-plugin/skills/mangolove-spec/SKILL.md"
     grep -q '### 8단계: 병렬 독립 코드 리뷰' "$REPO/cc-plugin/skills/mangolove-large-review/SKILL.md"
 }

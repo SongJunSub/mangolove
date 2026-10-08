@@ -211,7 +211,8 @@ teardown() {
     grep -qF 'review-gate.sh\" record' "$on"
     grep -q '"matcher": "Skill"' "$on"
     python3 -c "import json; json.load(open('$off'))"
-    ! grep -q "review-gate.sh" "$off"
+    run grep -q "review-gate.sh" "$off"
+    [ "$status" -eq 1 ]
     ! grep -q "PostToolUse" "$off"
 }
 

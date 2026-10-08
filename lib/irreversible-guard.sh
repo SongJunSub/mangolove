@@ -3,9 +3,9 @@
 # MangoLove: Irreversible/Destructive Command Guard (Claude PreToolUse)
 #
 # 되돌리기 어려운 명령을 실행 전에 차단한다 (exit 2 = 도구 호출 차단).
-# strict.md dry-run 게이트 철학("AI가 DB를 9초 만에 삭제한 사례는 dry-run 부재가
-# 아니라 확인 단계 부재가 원인")을, 어조가 아니라 명령 실행 경로상의 결정적
-# 관문으로 인코딩한다. 심층 방어 1겹(정규식이 못 잡는 변형은 잔여 위험).
+# strict.md dry-run 게이트의 원칙(dry-run 은 계획을, 확인 단계는 실행 의사를 검증하며
+# 서로를 대신하지 못한다)을, 어조가 아니라 명령 실행 경로상의 결정적 관문으로
+# 인코딩한다. 심층 방어 1겹(정규식이 못 잡는 변형은 잔여 위험).
 #
 # stdin = Claude PreToolUse JSON. 의도적 실행: MANGOLOVE_ALLOW_DANGER=1 (감사 대상).
 # ─────────────────────────────────────────────

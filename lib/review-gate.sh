@@ -745,7 +745,8 @@ _arg_tokens() {
 # 명령치환이 끝의 개행을 떼어내 "전체"를 뜻하던 값과 바이트가 같아진다. 그러면 그 한 파일만
 # 인정하려던 호출이 **범위 전체를 인정**한다(실증됨). 경로는 배열로 담아 그 부류를 구조적으로
 # 없앤다. (이 파일의 _analyze 도 같은 이유로 전역을 쓴다: 명령치환으로 부르지 않는다.)
-COVERAGE_MODE=""      # all | none | paths
+COVERAGE_MODE=""      # all | none | paths | commit
+COVERAGE_COMMIT=""    # commit 일 때만: 게이트가 알려 준 "리뷰 뒤 변경" 커밋
 COVERAGE_PATHS=()     # paths 일 때만 채운다. 이 트리 루트 기준 경로("." 은 전체)
 COVERAGE_TREES=()     # 인자가 짚은 **다른** git 작업 트리: "<루트><탭><그 루트 기준 경로>"
 ML_TOP=""             # 이 트리의 루트(물리 경로). 호출자가 구해 두면 다시 묻지 않는다
@@ -783,6 +784,14 @@ _coverage_scope() {
             --*=*) _coverage_remote; return 0 ;;          # --pr=1952
             --*) continue ;;                               # 산문 속 --cached)
         esac
+        # 게이트가 알려 준 "리뷰 뒤 변경" 커밋을 짚은 호출은 그 커밋이 보여 주는 내용을 본 것이다. 해시를
+        # 모르는 낱말로 흘려 작업 트리 전체를 인정하면 두 가지가 틀린다(둘 다 재현됨): 차단과 리뷰 사이에 더
+        # 쓴 코드가 아무도 보지 않은 채 통과하고, 다른 브랜치를 올리다 막힌 경우에는 리뷰를 돌려도 그
+        # 브랜치의 내용이 영영 인정되지 않는다. 다른 낱말(PR 같은)이 섞여 있어도 이 커밋이 범위를 정한다.
+        if [[ "$clean" =~ ^[0-9a-f]{40}$ ]] && _is_delta_commit "$clean"; then
+            COVERAGE_MODE="commit"; COVERAGE_COMMIT="$clean"; COVERAGE_PATHS=(); COVERAGE_TREES=()
+            return 0
+        fi
         # 확정 신호는 경로 검사보다 먼저 본다. 뒤집으면 이름이 겹치는 로컬 경로가 원격 참조를 가린다
         # (브랜치에 1952/ 를 심어 두면 /code-review 1952 가 그걸 봤다고 기록된다).
         case "$raw" in *://*) _coverage_remote; return 0 ;; esac
@@ -870,6 +879,13 @@ _coverage_scope() {
     # 강도뿐이거나 산문뿐이다 = 스킬 기본 범위(워킹트리 전체 diff)를 본 것이다.
     COVERAGE_MODE="all"
     return 0
+}
+
+# 이 게이트가 만든 "리뷰 뒤 변경" 커밋인가(_review_delta). 제목으로 가린다. 제목은 누구나 흉내 낼 수
+# 있지만 얻는 것이 없다: 인정되는 것은 그 커밋이 부모와 달라진 내용, 곧 리뷰어가 git show 로 보는 것뿐이다.
+DELTA_SUBJECT="mangolove review gate: 리뷰 뒤 변경"
+_is_delta_commit() {
+    [ "$(git log -1 --format=%s "$1" 2>/dev/null)" = "$DELTA_SUBJECT" ]
 }
 
 # 산문에 붙은 것을 떼어 낸 실재하는 경로를 HIT 에 둔다(없으면 빈 값). 입력은 _arg_tokens 의 경로형이다
@@ -971,6 +987,16 @@ _snapshot_covered() {
         grep -vxF "$skill" "$NOSCOPE_REL" > "$NOSCOPE_REL.tmp" 2>/dev/null || true
         mv -f "$NOSCOPE_REL.tmp" "$NOSCOPE_REL" 2>/dev/null || rm -f "$NOSCOPE_REL.tmp" 2>/dev/null || true
     fi
+    # 리뷰 뒤 변경 커밋을 짚었으면 그 커밋이 부모와 달라진 파일의 올리는 쪽 내용만 적는다.
+    if [ "$COVERAGE_MODE" = "commit" ]; then
+        git -c core.quotePath=false diff-tree -r --no-renames "${COVERAGE_COMMIT}^" "$COVERAGE_COMMIT" 2>/dev/null \
+            | awk -F'\t' -v s="$skill" '{
+                  split($1, a, " ")
+                  print s "\t" (a[4] ~ /^0+$/ ? "_absent" : a[4]) "\t" $2
+              }' >> "$COVERED_REL" 2>/dev/null || true
+        _covered_dedupe
+        return 0
+    fi
     # 짚은 경로가 있으면 git pathspec 으로 넘긴다. 손으로 "이 파일이 이 경로 아래인가"를
     # 짜면 후행 슬래시(lib/ -> lib//*)에서 아무것도 안 맞는 식으로 조용히 틀린다.
     # git 은 정확한 경로 또는 그 디렉토리 하위만 매칭하며(li 가 lib/ 를 오염시키지 않는다),
@@ -1049,15 +1075,18 @@ EOF
     printf '%s\n' "$files" | grep -vxF -f <(printf '%s' "$present" | sed "s|^$top/||") 2>/dev/null \
         | awk -v s="$skill" 'NF {print s "\t_absent\t" $0}' >> "$COVERED_REL" 2>/dev/null || true
 
-    # 여러 스킬이 같은 내용을 보므로 중복이 쌓인다. 집합으로 유지한다.
-    # sort 가 실패하면 원본을 남긴다: 커버리지 유실은 곧 불필요한 차단이다.
-    if [ -f "$COVERED_REL" ]; then
-        if sort -u "$COVERED_REL" 2>/dev/null > "$COVERED_REL.tmp"; then
-            mv -f "$COVERED_REL.tmp" "$COVERED_REL" 2>/dev/null || true
-        fi
-        rm -f "$COVERED_REL.tmp" 2>/dev/null || true
-    fi
+    _covered_dedupe
     return 0
+}
+
+# 여러 스킬이 같은 내용을 보므로 중복이 쌓인다. 집합으로 유지한다.
+# sort 가 실패하면 원본을 남긴다: 커버리지 유실은 곧 불필요한 차단이다.
+_covered_dedupe() {
+    [ -f "$COVERED_REL" ] || return 0
+    if sort -u "$COVERED_REL" 2>/dev/null > "$COVERED_REL.tmp"; then
+        mv -f "$COVERED_REL.tmp" "$COVERED_REL" 2>/dev/null || true
+    fi
+    rm -f "$COVERED_REL.tmp" 2>/dev/null || true
 }
 
 # 범위의 git diff --raw 줄들: ":<기준 모드> <올리는 모드> <기준 blob> <올리는 blob> <상태>\t<경로>[\t<새 경로>]".
@@ -1071,7 +1100,8 @@ _range_raw() {
 }
 
 # 범위(_range_raw 출력) 중 **이 스킬이** 아직 보지 않은 파일마다 한 줄:
-#   "<기준 모드>\t<올리는 모드>\t<기준 blob>\t<올리는 blob>\t<경로>\t<이 스킬이 본 blob 들>"
+#   "<기준 모드>\t<올리는 모드>\t<기준 blob>\t<올리는 blob>\t<기준 쪽 경로>\t<경로>\t<이 스킬이 본 blob 들>"
+# 기준 쪽 경로는 이름을 바꾼 파일에서만 경로와 다르다.
 # 커버리지 파일은 awk 안에서 한 번만 읽는다(파일마다 grep 을 부르지 않는다).
 _uncovered_plan() {
     printf '%s\n' "$2" | awk -F'\t' -v skill="$1" -v cov="$COVERED_REL" '
@@ -1090,7 +1120,7 @@ _uncovered_plan() {
             # 본 판본은 보통 파일 자리에만 쓴다(링크나 서브모듈 자리에 blob 을 끼우면 뜻 없는 차이가 나온다).
             cands = (a[2] ~ /^100/ || a[2] == "000000") ? seen[path] : ""
             if (!((sha "\t" path) in covered))
-                print substr(a[1], 2) "\t" a[2] "\t" a[3] "\t" a[4] "\t" path "\t" cands
+                print substr(a[1], 2) "\t" a[2] "\t" a[3] "\t" a[4] "\t" $2 "\t" path "\t" cands
         }'
 }
 
@@ -1103,10 +1133,10 @@ _uncovered_plan() {
 #
 # 그 차이를 커밋 하나로 만든다. 판정은 그 커밋을 impact-score 로 재는 것이라 기준이 따로 생기지 않고,
 # 차단 안내는 `git show <커밋>` 으로 "무엇을 다시 봐야 하는가"를 짚을 수 있다.
-#   부모 커밋 = 미검토 파일마다 이 스킬이 본 판본. 본 적 없는 파일은 범위의 기준 쪽 판본이다
-#               (그 파일은 지금처럼 전체 변경으로 잰다. 기준에 없던 새 파일이면 싣지 않는다)
+#   부모 커밋 = 미검토 파일마다 이 스킬이 본 판본. 본 적 없는 파일은 범위의 기준 쪽 판본을 기준 쪽
+#               경로에 둔다(그 파일은 지금처럼 전체 변경으로 잰다. 기준에 없던 새 파일이면 싣지 않는다)
 #   자식 커밋 = 같은 파일들의 올리는 내용
-# 본 판본이 여럿이면 지금 내용에 **더해진 줄이 가장 적은** 판본을 쓴다(같으면 지워진 줄이 적은 쪽).
+# 본 판본이 여럿이면 지금 내용에 **더해진 줄이 가장 적은** 판본을 쓴다.
 # 점수표가 보는 것이 더해진 줄이기 때문이다. 줄 수 합계로 고르면, 두 번째 리뷰 뒤에 지우기만 한
 # 파일에서 첫 판본이 뽑혀 두 번째 리뷰가 이미 본 줄이 미검토분으로 나온다. 어느 판본이든 이 스킬이
 # 본 내용이라, 잘못 골라도 더 막을 뿐 덜 막지는 않는다.
@@ -1126,46 +1156,77 @@ DELTA_COMMIT=""
 # 직전 호출의 입력. 같으면 DELTA_COMMIT 이 그대로 그 결과다(빈 값 = 못 만든다).
 DELTA_KEY=""
 _review_delta() {
-    local plan="$1" partial="${2:-0}" have smode dmode ssha dsha path cands c n ok best ba bd base mode
-    local la="" lb="" idx ta tb ca
+    local plan="$1" partial="${2:-0}" have smode dmode ssha dsha spath path cands c ok best mode
+    local la="" lb="" idx ta tb ca i j cmpa="" cmpb="" picks=""
+    local -a oks
     [ -n "$STATE_DIR" ] && [ -n "$plan" ] || return 1
     if [ "$partial$plan" = "$DELTA_KEY" ]; then [ -n "$DELTA_COMMIT" ]; return; fi
     DELTA_KEY="$partial$plan"; DELTA_COMMIT=""
-    have="$(printf '%s\n' "$plan" | cut -f6 | tr ' ' '\n' \
+    have="$(printf '%s\n' "$plan" | cut -f7 | tr ' ' '\n' \
         | git cat-file --batch-check 2>/dev/null | awk '$2 == "blob" { print $1 }')"
     [ -n "$have" ] || [ "$partial" = 1 ] || return 1
 
-    while IFS=$'\t' read -r smode dmode ssha dsha path cands; do
+    # 파일마다 객체가 남아 있는 판본을 추린다. 여럿이고 비교할 지금 내용이 있으면 비교 목록에 싣는다:
+    # 판본과 지금 내용을 "<줄 번호>_<순번>" 이름으로 두 트리에 나란히 둔다.
+    i=0
+    while IFS=$'\t' read -r smode dmode ssha dsha spath path cands; do
         [ -n "$path" ] || continue
         ok=""
         for c in $cands; do
             case $'\n'"$have"$'\n' in *$'\n'"$c"$'\n'*) ok="$ok $c" ;; esac
         done
-        best="${ok# }"
-        case "$best/$dsha" in
+        ok="${ok# }"; oks[i]="$ok"
+        case "$ok/$dsha" in
             *" "*/*[!0]*)
-                best=""; ba=0; bd=0
+                j=0
                 for c in $ok; do
-                    n="$(git diff --numstat "$c" "$dsha" 2>/dev/null \
-                        | awk '{ print ($1 == "-" ? 0 : $1) " " ($2 == "-" ? 0 : $2) }')"
-                    n="${n:-0 0}"
-                    if [ -z "$best" ] || [ "${n% *}" -lt "$ba" ] \
-                        || { [ "${n% *}" -eq "$ba" ] && [ "${n#* }" -lt "$bd" ]; }; then
-                        best="$c"; ba="${n% *}"; bd="${n#* }"
-                    fi
+                    cmpa="${cmpa}100644 blob ${c}"$'\t'"${i}_${j}"$'\n'
+                    cmpb="${cmpb}100644 blob ${dsha}"$'\t'"${i}_${j}"$'\n'
+                    j=$((j + 1))
                 done ;;
-            # 지워진 파일은 비교할 지금 내용이 없다. 어느 판본이든 같으니 첫 판본을 쓴다.
-            *" "*) best="${best%% *}" ;;
         esac
-        if [ -n "$best" ]; then
-            base="$best"
-            mode="$dmode"; [ "$mode" != "000000" ] || mode="$smode"
-        else
-            base="$ssha"; mode="$smode"
-        fi
+        i=$((i + 1))
+    done <<EOF
+$plan
+EOF
+    # 판본마다 git diff 를 부르면 판본 수만큼 fork 가 난다. 커버리지는 지워지지 않아 자주 고치는 파일은
+    # 판본이 계속 는다(판본 40개짜리 파일 둘이면 push 훅이 0.7초에서 2.7초). 두 트리를 한 번에 비교한다.
+    if [ -n "$cmpa" ]; then
+        ta="$(printf '%s' "$cmpa" | git mktree 2>/dev/null)"
+        tb="$(printf '%s' "$cmpb" | git mktree 2>/dev/null)"
+        [ -z "$ta" ] || [ -z "$tb" ] || picks="$(git diff-tree -r --numstat "$ta" "$tb" 2>/dev/null | awk '
+            {
+                split($3, k, "_"); a = ($1 == "-" ? 0 : $1 + 0)
+                if (!(k[1] in ba) || a < ba[k[1]]) { ba[k[1]] = a; bj[k[1]] = k[2] }
+            }
+            END { for (x in bj) print x "_" bj[x] }')"
+    fi
+
+    i=0
+    while IFS=$'\t' read -r smode dmode ssha dsha spath path cands; do
+        [ -n "$path" ] || continue
+        best="${oks[i]}"
+        case "$best" in
+            *" "*)
+                j=0
+                for c in $best; do
+                    case $'\n'"$picks"$'\n' in *$'\n'"${i}_${j}"$'\n'*) best="$c"; break ;; esac
+                    j=$((j + 1))
+                done
+                # 비교에 오르지 않았으면(지워진 파일은 비교할 내용이 없다) 첫 판본을 쓴다. 어느 것이든 같다.
+                best="${best%% *}" ;;
+        esac
         # blob 이 0 으로만 차 있으면 그쪽에는 파일이 없다(기준에 없던 새 파일, 지금은 지워진 파일).
-        case "$base" in *[!0]*) la="${la}${mode} ${base}"$'\t'"${path}"$'\n' ;; esac
+        if [ -n "$best" ]; then
+            mode="$dmode"; [ "$mode" != "000000" ] || mode="$smode"
+            la="${la}${mode} ${best}"$'\t'"${path}"$'\n'
+        else
+            # 본 적 없는 파일은 범위의 기준 쪽 판본을 **기준 쪽 경로에** 둔다. 이름을 바꾼 파일을 새 경로에
+            # 두면 차이가 비어, 경로로 매기는 신호(auth/ 로 옮긴 파일)가 사라진다(재현됨).
+            case "$ssha" in *[!0]*) la="${la}${smode} ${ssha}"$'\t'"${spath}"$'\n' ;; esac
+        fi
         case "$dsha" in *[!0]*) lb="${lb}${dmode} ${dsha}"$'\t'"${path}"$'\n' ;; esac
+        i=$((i + 1))
     done <<EOF
 $plan
 EOF
@@ -1181,7 +1242,7 @@ EOF
     rm -f "$idx.a" "$idx.b" "$idx.a.lock" "$idx.b.lock" 2>/dev/null
     [ -n "$ta" ] && [ -n "$tb" ] || return 1
     ca="$(_delta_commit_tree "$ta" -m "mangolove review gate: 리뷰가 본 판본")" || return 1
-    DELTA_COMMIT="$(_delta_commit_tree "$tb" -p "$ca" -m "mangolove review gate: 리뷰 뒤 변경")"
+    DELTA_COMMIT="$(_delta_commit_tree "$tb" -p "$ca" -m "$DELTA_SUBJECT")"
     [ -n "$DELTA_COMMIT" ]
 }
 
@@ -1351,7 +1412,7 @@ _analyze() {
     #   - 리뷰를 한 번 돌린 뒤 계속 새로 써서 push
     for s in $REVIEW_REQUIRED; do
         paths=(); seen=0; plan="$(_uncovered_plan "$s" "$raw")"
-        while IFS=$'\t' read -r _ _ _ _ p c; do
+        while IFS=$'\t' read -r _ _ _ _ _ p c; do
             [ -n "$p" ] || continue
             paths+=("$p"); [ -z "$c" ] || seen=1
         done <<EOF

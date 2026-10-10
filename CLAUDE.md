@@ -11,8 +11,10 @@
 - 예외: 되돌리기 어려운 작업(force-push, 공유 이력 재작성 등)은 이 규약에 포함되지 않는다. 사전 확인.
 
 ## 검증 명령
-- 테스트: `bats tests/`
-- 린트: `shellcheck -x bin/mangolove lib/*.sh install.sh uninstall.sh`
+- 테스트: `tests/run.sh` (파일 단위 병렬). DoD 스크립트(`dod.sh`)에도 이것을 쓴다
+  - 파일 하나만 볼 때는 `bats tests/<파일>`, 직렬 전체는 `bats tests/` (약 5분)
+  - 테스트 파일을 더 나눌지는 `tests/run.sh` 머리말의 기준으로 판단한다
+- 린트: `shellcheck -x bin/mangolove lib/*.sh install.sh uninstall.sh tests/run.sh`
 - 플러그인: `claude plugin validate --strict cc-plugin`
 
 ## 문장부호 규약은 코드가 강제한다

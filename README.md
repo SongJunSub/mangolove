@@ -198,15 +198,16 @@ mangolove doctor
 ## 테스트
 
 ```bash
-bats tests/                              # 전체 스위트
-shellcheck -x bin/mangolove lib/*.sh     # 린트
+tests/run.sh                             # 전체 스위트 (파일 단위 병렬)
+bats tests/dod-gate.bats                 # 파일 하나만
+shellcheck -x bin/mangolove lib/*.sh install.sh uninstall.sh tests/run.sh   # 린트
 ```
 
 ## 기여
 
 1. 이 저장소를 Fork
 2. 기능 브랜치 생성
-3. `bats tests/`와 `shellcheck -x bin/mangolove lib/*.sh` 통과 확인
+3. `tests/run.sh`와 위 린트 명령 통과 확인
 4. Pull Request 생성
 
 ## 라이선스

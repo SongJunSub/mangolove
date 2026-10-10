@@ -48,6 +48,9 @@
 #
 # 트랙이 Trivial/Small 이면 아무 것도 요구하지 않는다: 사소한 변경에 무거운 절차를
 # 씌우지 않는 것이 이 게이트의 절반이다(과대 판정도 실패다).
+# 리뷰 뒤에 고친 내용에도 같은 기준을 쓴다: 리뷰가 본 판본과 지금 내용의 차이만 따로 재서, 그 차이가
+# Trivial/Small 이면 다시 요구하지 않는다(_review_delta). 리뷰 지적을 반영할 때마다 원래 트랙으로 다시
+# 막으면 재리뷰가 끝나지 않는다.
 #
 # 계약:
 #   review-gate.sh record       stdin=PostToolUse JSON. 항상 exit 0 (게이트가 작업을 막지 않는다).
@@ -990,9 +993,12 @@ _snapshot_covered() {
     [ -z "$files" ] && return 0
 
     # 존재하는 것과 사라진 것을 가른다(루프는 builtin 만 쓴다: fork 없음).
+    # 심볼릭 링크는 해시하지 않는다. git hash-object 는 링크를 따라가므로, 아래의 -w 가 링크 너머
+    # (레포 밖일 수 있다)의 내용을 .git 에 복사하게 된다. 링크는 따라간 내용의 해시가 HEAD 의 blob
+    # (링크 문자열)과 맞을 수 없어 인정된 적이 없으므로, 빼도 판정은 달라지지 않는다.
     present=""
     while IFS= read -r f; do
-        [ -f "$top/$f" ] && present="${present}${top}/${f}
+        [ -f "$top/$f" ] && [ ! -L "$top/$f" ] && present="${present}${top}/${f}
 "
     done <<EOF
 $files
@@ -1000,8 +1006,11 @@ EOF
 
     # 존재하는 파일은 --stdin-paths 로 **한 번에** 해시한다. 파일마다 git hash-object 를
     # 부르면 스킬 호출마다 파일 수만큼 fork 가 난다.
+    # -w 로 객체를 남긴다: 리뷰 뒤에 고친 파일의 미검토분을 "리뷰가 본 판본과의 차이"로 재려면
+    # (_review_delta) 그 판본을 꺼낼 수 있어야 한다. 커밋 전에 리뷰하고 고친 뒤 커밋하는 흐름에서는
+    # 본 판본이 어떤 커밋에도 없다. 객체는 ref 에 걸리지 않아 push 되지 않고 git gc 가 치운다.
     if [ -n "$present" ]; then
-        hashes="$(printf '%s' "$present" | git hash-object --stdin-paths 2>/dev/null)"
+        hashes="$(printf '%s' "$present" | git hash-object -w --stdin-paths 2>/dev/null)"
         # 줄 수가 어긋나면 paste 가 해시와 경로를 엇갈리게 붙여 **틀린 커버리지**를 적는다.
         # (검사와 해싱 사이에 파일이 사라지면 실제로 난다.) 그럴 땐 통째로 버린다:
         # 커버리지가 비면 불필요한 차단이지만, 어긋나면 조용한 통과다.
@@ -1027,15 +1036,20 @@ EOF
     return 0
 }
 
-# 범위의 "<HEAD blob 해시>\t<경로>" 줄들. git diff --raw 가 dst blob sha 를 그대로 주므로
-# 한 번의 fork 로 끝난다(파일마다 git rev-parse HEAD:<경로> 를 부르면 파일 수만큼 fork).
-_range_signature() {
+# 범위의 git diff --raw 줄들: ":<기준 모드> <올리는 모드> <기준 blob> <올리는 blob> <상태>\t<경로>[\t<새 경로>]".
+_range_raw() {
     # core.quotePath=false 가 필수다. 기본값이면 git 이 비-ASCII 경로를 "\355\225\234..." 로
     # C-quote 해서 내보내고, 그 문자열을 pathspec 으로 넘기면 아무 파일도 매칭되지 않는다.
     # 그러면 잔여가 0건이 되어 **미검토 한글 파일이 조용히 통과한다**(실측으로 확인된 우회).
     local sp=()
     [ "${#SCOPE_PATHS[@]}" -gt 0 ] && sp=(-- "${SCOPE_PATHS[@]}")
-    git -c core.quotePath=false diff --raw --abbrev=40 "$1" ${sp[@]+"${sp[@]}"} 2>/dev/null | awk -F'\t' '
+    git -c core.quotePath=false diff --raw --abbrev=40 "$1" ${sp[@]+"${sp[@]}"} 2>/dev/null
+}
+
+# 범위의 "<HEAD blob 해시>\t<경로>" 줄들. git diff --raw 가 dst blob sha 를 그대로 주므로
+# 한 번의 fork 로 끝난다(파일마다 git rev-parse HEAD:<경로> 를 부르면 파일 수만큼 fork).
+_range_signature() {
+    _range_raw "$1" | awk -F'\t' '
         {
             split($1, a, " ")
             sha = a[4]
@@ -1046,7 +1060,8 @@ _range_signature() {
 }
 
 # 위 서명 중 **이 스킬이** 아직 보지 않은 것의 경로만 출력한다.
-# 파일 단위로 판정한다: 리뷰 후 한 줄만 고쳐도 그 파일 전체가 미검토다(안전한 쪽으로 틀린다).
+# 파일 단위로 가른다: 리뷰 후 한 줄만 고쳐도 그 파일은 이 목록에 오른다. 그 파일의 미검토분을 얼마로
+# 볼지는 _analyze 가 정한다(범위 전체 변경으로 재고, 그걸로 막히면 _review_delta 로 본 판본과의 차이를 잰다).
 # 커버리지 파일은 awk 안에서 한 번만 읽는다(파일마다 grep 을 부르지 않는다).
 _uncovered_paths() {
     printf '%s\n' "$2" | awk -v skill="$1" -v cov="$COVERED_REL" '
@@ -1054,6 +1069,119 @@ _uncovered_paths() {
         NF {
             if (!((skill "\t" $0) in seen)) { p = $0; sub(/^[^\t]*\t/, "", p); print p }
         }'
+}
+
+# ── 리뷰 뒤 변경만 따로 잰다 ────────────────────────────────────
+# 미검토 파일을 범위 전체 변경으로만 재면(_analyze 의 기본), 리뷰가 이미 본 파일을 한 줄 고쳐도 그
+# 파일이 원래 실었던 변경 전체가 다시 미검토분이 된다. 큰 작업에서는 리뷰 지적을 반영할 때마다 원래
+# 트랙으로 다시 막혔고, 그때마다 우회하거나 전체를 재리뷰했다(원장: 2026-09-12 이후 리뷰 우회 34건,
+# 그중 한 브랜치가 14건. 재현: 파일 12개 Large 작업을 리뷰한 뒤 주석 한 줄에 세 스킬 전부 재요구).
+# 리뷰가 본 판본이 남아 있는 파일의 미검토분은 그 판본과 지금 내용의 차이다.
+#
+# 그 차이를 커밋 하나로 만든다. 판정은 그 커밋을 impact-score 로 재는 것이라 기준이 따로 생기지 않고,
+# 차단 안내는 `git show <커밋>` 으로 "무엇을 다시 봐야 하는가"를 짚을 수 있다.
+#   부모 커밋 = 미검토 파일마다 이 스킬이 본 판본(여럿이면 지금 내용과 줄 차이가 가장 작은 것).
+#               본 적 없는 파일은 범위의 기준 쪽 판본이다(그 파일은 지금처럼 전체 변경으로 잰다)
+#   자식 커밋 = 같은 파일들의 올리는 내용
+# 본 판본은 스킬마다 따로 본다. 섞으면 한 스킬이 본 것으로 다른 스킬의 리뷰가 면제된다.
+# 객체는 어떤 ref 에도 걸리지 않아 push 되지 않고 git gc 가 치운다. 날짜와 작성자를 고정하므로 입력이
+# 같으면 커밋도 같다(스킬끼리 점수를 재사용하고, 판정을 되풀이해도 객체가 늘지 않는다).
+#
+# 호출: _review_delta <스킬> <범위> <미검토 경로>...   (범위의 경로 제한은 호출자의 SCOPE_PATHS 그대로)
+# 반환 0 이면 DELTA_COMMIT 에 자식 커밋. 이 스킬이 본 판본이 하나도 남아 있지 않으면 1 이고, 그때는
+# 따로 잴 차이가 없으므로 호출자가 기본 판정을 유지한다(이 기능 전의 기록, gc 가 치운 판본 포함).
+DELTA_COMMIT=""
+# 직전 호출의 plan 과 그 결과. 스킬들은 대개 같은 판본을 봤으므로 plan 이 같고, plan 은 내용 주소라
+# 같으면 결과도 같다. 커밋을 다시 짓지 않는다(스킬마다 fork 9번).
+DELTA_PLAN=""; DELTA_PLAN_COMMIT=""
+_review_delta() {
+    local skill="$1" ref="$2"; shift 2
+    local plan have smode dmode ssha dsha path cands c n ok best bestn base mode
+    local la="" lb="" used=0 idx ta tb ca
+    DELTA_COMMIT=""
+    [ -n "$STATE_DIR" ] || return 1
+    # plan: 미검토 경로마다 "<기준 모드>\t<올리는 모드>\t<기준 blob>\t<올리는 blob>\t<경로>\t<이 스킬이 본 blob 들>"
+    plan="$( { printf '%s\n' "$@"; printf '\034\n'; _range_raw "$ref"; } \
+        | awk -F'\t' -v skill="$skill" -v cov="$COVERED_REL" '
+            BEGIN {
+                while ((getline line < cov) > 0) {
+                    split(line, f, "\t")
+                    if (f[1] == skill && f[2] != "_absent") seen[f[3]] = seen[f[3]] " " f[2]
+                }
+            }
+            $0 == "\034" { raw = 1; next }
+            !raw { want[$0] = 1; next }
+            {
+                split($1, a, " ")
+                path = ($3 != "" ? $3 : $2)
+                if (path in want) print substr(a[1], 2) "\t" a[2] "\t" a[3] "\t" a[4] "\t" path "\t" seen[path]
+            }')"
+    [ -n "$plan" ] || return 1
+    if [ "$plan" = "$DELTA_PLAN" ]; then
+        DELTA_COMMIT="$DELTA_PLAN_COMMIT"
+        [ -n "$DELTA_COMMIT" ]; return
+    fi
+    DELTA_PLAN="$plan"; DELTA_PLAN_COMMIT=""
+    have="$(printf '%s\n' "$plan" | cut -f6 | tr ' ' '\n' | grep . | sort -u \
+        | git cat-file --batch-check 2>/dev/null | awk '$2 == "blob" { print $1 }')"
+    [ -n "$have" ] || return 1
+
+    while IFS=$'\t' read -r smode dmode ssha dsha path cands; do
+        [ -n "$path" ] || continue
+        ok=""
+        # 본 판본은 보통 파일로만 쓴다. 링크나 서브모듈 자리에 blob 을 끼우면 뜻 없는 차이가 나온다.
+        case "$dmode" in
+            100*|000000)
+                for c in $cands; do
+                    case $'\n'"$have"$'\n' in *$'\n'"$c"$'\n'*) ok="$ok $c" ;; esac
+                done ;;
+        esac
+        best="${ok# }"
+        case "$best" in
+            *" "*)
+                best=""; bestn=0
+                for c in $ok; do
+                    # 지워진 파일은 비교할 지금 내용이 없어 출력이 빈다. 그때는 첫 판본을 쓴다.
+                    n="$(git diff --numstat "$c" "$dsha" 2>/dev/null | awk '{ print ($1 == "-" ? 0 : $1 + $2) }')"
+                    n="${n:-0}"
+                    if [ -z "$best" ] || [ "$n" -lt "$bestn" ]; then best="$c"; bestn="$n"; fi
+                done ;;
+        esac
+        if [ -n "$best" ]; then
+            base="$best"; used=1
+            mode="$dmode"; [ "$mode" != "000000" ] || mode="$smode"
+        else
+            base="$ssha"; mode="$smode"
+        fi
+        # blob 이 0 으로만 차 있으면 그쪽에는 파일이 없다(기준에 없던 새 파일, 지금은 지워진 파일).
+        case "$base" in *[!0]*) la="${la}${mode} ${base}"$'\t'"${path}"$'\n' ;; esac
+        case "$dsha" in *[!0]*) lb="${lb}${dmode} ${dsha}"$'\t'"${path}"$'\n' ;; esac
+    done <<EOF
+$plan
+EOF
+    [ "$used" = 1 ] || return 1
+
+    # 트리는 임시 인덱스로 만든다(하위 폴더가 있는 경로를 git mktree 로 쌓으려면 재귀가 필요하다).
+    mkdir -p "$STATE_DIR" 2>/dev/null || return 1
+    idx="$STATE_DIR/.review-delta.$$"
+    ta=""; tb=""
+    if printf '%s' "$la" | GIT_INDEX_FILE="$idx.a" git update-index --index-info 2>/dev/null \
+        && printf '%s' "$lb" | GIT_INDEX_FILE="$idx.b" git update-index --index-info 2>/dev/null; then
+        ta="$(GIT_INDEX_FILE="$idx.a" git write-tree 2>/dev/null)"
+        tb="$(GIT_INDEX_FILE="$idx.b" git write-tree 2>/dev/null)"
+    fi
+    rm -f "$idx.a" "$idx.b" "$idx.a.lock" "$idx.b.lock" 2>/dev/null
+    [ -n "$ta" ] && [ -n "$tb" ] || return 1
+    ca="$(_delta_commit_tree "$ta" -m "mangolove review gate: 리뷰가 본 판본")" || return 1
+    DELTA_COMMIT="$(_delta_commit_tree "$tb" -p "$ca" -m "mangolove review gate: 리뷰 뒤 변경")" || DELTA_COMMIT=""
+    DELTA_PLAN_COMMIT="$DELTA_COMMIT"
+    [ -n "$DELTA_COMMIT" ]
+}
+
+# 사용자 정보가 설정되지 않은 환경(CI)에서도 만들어지도록 작성자를 직접 준다.
+_delta_commit_tree() {
+    GIT_AUTHOR_DATE='@0 +0000' GIT_COMMITTER_DATE='@0 +0000' \
+        git -c user.name=mangolove -c user.email=mangolove@localhost commit-tree "$@" </dev/null 2>/dev/null
 }
 
 # 플러그인 스킬은 "<plugin>:<skill>" 로 들어온다(code-review:code-review).
@@ -1172,10 +1300,15 @@ REVIEW_TRACK=""; REVIEW_JSON=""; REVIEW_REQUIRED=""; REVIEW_MISSING=""; REVIEW_R
 #   stale   = 보긴 했는데 그 뒤에 코드를 더 썼다 (가장 흔하다. 이걸 scope 와 섞으면
 #             "커버리지 판정이 엄격한가"를 그 수치로 판단할 수 없다)
 REVIEW_BLOCK_KIND=""
+# 리뷰 뒤 변경만 따로 재서 통과시킨 스킬이 있으면 그 사실 한 줄(_review_delta). 통과는 조용히 넘기지 않는다.
+REVIEW_DELTA_NOTE=""
+# 차단 목록에 리뷰 뒤 변경 커밋을 실었는가. 안내 문구가 갈린다(그 변경만 다시 보라 / 예전 문구).
+REVIEW_DELTA_SHOWN=""
 _analyze() {
     local ref="${1:-}" json tr s missing="" detail="" p sp=()
     local sig total paths=() key rj rt rreq cache_key="" cache_rt="" cache_rreq=""
-    REVIEW_BLOCK_KIND=""
+    local dj dn="" drt="" dreq="" dcache=""
+    REVIEW_BLOCK_KIND=""; REVIEW_DELTA_NOTE=""; REVIEW_DELTA_SHOWN=""
     # 범위와 경로 제한(SCOPE_PATHS)은 호출자가 _push_scope 로 정한다. 여기서 다시 구하지 않는다.
     [ -z "$ref" ] && return 1
     REVIEW_RANGE="$ref"
@@ -1224,6 +1357,34 @@ _analyze() {
             *) continue ;;
         esac
 
+        # 막기 전에, 이 스킬이 본 판본과 지금 내용의 차이만 따로 잰다. 기준은 위와 같은 required_skills 다.
+        # 위 판정이 통과시킨 것은 여기 오지 않으므로, 이 단계 때문에 전보다 엄격해지는 경우는 없다.
+        if _review_delta "$s" "$ref" "${paths[@]}"; then
+            if [ "$DELTA_COMMIT" != "$dcache" ]; then
+                dj="$(bash "$IMPACT" score "$DELTA_COMMIT" 2>/dev/null)" || dj=""
+                dcache=""
+                if [ -n "$dj" ]; then
+                    tr="$(_track_and_required "$dj")"
+                    drt="${tr%%	*}"; dreq="${tr#*	}"; dn="$(_json_field "$dj" files)"
+                    dcache="$DELTA_COMMIT"
+                fi
+            fi
+            if [ -n "$dcache" ]; then
+                case " $dreq " in
+                    *" $s "*) ;;
+                    *)
+                        case "$REVIEW_DELTA_NOTE" in
+                            *"$dcache"*) ;;
+                            *) REVIEW_DELTA_NOTE="${REVIEW_DELTA_NOTE}  리뷰 뒤 변경은 파일 ${dn}개, 그 변경만의 트랙은 ${drt}: 다시 리뷰를 요구하지 않습니다 (git show ${dcache})
+" ;;
+                        esac
+                        continue ;;
+                esac
+            fi
+        else
+            dcache=""
+        fi
+
         missing="$missing $s"
         # 사유는 엄격한 순으로 덮어쓴다: missing > scope > stale.
         if ! grep -qxF "$s" "$LEDGER_REL" 2>/dev/null; then
@@ -1233,8 +1394,14 @@ _analyze() {
         else
             [ -n "$REVIEW_BLOCK_KIND" ] || REVIEW_BLOCK_KIND="stale"            # 보고 나서 더 썼다
         fi
-        detail="${detail}  - /${s}: 이 스킬이 보지 않은 파일 ${#paths[@]}개 (그 자체로 ${rt})
+        if [ -n "$dcache" ]; then
+            REVIEW_DELTA_SHOWN=1
+            detail="${detail}  - /${s}: 이 스킬이 보지 않은 변경이 파일 ${dn}개 (그 변경만으로 ${drt}). 보기: git show ${dcache}
 "
+        else
+            detail="${detail}  - /${s}: 이 스킬이 보지 않은 파일 ${#paths[@]}개 (그 자체로 ${rt})
+"
+        fi
     done
     REVIEW_MISSING="${missing# }"
     REVIEW_DETAIL="$detail"
@@ -1326,12 +1493,19 @@ _emit_block() {
                 echo "강도만 주거나(/code-review high) 이 트리의 경로를 짚어 다시 돌리세요."
                 ;;
             *)
-                echo "스킬은 이 내용을 봤지만 그 뒤에 코드가 더 들어왔습니다."
-                echo "델타가 사소하면 근거를 남기고 스스로 우회하세요. 이것도 묻지 마세요."
+                if [ -n "$REVIEW_DELTA_SHOWN" ]; then
+                    echo "스킬이 본 뒤에 들어온 변경이 그것만으로 리뷰 대상입니다."
+                    echo "그 변경만 다시 리뷰하세요. 범위 전체를 다시 돌리지 않습니다: 이미 본 내용에서 새 지적을 찾는"
+                    echo "회차는 끝나지 않습니다. 위 목록의 커밋을 스킬 인자로 짚습니다(예: /code-review <커밋>)."
+                    echo "다시 볼 필요가 없다고 판단하면 근거를 남기고 스스로 우회하세요. 이것도 묻지 마세요."
+                else
+                    echo "스킬은 이 내용을 봤지만 그 뒤에 코드가 더 들어왔습니다."
+                    echo "델타가 사소하면 근거를 남기고 스스로 우회하세요. 이것도 묻지 마세요."
+                fi
                 echo "  방법 1: Write 도구로 ${SKIP_REL} 파일에 근거를 적는다"
                 echo "          (권한이 필요 없어 실행 중인 세션에서도 바로 됩니다)"
                 echo "  방법 2: cd \"$PWD\" && mangolove review skip \"<무엇을 리뷰했고 델타가 무엇인지>\""
-                echo "델타가 사소하지 않으면 다시 돌리는 편이 낫습니다."
+                [ -n "$REVIEW_DELTA_SHOWN" ] || echo "델타가 사소하지 않으면 다시 돌리는 편이 낫습니다."
                 ;;
         esac
         echo "부족분 확인: mangolove review status"
@@ -1353,6 +1527,13 @@ _judge_rev() {
     if [ -z "$REVIEW_MISSING" ]; then
         # 통과. 원장은 여기서 지우지 않는다: push 가 실제로 성공했는지 알 수 없기 때문이다.
         [ -z "$REVIEW_REQUIRED" ] || echo "MangoLove review gate: ${REVIEW_TRACK} 필수 리뷰 충족 (${REVIEW_REQUIRED})" >&2
+        # 리뷰 뒤 변경을 따로 재서 넘긴 것은 "강제할 수 있었으나 넘긴 시점"이다. 이 빈도가 안 보이면
+        # 그 판정이 느슨한지 알 방법이 없다. 두 훅(에이전트, 터미널)이 이어 도는 push 는 각자 한 번씩 적는다.
+        if [ -n "$REVIEW_DELTA_NOTE" ]; then
+            printf '%s' "$REVIEW_DELTA_NOTE" >&2
+            local rec="$GATE_DIR/efficacy-recorder.sh"
+            if [ -f "$rec" ]; then bash "$rec" record-skip review "delta" 2>/dev/null || true; fi
+        fi
         return 0
     fi
     _emit_block
@@ -1522,6 +1703,7 @@ do_status() {
         echo "  판정: BLOCK, 부족: ${REVIEW_MISSING}"
         printf '%s' "${REVIEW_DETAIL}"
     fi
+    printf '%s' "${REVIEW_DELTA_NOTE}"
 }
 
 main() {

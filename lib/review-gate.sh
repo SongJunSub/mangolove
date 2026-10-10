@@ -758,7 +758,7 @@ _coverage_remote() { COVERAGE_MODE="none"; COVERAGE_TREES=(); }
 _coverage_scope() {
     local args root raw clean path abs t pre d leaf re
     local elsewhere=0 here=0 saw_pr=0 saw_num=0 prev="" refs=""
-    COVERAGE_MODE=""; COVERAGE_PATHS=(); COVERAGE_TREES=(); REF_CUR=""; REF_UP=""; REF_FROM="-"
+    COVERAGE_MODE=""; COVERAGE_COMMIT=""; COVERAGE_PATHS=(); COVERAGE_TREES=(); REF_CUR=""; REF_UP=""; REF_FROM="-"
     args="$(_json_unescape "${1:-}")"
     [ -z "${args//[[:space:]]/}" ] && { COVERAGE_MODE="all"; return 0; }
     root="${ML_TOP:-$(git rev-parse --show-toplevel 2>/dev/null)}"
@@ -787,10 +787,11 @@ _coverage_scope() {
         # 게이트가 알려 준 "리뷰 뒤 변경" 커밋을 짚은 호출은 그 커밋이 보여 주는 내용을 본 것이다. 해시를
         # 모르는 낱말로 흘려 작업 트리 전체를 인정하면 두 가지가 틀린다(둘 다 재현됨): 차단과 리뷰 사이에 더
         # 쓴 코드가 아무도 보지 않은 채 통과하고, 다른 브랜치를 올리다 막힌 경우에는 리뷰를 돌려도 그
-        # 브랜치의 내용이 영영 인정되지 않는다. 다른 낱말(PR 같은)이 섞여 있어도 이 커밋이 범위를 정한다.
+        # 브랜치의 내용이 영영 인정되지 않는다. 이 트리의 범위는 이 커밋이 정한다(루프 뒤에서 확정한다).
+        # 함께 짚은 다른 작업 트리의 경로는 그 트리 몫으로 그대로 모은다.
         if [[ "$clean" =~ ^[0-9a-f]{40}$ ]] && _is_delta_commit "$clean"; then
-            COVERAGE_MODE="commit"; COVERAGE_COMMIT="$clean"; COVERAGE_PATHS=(); COVERAGE_TREES=()
-            return 0
+            COVERAGE_COMMIT="$clean"
+            continue
         fi
         # 확정 신호는 경로 검사보다 먼저 본다. 뒤집으면 이름이 겹치는 로컬 경로가 원격 참조를 가린다
         # (브랜치에 1952/ 를 심어 두면 /code-review 1952 가 그걸 봤다고 기록된다).
@@ -869,6 +870,8 @@ _coverage_scope() {
         fi
     done < <(_arg_tokens "$args")
 
+    # 리뷰 뒤 변경 커밋을 짚었으면 아래의 산문 추정(PR 낱말 등)보다 그것이 앞선다.
+    if [ -n "$COVERAGE_COMMIT" ]; then COVERAGE_MODE="commit"; COVERAGE_PATHS=(); return 0; fi
     # PR 낱말과 숫자 낱말의 공존("크스-1952 관련 PR 검토")은 산문 추정이라 다른 대상 신호로만 쓴다.
     [ "$saw_pr" = 1 ] && [ "$saw_num" = 1 ] && elsewhere=1
     # 이 트리를 가리키는 지시어가 있으면 다른 트리 경로는 맥락이다. 그 트리에 리뷰 기록을 남기지 않는다:

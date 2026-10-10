@@ -72,6 +72,24 @@ load review_gate_helper
     [ "$status" -eq 0 ]
 }
 
+@test "차이 커밋과 다른 작업 트리를 함께 짚으면 둘 다 기록한다" {
+    # 한 호출이 여러 대상을 보는 일이 흔하다. 차이 커밋이 있다고 다른 트리 몫을 버리면 그 레포가 막힌다.
+    _other_repo
+    _commit_external_api_in "$OTHER"
+    _reviewed_work
+    _add_external_call "$REPO_DIR/client.js" v2
+    _commit_all "new call after review"
+    _gate "git push"
+    [ "$status" -eq 2 ]
+    local sha; sha="$(_delta_commit "$output")"
+    [ -n "$sha" ]
+    _run_all_reviews "$sha 와 $OTHER 의 변경"
+    _gate "git push"
+    [ "$status" -eq 0 ]
+    _gate "git -C $OTHER push -u origin main"
+    [ "$status" -eq 0 ]
+}
+
 @test "제목만 흉내 낸 커밋을 짚어도 그 커밋이 보여 주지 않는 내용은 인정하지 않는다" {
     _work
     local fake

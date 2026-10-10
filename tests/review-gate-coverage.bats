@@ -59,7 +59,7 @@ load review_gate_helper
 }
 
 @test "status: 범위가 아닌 ref 는 거짓 PASS 대신 거부한다" {
-    # _range_signature 는 A...B 만 이해한다. sha 를 넘기면 서명이 비어 모든 스킬이
+    # _range_raw 는 A...B 만 이해한다. sha 를 넘기면 서명이 비어 모든 스킬이
     # 충족으로 보이고 "필수 리뷰: simplify code-review / 판정: PASS" 라는 모순이 났다.
     _commit_external_api
     run bash -c "cd '$REPO_DIR' && bash '$GATE' status HEAD"

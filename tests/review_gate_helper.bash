@@ -111,3 +111,42 @@ _other_repo() {
 }
 
 _block_kinds() { grep -o '"kind":"[a-z]*"' "$MANGOLOVE_DIR/efficacy/proj.jsonl" 2>/dev/null | tail -1; }
+
+# ── 리뷰 뒤 변경 판정 테스트(review-gate-delta*.bats)의 준비 코드 ──────────────
+
+# 외부 호출이 든 작업(Medium: client.js 와 seed.txt)을 커밋한다. 리뷰 뒤 client.js 를 한 줄만 고쳐도
+# 그 파일의 범위 전체 변경에는 외부 호출이 있어, 차이를 따로 재지 않으면 다시 막힌다.
+_work() {
+    echo "seed v2" > "$REPO_DIR/seed.txt"
+    _commit_external_api
+}
+_reviewed_work() { _work; _run_all_reviews; }
+
+# 파일 11개를 만든다(커밋하지 않는다). 위험 신호가 없어도 파일 수만으로 Medium 이 되는 크기다.
+_eleven_files() {
+    local i
+    for i in $(seq 1 11); do echo "export const F$i = $i" > "$REPO_DIR/${1:-mod}$i.js"; done
+}
+
+# 같은 작업에 파일 11개를 더한 Large 작업.
+_reviewed_large_work() { _eleven_files; _reviewed_work; }
+
+_commit_all() {
+    git -C "$REPO_DIR" add -A
+    git -C "$REPO_DIR" commit -qm "$1"
+}
+
+# 리뷰 뒤에 주석 한 줄만 고쳐 커밋한다(그 차이만으로는 Trivial). $1 은 고칠 파일.
+_review_fix() {
+    echo "// 타임아웃은 호출부가 정한다" >> "$REPO_DIR/${1:-client.js}"
+    _commit_all "review fix"
+}
+
+_delta_skips() {
+    local f="$MANGOLOVE_DIR/efficacy/proj.jsonl"
+    [ -f "$f" ] || { echo 0; return 0; }
+    grep -c '"type":"skip","phase":"review","kind":"delta"' "$f" || true
+}
+
+# 차단 안내가 알려 준 "리뷰 뒤 변경" 커밋.
+_delta_commit() { printf '%s\n' "$1" | sed -n 's/.*git show \([0-9a-f]\{40\}\).*/\1/p' | head -1; }

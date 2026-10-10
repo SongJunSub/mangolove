@@ -57,7 +57,10 @@ _message() {
 
 @test "resume-notice: 출력은 ASCII 뿐이다 (UTF-8 이 아닌 로케일에서도 사라지지 않는다)" {
     command -v python3 >/dev/null 2>&1 || skip "needs python3"
-    run bash -c "printf '%s' '$(_payload resume 5400 182340 true 1.1396)' | LC_ALL=en_US.ISO8859-1 bash '$HOOK'"
+    # 로케일 이름에 기대지 않는다. en_US.ISO8859-1 은 macOS 에는 있고 CI 의 우분투에는 없어서,
+    # bash 가 낸 경고가 출력에 섞여 이 테스트만 CI 에서 떨어졌다. 파이썬의 출력 인코딩을 직접
+    # latin-1 로 고정하면 어디서나 같은 조건이 된다: 한글을 그대로 찍으면 인코딩 오류로 출력이 빈다.
+    run bash -c "printf '%s' '$(_payload resume 5400 182340 true 1.1396)' | LC_ALL=C PYTHONIOENCODING=latin-1 bash '$HOOK'"
     [ "$status" -eq 0 ]
     [ -n "$output" ]
     [[ "$(_message)" == *"1시간 30분"* ]]

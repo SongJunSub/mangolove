@@ -131,7 +131,7 @@ mangolove audit-methodology   # 방법론 파일 감사: 섹션별 부피, 강�
 - **커밋 게이트**: 스테이징된 변경에서 시크릿(+선택적 lint/test)을 스캔해 발견 시 **커밋을 차단**.
 - **비가역 명령 가드**: force-push, 위험 루트의 `rm -rf`, 파괴적 SQL/Mongo, `kubectl delete`, `terraform destroy` 를 실행 전 차단. 의도된 실행: `MANGOLOVE_ALLOW_DANGER=1`(감사 대상).
 - **DoD 게이트**(기본 on): Stop 훅이 완료 직전 `./.mangolove/dod.sh`(모델이 외부화한 실행형 DoD)를 검증해, **통과 전에는 턴을 끝내지 못하게** 차단. 자기채점이 아니라 코드로 닫는 검증 루프. DoD 를 외부화하지 않은 턴은 즉시 통과하므로 idle 비용이 없습니다. DoD 는 **처음 평가한 세션의 소유**라, 같은 프로젝트의 다른 세션은 남의 `dod.sh` 로 차단되지 않습니다(안내 한 줄 내고 통과). 같은 DoD 를 `MANGOLOVE_DOD_MAX_ATTEMPTS`(기본 3) 회, DoD 를 바꿔 가며 그 3배를 시도해도 미통과면 무한루프 방지로 해제되고, 해제 뒤에도 `dod.sh` 는 근거로 남습니다(재실행 없음). 새 DoD 를 쓰면 재무장합니다. 끄기: `MANGOLOVE_DOD_GATE=off`.
-- **리뷰 게이트**(기본 on): `git push` 시점에 이 push 로 원격에 처음 가는 커밋이 더하는 변경의 `track_floor`를 코드로 계산해, **Medium 이상인데 트랙별 필수 리뷰가 그 내용을 보지 않았으면 push를 차단**. 실행 여부의 근거는 모델의 자기보고가 아니라 PostToolUse(Skill) 훅이 남긴 원장, 즉 도구 호출 사실입니다. Trivial/Small 은 아무 것도 요구하지 않아 사소한 작업에는 무비용. 끄기: `MANGOLOVE_REVIEW_GATE=off`, 우회(감사됨): `MANGOLOVE_SKIP_REVIEW=1`.
+- **리뷰 게이트**(기본 on): `git push` 시점에 이 push 로 원격에 처음 가는 커밋이 더하는 변경의 `track_floor`를 코드로 계산해, **Medium 이상인데 트랙별 필수 리뷰가 그 내용을 보지 않았으면 push를 차단**. 실행 여부의 근거는 모델의 자기보고가 아니라 PostToolUse(Skill) 훅이 남긴 원장, 즉 도구 호출 사실입니다. Trivial/Small 은 아무 것도 요구하지 않아 사소한 작업에는 무비용. 리뷰 뒤에 고친 내용은 리뷰가 본 판본과의 차이만 따로 재서, 그 차이가 Trivial/Small 이면 다시 요구하지 않고 Medium 이상이면 그 변경만 담은 커밋을 알려 줍니다(그 커밋만 다시 리뷰). 끄기: `MANGOLOVE_REVIEW_GATE=off`, 우회(감사됨): `MANGOLOVE_SKIP_REVIEW=1`.
 
 차단된 건은 로컬 효능 원장에 기록돼 `mangolove efficacy`가 무엇을 잡았는지 보고합니다. 게이트가 강제하지 않고 넘긴 건(1회 우회, 다른 세션 소유의 DoD, 시도 상한 해제)도 따로 집계돼 게이트가 얼마나 자주 손을 떼는지 함께 보여줍니다. 두 수치는 합산하지 않습니다: 통과를 차단으로 세면 효능이 부풀어 판단 근거가 사라집니다.
 

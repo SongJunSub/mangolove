@@ -25,7 +25,13 @@ jobs:
   test:
     name: Run Tests
     runs-on: ${{ matrix.os }}
+    # 멈춘 테스트 하나가 기본 한도(6시간)까지 러너를 잡지 않게 한다. 정상 실행은 몇 분이다.
+    # 실행기는 파일이 끝날 때마다 한 줄을 찍는다. 한도에 걸리면 줄이 없는 파일이 멈춘 파일이다.
+    timeout-minutes: 15
     strategy:
+      # 한쪽이 떨어져도 다른 쪽은 끝까지 돌린다. 켜 두면 우분투가 먼저 떨어질 때마다 macOS 가
+      # 취소돼, 한 달 동안 macOS 결과를 한 번도 보지 못했다.
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
 
@@ -51,7 +57,7 @@ jobs:
             export PATH="$(brew --prefix)/bin:$PATH"
           fi
           echo "bash: $(bash --version | head -1)"
-          bats tests/
+          tests/run.sh
 
   plugin-validate:
     name: Plugin manifest
@@ -98,3 +104,4 @@ jobs:
           shellcheck -x lib/*.sh
           shellcheck -x install.sh
           shellcheck -x uninstall.sh
+          shellcheck -x tests/run.sh

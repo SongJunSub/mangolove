@@ -118,6 +118,35 @@ setup() {
     grep -q '필요하시면 지금 돌리겠습니다' "$REPO/methodology/strict.md"
 }
 
+@test "methodology: 리뷰 발견 처리와 종료 조건이 코어에 상주한다" {
+    # 회귀: 리뷰 발견을 전부 고치고, 고칠 때마다 전체를 다시 리뷰해 끝나지 않던 루프
+    # (구현 40분에 리뷰와 반영 2시간 10분). 온디맨드 스킬에만 두면 Medium 트랙에서 로드되지 않는다.
+    local core="$REPO/methodology/core.md"
+    grep -q '### 리뷰 발견 처리와 종료 조건' "$core"
+    grep -qF '범위 전체를 보는 리뷰는 **한 번**이다' "$core"
+    grep -qF '| Minor | 고치지 않는다.' "$core"
+    grep -q 'mangolove review status' "$core"
+}
+
+@test "methodology: 발견을 전부 고치거나 고칠 때마다 재리뷰하라는 문장이 없다" {
+    # "Minor 는 보고만" 과 충돌하던 문장들이다. 하나라도 돌아오면 에이전트는 더 넓은 쪽을 따른다.
+    run grep -n '발견된 이슈를 모두 수정' "$REPO/methodology/strict.md"
+    [ "$status" -eq 1 ]
+    run grep -n '수정 → 재리뷰 → Dashboard' "$REPO/methodology/strict.md"
+    [ "$status" -eq 1 ]
+    run grep -n '수정을 제안하면 즉시 반영' "$REPO/prompts/system-prompt.md"
+    [ "$status" -eq 1 ]
+    run grep -rn '통과할 때까지 반복' "$REPO/methodology/strict.md" "$REPO/prompts/modes"
+    [ "$status" -eq 1 ]
+}
+
+@test "boundary: 방법론이 말하는 게이트의 종료 판정이 코드에 있다" {
+    # 방법론은 "리뷰 뒤 변경이 Trivial/Small 이면 게이트가 통과시킨다"고 약속한다.
+    # 그 판정이 사라지면 문서는 끝나지 않는 재리뷰를 다시 지시하는 셈이 된다.
+    grep -q '^_review_delta()' "$REPO/lib/review-gate.sh"
+    grep -q 'record-skip review "delta"' "$REPO/lib/review-gate.sh"
+}
+
 @test "methodology: 트랙 판정을 mangolove impact 로 확정하도록 배선돼 있다" {
     # F3 회귀: 결정적 계산기가 있는데 모델이 표를 보고 암산하면 과대 판정이 나온다.
     grep -q '트랙 판정은 암산이 아니라' "$REPO/methodology/strict.md"

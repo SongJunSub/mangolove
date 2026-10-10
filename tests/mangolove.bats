@@ -470,6 +470,39 @@ SM
     [ "$(tr '\n' '|' < "$TEST_DIR/claude-calls")" = "--settings|/tmp/s.json|--system-prompt-snapshot|off|-c|<<END>>|--settings|/tmp/s.json|<<END>>|" ]
 }
 
+# 예전에는 -c 가 0 이 아닌 무엇으로 끝나든 새 대화를 열었다. 이어가던 세션이 오류로 끝나면
+# 빈 새 세션이 떠서 무슨 일이 있었는지 가려졌다. "곧바로 1" 만 이어갈 대화가 없다는 뜻이다.
+# $1 = -c 호출에서 claude 가 할 일(셸 코드). 호출은 claude-calls 에 남는다.
+_resume_with_claude() {
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'
+      claude() {
+          if [ \"\${1:-}\" = '--version' ]; then echo '2.1.293 (Claude Code)'; return 0; fi
+          { printf '%s\n' \"\$@\"; echo '<<END>>'; } >> '$TEST_DIR/claude-calls'
+          case \" \$* \" in *' -c '*) $1 ;; esac
+          return 0
+      }
+      CLAUDE_ARGS=(--settings /tmp/s.json); ML_RESUME=1; ML_RESUME_QUICK_EXIT_SECS=1
+      _ml_launch"
+}
+
+@test "launch: 한동안 돌다가 1 로 끝난 세션 뒤에는 새 대화를 열지 않는다" {
+    _resume_with_claude 'sleep 2; return 1'
+    [ "$status" -eq 1 ]
+    [ "$(grep -c '<<END>>' "$TEST_DIR/claude-calls")" = "1" ]
+}
+
+@test "launch: -c 가 1 이 아닌 코드로 끝나면 새 대화를 열지 않고 그 코드를 돌려준다" {
+    _resume_with_claude 'return 3'
+    [ "$status" -eq 3 ]
+    [ "$(grep -c '<<END>>' "$TEST_DIR/claude-calls")" = "1" ]
+}
+
+@test "launch: 이어가기가 낸 오류 출력을 숨기지 않는다" {
+    _resume_with_claude 'echo "unknown option: --nope" >&2; return 2'
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"unknown option: --nope"* ]]
+}
+
 @test "session-settings: 재개 안내는 환경변수로도 끌 수 있다" {
     # 기본값을 무조건 대입하면 `MANGOLOVE_RESUME_NOTICE=off mangolove -c` 가 듣지 않는다.
     local out="$TEST_DIR/env-off.json"

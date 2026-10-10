@@ -171,14 +171,26 @@ Continue from where you left off. Summarize the previous session state and ask w
 
 # 마지막 단계: CLAUDE_ARGS 를 실어 claude 를 띄운다.
 #
-# `mangolove resume`(ML_RESUME=1)은 직전 대화를 -c 로 잇는다. 이을 대화가 없으면 -c 가
-# 실패하므로 새 대화를 연다(종료코드로 판단하는 것은 예전부터의 동작이다).
+# `mangolove resume`(ML_RESUME=1)은 직전 대화를 -c 로 잇고, 이어갈 대화가 없으면 새 대화로
+# 시작한다. 없다는 판단은 claude 가 한다: "No conversation found to continue" 를 찍고 곧바로
+# 1 로 끝난다(v2.1.294 실측. 문서에 없는 동작이고, 미리 알아내는 공식 방법도 없다). 그래서
+# 1 로 곧바로 끝났을 때만 새 대화를 연다.
+# 예전에는 0 이 아닌 모든 종료에 새 대화를 열었다. 한동안 이어가던 세션이 오류로 끝나도 빈 새
+# 세션이 떠서 무슨 일이 있었는지 가려졌다. 이제 그런 종료는 종료코드를 그대로 돌려준다.
+# stderr 도 숨기지 않는다. 그 안내 문구는 stdout 으로 나와 숨겨서 얻는 것이 없었고, 진짜
+# 오류(모르는 플래그, 설정 오류)만 가려졌다.
+ML_RESUME_QUICK_EXIT_SECS=10
+
 _ml_launch() {
     if [ "${ML_RESUME:-0}" = "1" ]; then
         _ml_snapshot_args -c "$@"
-        claude "${CLAUDE_ARGS[@]}" "${ML_SNAPSHOT_ARGS[@]}" -c "$@" 2>/dev/null \
-            || claude "${CLAUDE_ARGS[@]}" "$@"
-        return
+        local rc=0 began=$SECONDS
+        claude "${CLAUDE_ARGS[@]}" "${ML_SNAPSHOT_ARGS[@]}" -c "$@" || rc=$?
+        if [ "$rc" -eq 1 ] && [ $((SECONDS - began)) -lt "$ML_RESUME_QUICK_EXIT_SECS" ]; then
+            claude "${CLAUDE_ARGS[@]}" "$@"
+            return
+        fi
+        return "$rc"
     fi
     _ml_snapshot_args "$@"
     claude "${CLAUDE_ARGS[@]}" "${ML_SNAPSHOT_ARGS[@]}" "$@"

@@ -514,9 +514,9 @@ _repo_with_base() {
     printf 'const a = await axios.get("https://api.example.com/a")\n' > feat.js
     _mkcommit "$r" "feat" >/dev/null
     git checkout -q upstream
-    git merge -q --no-ff -m "merge feat" feat
+    git -c user.email=t@t.com -c user.name=t merge -q --no-ff -m "merge feat" feat
     git checkout -q -b mine feat
-    git merge -q --no-ff -m "merge feat into mine" feat 2>/dev/null || true
+    git -c user.email=t@t.com -c user.name=t merge -q --no-ff -m "merge feat into mine" feat 2>/dev/null || true
     echo mine > mine.txt
     _mkcommit "$r" "mine" >/dev/null
     run bash "$(IMPACT)" score 'upstream...HEAD'
@@ -534,7 +534,7 @@ _repo_with_base() {
     _mkcommit "$r" "rogue" >/dev/null
     git checkout -q upstream
     git checkout -q -b mine
-    git merge -q --no-ff -m "merge rogue" rogue
+    git -c user.email=t@t.com -c user.name=t merge -q --no-ff -m "merge rogue" rogue
     run bash "$(IMPACT)" score 'upstream...HEAD'
     [ "$status" -eq 0 ]
     # 미검토 코드는 머지로 숨지 못한다.

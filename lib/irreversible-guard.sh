@@ -124,6 +124,8 @@ has 'git[[:space:]]+reset[[:space:]]+--hard' && block "git reset --hard"
 # 4개 조건을 명령 전체가 아니라 각 rm '세그먼트'에서만 확인: 위 git push 검사와 동일 원리.
 # 무관한 토큰(다른 명령의 -r, jq '//=' 의 '/', 설정 경로의 $HOME 등)이 합쳐져 생기던 오탐 제거.
 # 진짜 'rm -rf $HOME' / 'rm -rf /' 는 그 세그먼트에서 3조건이 모두 참이므로 그대로 차단.
+# \$HOME, \$PWD 는 변수 이름이 거기서 끝날 때만 본다. \$HOMEP, \$PWD2, \$HOMEBREW_CACHE 는 다른
+# 변수다(임의의 변수는 원래 막지 않는다). 이름 앞부분이 같다는 이유로 막던 것이 실사용을 막았다.
 #
 # 단 하나의 예외: OS 가 정의한 임시 디렉토리의 **하위** 경로만 지우는 경우.
 # 근거는 두 가지다. (1) /tmp 계열은 OS 가 재부팅마다 비우는 영역이라 그 아래를 지우는 것은
@@ -153,7 +155,7 @@ while IFS= read -r rm_seg; do
     [ -z "$rm_seg" ] && continue
     printf '%s' "$rm_seg" | grep -qiE '(--recursive|[[:space:]]-[a-z]*r)' || continue
     printf '%s' "$rm_seg" | grep -qiE '(--force|[[:space:]]-[a-z]*f)'     || continue
-    printf '%s' "$rm_seg" | grep -qiE '[[:space:]](/|~|\$HOME|\$PWD|\$\{HOME\}|\$\{PWD\}|\$\(pwd\))' || continue
+    printf '%s' "$rm_seg" | grep -qiE '[[:space:]](/|~|\$(HOME|PWD)([^a-zA-Z0-9_]|$)|\$\{HOME\}|\$\{PWD\}|\$\(pwd\))' || continue
     _rm_operands_all_ephemeral "$rm_seg" && continue
     block "rm -rf on dangerous root"
 done < <(printf '%s' "$cmd" | grep -oiE '(^|[;|&])[[:space:]]*rm[[:space:]][^;|&]*')

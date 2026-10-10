@@ -175,6 +175,28 @@ _json() {
     [ "$status" -eq 2 ]
 }
 
+# $HOME, $PWD 는 그 아래 경로와 따옴표 안에서도 그대로 막는다(경계를 넣으며 좁아지면 안 된다).
+@test "guard: blocks rm -rf on HOME and PWD in every position they can end" {
+    local c
+    for c in 'rm -rf $HOME' 'rm -rf "$HOME"' 'rm -rf $HOME/.ssh' 'rm -rf "$HOME/Library/x"' \
+             'rm -rf $HOME; echo done' 'rm -rf $HOME.bak' 'rm -fr $home' \
+             'rm -rf $PWD/build' 'rm -rf "$PWD"' 'rm -rf ${PWD}/x'; do
+        run bash "$(_guard)" <<< "$(_json "$c")"
+        [ "$status" -eq 2 ] || { echo "not blocked: $c"; false; }
+    done
+}
+
+# 실사용 오탐: 이름이 HOME, PWD 로 시작할 뿐인 다른 변수를 홈 삭제로 봤다. 임의의 변수($SBOX 등)는
+# 원래 막지 않으므로 이름 앞부분이 같다는 것만으로 막을 이유가 없다.
+@test "guard: allows rm -rf on a different variable whose name starts with HOME or PWD" {
+    local c
+    for c in 'rm -rf "$HOMEP"' 'rm -rf $HOMEP/x' 'rm -rf $HOME_BACKUP' \
+             'rm -rf $HOMEBREW_CACHE/downloads' 'rm -rf $PWD2' 'rm -rf "$PWDX/build"'; do
+        run bash "$(_guard)" <<< "$(_json "$c")"
+        [ "$status" -eq 0 ] || { echo "blocked: $c"; false; }
+    done
+}
+
 @test "guard: blocks rm -rf on pwd command substitution" {
     run bash "$(_guard)" <<< "$(_json 'rm -rf $(pwd)')"
     [ "$status" -eq 2 ]

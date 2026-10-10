@@ -863,6 +863,8 @@ _register_demo_project() {
 
 # 종료 trap 은 플러그인 훅과 작업 로거를 최대 10번(1초씩) 기다린다. 로거를 띄우지 않았을 때
 # pid 자리에 0 을 두면 kill -0 0 이 항상 성공해 10번을 꽉 채웠다. 벽시계 대신 sleep 횟수를 센다.
+# 기준은 "꽉 채우지 않는다"다. 그보다 낮게 잡으면 테스트 파일이 동시에 도는 부하에서 플러그인
+# 훅이 조금만 늦게 끝나도 떨어진다.
 @test "exit: 작업 로그가 꺼져 있으면 종료할 때 로거를 기다리지 않는다" {
     _fake_claude_recording
     cat > "$TEST_DIR/fakebin/sleep" <<FAKE
@@ -876,7 +878,7 @@ FAKE
     [ "$status" -eq 0 ]
     local n=0
     [ -f "$TEST_DIR/sleep-calls" ] && n="$(wc -l < "$TEST_DIR/sleep-calls" | tr -d ' ')"
-    [ "$n" -lt 8 ]
+    [ "$n" -lt 10 ]
 }
 
 @test "switch: 없는 프로젝트면 세션을 띄우지 않고 실패한다" {

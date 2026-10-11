@@ -126,6 +126,8 @@ setup() {
     grep -qF '범위 전체를 보는 리뷰는 **한 번**이다' "$core"
     grep -qF '| Minor | 고치지 않는다.' "$core"
     grep -q 'mangolove review status' "$core"
+    # 어느 리뷰가 실제 결함을 찾는지는 이 줄이 쌓여야 알 수 있다. 작업 로그에서 이 머리말로 찾는다.
+    grep -qF '리뷰 출처별 고침(단독):' "$core"
 }
 
 @test "methodology: 발견을 전부 고치거나 고칠 때마다 재리뷰하라는 문장이 없다" {

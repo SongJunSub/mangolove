@@ -258,6 +258,7 @@ Trivial/Small Track은 Dashboard 없이 빌드/린트/테스트 + DoD 한 줄 �
   - 셀프 리뷰: PASS
   - 3인 독립 리뷰(찾기→검증): 확정 N건 수정완료 / 반증 M건 폐기
   - 발견 처리: 고침 N건 / 기각 M건 / Minor K건 (리뷰 R회)
+  - 리뷰 출처별 고침(단독): code-review N(n), security-review N(n), 정독 N(n), 반증 N(n), 반례 N(n)
   - 보고만 한 Minor: [목록, 없으면 "없음"]
 
 DoD 검증:
@@ -283,6 +284,7 @@ PR / CI:
   - 셀프 리뷰: PASS
   - 1인 코드 리뷰: PASS
   - 발견 처리: 고침 N건 / 기각 M건 / Minor K건 (리뷰 R회)
+  - 리뷰 출처별 고침(단독): code-review N(n), security-review N(n), 1인 리뷰 N(n)
   - 보고만 한 Minor: [목록, 없으면 "없음"]
 
 DoD 검증:

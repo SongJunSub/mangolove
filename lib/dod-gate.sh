@@ -304,13 +304,25 @@ fi
 #    그것으로 미루면 게이트가 사실상 꺼진다. 워크플로, 팀원 같은 나머지 종류는 입력 형태를
 #    실측하지 못해 넣지 않았다(안 맞으면 미루지 않을 뿐이다: 예전 동작).
 #    항목 형태는 Claude Code 2.1.296 에서 프로브 훅으로 실측했다:
-#      {"id":"…","type":"subagent","status":"running","description":"…","agent_type":"…"}
-#    키 순서까지 맞춰 읽는다. 순서가 바뀌면 맞지 않아 예전처럼 평가한다(막는 쪽으로 틀린다).
-#    문자열 값 안에 같은 글자가 적혀 있어도 그 따옴표에는 역슬래시가 붙어 오므로 맞지 않는다.
+#      "background_tasks":[{"id":"…","type":"subagent","status":"running","description":"…","agent_type":"…"}]
+#    배열의 항목을 앞에서부터 하나씩 떼어 그 안에서 type 과 status 를 찾는다. 키 순서나 새로 끼어든
+#    키에 기대지 않는다: 순서 하나에 맞춰 읽으면 런타임이 키를 하나 더하는 날 조용히 예전 차단으로
+#    돌아간다. 항목은 문자열을 건너뛰며 떼므로 설명 안의 중괄호에 걸리지 않고, 문자열 값 안에 같은
+#    글자가 적혀 있어도 그 따옴표에는 역슬래시가 붙어 오므로 키로 읽히지 않는다. 중첩된 객체를 가진
+#    항목이 나오면 거기서 멈춘다(미루지 않는 쪽으로 틀린다).
 _subagent_running() {
-    local ws='[[:space:]]*'
-    local re="\\{${ws}\"id\"${ws}:${ws}\"[^\"\\\\]*\"${ws},${ws}\"type\"${ws}:${ws}\"subagent\"${ws},${ws}\"status\"${ws}:${ws}\"running\""
-    [[ "$1" =~ $re ]]
+    local ws='[[:space:]]*' rest item
+    local head="\"background_tasks\"${ws}:${ws}\\[(.*)"
+    local obj="^[[:space:],]*(\\{([^{}\"]|\"([^\"\\\\]|\\\\.)*\")*\\})"
+    local is_agent="\"type\"${ws}:${ws}\"subagent\"" is_running="\"status\"${ws}:${ws}\"running\""
+    [[ "$1" =~ $head ]] || return 1
+    rest="${BASH_REMATCH[1]}"
+    while [[ "$rest" =~ $obj ]]; do
+        item="${BASH_REMATCH[1]}"
+        rest="${rest:${#BASH_REMATCH[0]}}"
+        if [[ "$item" =~ $is_agent ]] && [[ "$item" =~ $is_running ]]; then return 0; fi
+    done
+    return 1
 }
 if _subagent_running "$input"; then
     echo "MangoLove DoD gate: 실행 중인 서브에이전트가 있어 이번 턴은 DoD 평가를 미룹니다. 서브에이전트가 끝나 세션이 다시 깨어난 턴에 평가합니다." >&2

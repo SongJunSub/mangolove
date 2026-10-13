@@ -448,13 +448,12 @@ _repo_root_project() {
 # 세 번 막혔고("작업 트리가 깨끗해야 통과"인데 커밋은 리뷰 결과를 받은 뒤라야 했다), 그 뒤로는
 # 턴을 끝내지 않으려고 최대 9분 30초짜리 포그라운드 폴링을 20회(118분) 돌렸다.
 # 아래 payload 는 Claude Code 2.1.296 에서 프로브 훅으로 받은 Stop 입력 그대로다(id 만 바꿨다).
-_stop_payload() {   # $1 = background_tasks 배열 본문, $2 = last_assistant_message
+run_gate_with() {   # $1 = background_tasks 배열 본문, $2 = last_assistant_message
     printf '{"session_id":"S-1","transcript_path":"/tmp/t.jsonl","cwd":"%s","prompt_id":"p-1","permission_mode":"auto","effort":{"level":"medium"},"hook_event_name":"Stop","stop_hook_active":false,"last_assistant_message":"%s","background_tasks":[%s],"session_crons":[]}' \
-        "$PROJ" "${2:-OK}" "$1"
+        "$PROJ" "${2:-OK}" "$1" | "$GATE"
 }
 _bg_shell='{"id":"bapgqw5um","type":"shell","status":"running","description":"Sleep 60 seconds in background","command":"sleep 60"}'
 _bg_agent='{"id":"ae20da554b5036ae5","type":"subagent","status":"running","description":"probe sleeper","agent_type":"general-purpose"}'
-run_gate_with() { _stop_payload "$@" | "$GATE"; }
 
 @test "dod-gate: 실행 중인 서브에이전트가 있으면 평가를 미룬다 (DoD 를 돌리지도 시도를 세지도 않는다)" {
     write_failing_dod
@@ -466,7 +465,8 @@ run_gate_with() { _stop_payload "$@" | "$GATE"; }
     [ ! -f "$PROJ/.mangolove/.dod-gate-attempts" ]      # 시도 예산과 소유권을 건드리지 않았다
 }
 
-@test "dod-gate: 서브에이전트가 끝나 목록에서 빠지면 그 턴에 평소대로 평가한다" {
+@test "dod-gate: 서브에이전트가 끝나면 그 턴에 평소대로 평가한다 (백그라운드 셸만 남아서는 미루지 않는다)" {
+    # 셸은 개발 서버처럼 세션 내내 떠 있는 일이 흔하다. 그것으로 미루면 게이트가 꺼진다.
     write_failing_dod
     run_gate_with "$_bg_shell,$_bg_agent"
     run run_gate_with "$_bg_shell"
@@ -475,22 +475,37 @@ run_gate_with() { _stop_payload "$@" | "$GATE"; }
     [ "$(state_field 1)" = "1" ]
 }
 
-@test "dod-gate: 백그라운드 셸만 있으면 미루지 않는다 (개발 서버가 게이트를 끄지 못한다)" {
-    write_failing_dod
-    run run_gate_with "$_bg_shell"
-    [ "$status" -eq 2 ]
-    [ -e "$PROJ/ran" ]
+@test "dod-gate: 항목의 키 순서가 바뀌거나 새 키가 끼어도 실행 중인 서브에이전트를 알아본다" {
+    # 순서 하나에 맞춰 읽으면 런타임이 키를 하나 더하는 날 조용히 예전 차단으로 돌아간다.
+    local shape
+    for shape in \
+        '{"type":"subagent","id":"a1","status":"running","description":"r"}' \
+        '{"id":"a1","name":"rev","type":"subagent","status":"running"}' \
+        '{"id":"a1","status":"running","type":"subagent"}' \
+        '{"id":"b1","type":"shell","status":"running","description":"a },{ b","command":"x"},{"id":"a1","type":"subagent","status":"running"}'
+    do
+        write_failing_dod
+        run run_gate_with "$shape"
+        [ "$status" -eq 0 ] || { echo "미루지 않음: $shape"; false; }
+        [ ! -e "$PROJ/ran" ]
+    done
 }
 
 @test "dod-gate: 문자열 값에 적힌 서브에이전트 표기로는 미뤄지지 않는다" {
     # 모델이 마지막 메시지나 셸 설명에 같은 글자를 적어 넣어도, JSON 문자열 안의 따옴표는
-    # 역슬래시가 붙어 오므로 작업 항목으로 읽히지 않아야 한다.
-    write_failing_dod
-    local fake='{\"id\":\"x\",\"type\":\"subagent\",\"status\":\"running\"}'
-    local shell_fake='{"id":"b1","type":"shell","status":"running","description":"'"$fake"'","command":"echo '"$fake"'"}'
-    run run_gate_with "$shell_fake" "$fake"
-    [ "$status" -eq 2 ]
-    [ -e "$PROJ/ran" ]
+    # 역슬래시가 붙어 오므로 작업 항목이나 키로 읽히지 않아야 한다.
+    local fake='{\"id\":\"x\",\"type\":\"subagent\",\"status\":\"running\"}' shape
+    for shape in \
+        '{"id":"b1","type":"shell","status":"running","description":"'"$fake"'","command":"echo '"$fake"'"}' \
+        '{"id":"b1","type":"shell","status":"running","description":"type: subagent status: running"}' \
+        '{"id":"b1","type":"shell","status":"running","description":"\"background_tasks\":['"$fake"']"}'
+    do
+        write_failing_dod
+        rm -f "$PROJ/ran"
+        run run_gate_with "$shape" "$fake \\\"background_tasks\\\":[$fake]"
+        [ "$status" -eq 2 ] || { echo "미룸: $shape"; false; }
+        [ -e "$PROJ/ran" ]
+    done
 }
 
 @test "dod-gate: 끝난 서브에이전트 항목으로는 미뤄지지 않는다" {
@@ -500,15 +515,12 @@ run_gate_with() { _stop_payload "$@" | "$GATE"; }
 }
 
 @test "dod-gate: 미룬 턴은 효능 원장에 차단이 아니라 건너뜀으로 남는다" {
-    local home; home="$(mktemp -d)"
     write_failing_dod
-    MANGOLOVE_DIR="$home" run_gate_with "$_bg_agent" >/dev/null 2>&1
+    run_gate_with "$_bg_agent" >/dev/null 2>&1
 
-    local lg="$home/efficacy/_no-git.jsonl"
+    local lg="$MANGOLOVE_DIR/efficacy/_no-git.jsonl"
     grep -q '"type":"skip","phase":"dod-gate","kind":"pending-agents"' "$lg"
-    run grep -c '"type":"block"' "$lg"
-    [ "$output" = "0" ]
-    rm -rf "$home"
+    ! grep -q '"type":"block"' "$lg"
 }
 
 @test "boundary: 두 게이트의 _json_str 이 바이트 동일하다" {

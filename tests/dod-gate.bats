@@ -462,7 +462,25 @@ _bg_agent='{"id":"ae20da554b5036ae5","type":"subagent","status":"running","descr
     [[ "$output" == *"서브에이전트"* ]]
     [ ! -e "$PROJ/ran" ]                                # dod.sh 를 실행하지 않았다
     [ -f "$PROJ/.mangolove/dod.sh" ]                    # 지우지도 않았다
-    [ ! -f "$PROJ/.mangolove/.dod-gate-attempts" ]      # 시도 예산과 소유권을 건드리지 않았다
+    [ "$(state_field 1)" = "0" ]                        # 시도 예산을 쓰지 않았다
+}
+
+@test "dod-gate: 평가를 미룬 세션이 그 DoD 의 소유자로 남는다 (기다리는 사이 다른 세션이 물려받지 않는다)" {
+    # 미루면서 소유권을 찍지 않으면, 리뷰어를 기다리는 사이 같은 프로젝트의 다른 세션이 이 DoD 를
+    # 제 것으로 찍고 평가해 막힌다(남의 DoD 에 인질). 원래 세션은 돌아와서 남의 것으로 보고 건너뛴다.
+    write_failing_dod
+    run_gate_with "$_bg_agent"                          # 세션 S-1: 미룸
+    [ "$(state_field 3)" = "S-1" ]
+
+    run run_gate_as SESSION-B                           # 다른 세션: 남의 DoD 라 건너뛴다
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"다른 세션"* ]]
+    [ ! -e "$PROJ/ran" ]
+
+    run run_gate_as S-1                                 # 원래 세션이 돌아오면 평가한다
+    [ "$status" -eq 2 ]
+    [ -e "$PROJ/ran" ]
+    [ "$(state_field 1)" = "1" ]
 }
 
 @test "dod-gate: 서브에이전트가 끝나면 그 턴에 평소대로 평가한다 (백그라운드 셸만 남아서는 미루지 않는다)" {

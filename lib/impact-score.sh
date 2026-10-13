@@ -18,6 +18,8 @@
 #   impact-score.sh declared-track <sha>                       → 커밋의 Change-Track: trailer (없으면 빈 출력)
 #   impact-score.sh triage-commit  <sha|--working>             → score + 선언트랙 + verdict(JSON 1줄)
 #   impact-score.sh report         <sha|--working>             → 사람용 출력
+#   impact-score.sh [<ref>]                                    → report 와 같다(ref 를 빼면 --working)
+#   impact-score.sh help                                       → 사용법 (`mangolove impact` 가 그대로 넘긴다)
 # ─────────────────────────────────────────────
 set -uo pipefail
 
@@ -266,6 +268,16 @@ report() {
 }
 
 main() {
+    # 사용법은 git 레포 밖에서도 낸다.
+    case "${1:-}" in
+        help|--help|-h)
+            echo "Usage:"
+            echo "  mangolove impact [<sha>|--working|--staged|A...B] [-- <path>...]   Deterministic track of a change (default: --working)"
+            echo "  mangolove impact triage-commit <sha>                               Declared Change-Track vs computed floor (JSON)"
+            echo "  mangolove impact score <ref> [-- <path>...]                        Score breakdown and track_floor (JSON)"
+            return 0
+            ;;
+    esac
     if ! git rev-parse --git-dir >/dev/null 2>&1; then
         echo "impact-score: not a git repository" >&2; exit 1
     fi
@@ -286,7 +298,9 @@ main() {
         declared-track) [ -n "${2:-}" ] || { echo "usage: impact-score.sh declared-track <sha>" >&2; exit 2; }; _require_ref "$2"; declared_track "$2" ;;
         triage-commit)  [ -n "${2:-}" ] || { echo "usage: impact-score.sh triage-commit $u" >&2; exit 2; }; _require_ref "$2"; triage_commit "$2" ;;
         report) [ -n "${2:-}" ] || { echo "usage: impact-score.sh report $u" >&2; exit 2; }; _require_ref "$2"; report "$2" ;;
-        *) echo "usage: impact-score.sh {score|triage|declared-track|triage-commit|report} ..." >&2; exit 2 ;;
+        # 하위 명령이 아니면 ref 로 읽어 사람용 보고를 낸다(`mangolove impact [<ref>]`). 하위 명령을
+        # 잘못 적으면 그 낱말이 "unknown revision" 으로 나온다.
+        *) set -- "${1:---working}"; _require_ref "$1"; report "$1" ;;
     esac
 }
 

@@ -943,6 +943,21 @@ main() {
             ;;
         impact)
             shift
+            # 첫 인자를 무조건 리비전으로 넘기던 때에는 --help 와 방법론이 안내하는
+            # triage-commit 이 둘 다 "unknown revision" 으로 끝났다.
+            case "${1:-}" in
+                help|--help|-h)
+                    echo "Usage:"
+                    echo "  mangolove impact [<sha>|--working|--staged|A...B]   Deterministic track of a change (default: --working)"
+                    echo "  mangolove impact triage-commit <sha>                Declared Change-Track vs computed floor (JSON)"
+                    exit 0
+                    ;;
+                triage-commit)
+                    shift
+                    bash "$IMPACT_SCRIPT" triage-commit "$@"
+                    exit 0
+                    ;;
+            esac
             bash "$IMPACT_SCRIPT" report "${1:---working}"
             exit 0
             ;;

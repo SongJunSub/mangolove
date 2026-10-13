@@ -174,6 +174,44 @@ _mkcommit() {
     [[ "$output" == *"Impact"* ]]
 }
 
+# 실측(CRS 세션 2026-10-10, 10-12, 10-13): `mangolove impact --help` 와 방법론이 안내하는
+# `mangolove impact triage-commit <sha>` 가 둘 다 "unknown revision" 으로 끝났다. 첫 인자를
+# 무조건 리비전으로 넘겼기 때문이다.
+@test "impact: mangolove impact --help prints usage instead of reading it as a revision" {
+    local r; r=$(_repo "cli-help")
+    echo x > "$r/a.txt"; _mkcommit "$r" "a" >/dev/null
+    cp "$BATS_TEST_DIRNAME/../bin/mangolove" "$MANGOLOVE_DIR/bin/mangolove"
+    chmod +x "$MANGOLOVE_DIR/bin/mangolove"
+    cd "$r"
+    local flag
+    for flag in --help -h help; do
+        run bash "$MANGOLOVE_DIR/bin/mangolove" impact "$flag"
+        [ "$status" -eq 0 ]
+        [[ "$output" == *"mangolove impact triage-commit"* ]]
+        [[ "$output" != *"unknown revision"* ]]
+    done
+}
+
+@test "impact: mangolove impact triage-commit <sha> reports the declared-track verdict" {
+    local r; r=$(_repo "cli-triage")
+    echo x > "$r/a.txt"
+    git -C "$r" add -A
+    git -C "$r" -c user.email=t@t.com -c user.name=t commit -qm "feat: a" -m "Change-Track: Trivial"
+    local sha; sha=$(git -C "$r" rev-parse HEAD)
+    cp "$BATS_TEST_DIRNAME/../bin/mangolove" "$MANGOLOVE_DIR/bin/mangolove"
+    chmod +x "$MANGOLOVE_DIR/bin/mangolove"
+    cd "$r"
+    run bash "$MANGOLOVE_DIR/bin/mangolove" impact triage-commit "$sha"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"declared":"Trivial"'* ]]
+    [[ "$output" == *'"verdict":"ok"'* ]]
+
+    # 리비전을 빼먹으면 사용법으로 끝난다(워킹트리로 조용히 대체하지 않는다)
+    run bash "$MANGOLOVE_DIR/bin/mangolove" impact triage-commit
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"usage"* ]]
+}
+
 @test "impact: errors cleanly outside a git repository" {
     local d="$TEST_DIR/nogit"; mkdir -p "$d"
     cd "$d"

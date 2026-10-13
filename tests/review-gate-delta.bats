@@ -120,7 +120,7 @@ load review_gate_helper
     _gate "git push"
     [ "$status" -eq 2 ]
     local blocked="$output" sha
-    sha="$(_delta_commit "$(printf '%s\n' "$blocked" | grep -- '- /code-review:')")"
+    sha="$(_delta_commit "$blocked" code-review)"
     [ -n "$sha" ]
     run git -C "$REPO_DIR" show --format= --numstat "$sha"
     # client.js 는 고친 한 줄만, 본 적 없는 두 파일은 범위의 기준 쪽 판본과의 차이 전체다
@@ -128,7 +128,7 @@ load review_gate_helper
 
     # simplify 의 미검토분에는 client.js 가 없다: 이 작업에서 이미 본 파일이라 이후 변경은 code-review 가
     # 본다(tests/review-gate-simplify-once.bats). 본 적 없는 두 파일은 simplify 에도 그대로 남는다.
-    sha="$(_delta_commit "$(printf '%s\n' "$blocked" | grep -- '- /simplify:')")"
+    sha="$(_delta_commit "$blocked" simplify)"
     [ -n "$sha" ]
     run git -C "$REPO_DIR" show --format= --numstat "$sha"
     [ "$(printf '%s\n' "$output" | sort)" = "$(printf '1\t0\tother.js\n1\t1\tseed.txt\n')" ]

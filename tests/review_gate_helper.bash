@@ -80,10 +80,13 @@ _add_external_call() {
 # 이 세션에서 Medium 필수 리뷰 3종을 모두 돌린 것으로 기록한다(외부 API 신호가 있으면
 # security-review 까지 필수다). record 는 그 시점 내용을 커버리지로 함께 스냅샷한다.
 _run_all_reviews() {
-    printf '%s' "$(_json_skill simplify "${1:-}")"        | bash "$GATE" record
-    printf '%s' "$(_json_skill code-review "${1:-}")"     | bash "$GATE" record
-    printf '%s' "$(_json_skill security-review "${1:-}")" | bash "$GATE" record
+    _record simplify "${1:-}"
+    _record code-review "${1:-}"
+    _record security-review "${1:-}"
 }
+
+# 스킬 하나를 돌린 것으로 기록한다. $2 는 스킬 인자(없으면 작업 트리 전체).
+_record() { _json_skill "$1" "${2:-}" | bash "$GATE" record; }
 
 # 브랜치 하나에 파일 N개짜리 커밋을 만든다. 끝나면 main 으로 돌아온다. $1 브랜치, $2 시작점, $3 파일 수
 _branch_commit() {
@@ -148,5 +151,7 @@ _delta_skips() {
     grep -c '"type":"skip","phase":"review","kind":"delta"' "$f" || true
 }
 
-# 차단 안내가 알려 준 "리뷰 뒤 변경" 커밋.
-_delta_commit() { printf '%s\n' "$1" | sed -n 's/.*git show \([0-9a-f]\{40\}\).*/\1/p' | head -1; }
+# 차단 안내가 알려 준 "리뷰 뒤 변경" 커밋. $2 를 주면 그 스킬의 줄에서만 찾는다.
+_delta_commit() {
+    printf '%s\n' "$1" | grep -- "${2:+- /$2:}" | sed -n 's/.*git show \([0-9a-f]\{40\}\).*/\1/p' | head -1
+}

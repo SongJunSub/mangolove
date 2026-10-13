@@ -44,6 +44,8 @@ _delta_files() { git -C "$REPO_DIR" show --format= --name-only "$1"; }
     [ "$status" -eq 2 ]
     [[ "$output" == *"- /code-review:"* ]]
     [[ "$output" != *"- /simplify:"* ]]
+    # 넘긴 사실은 부족 목록 밖에 따로 적는다. 목록 안에 있으면 simplify 가 남은 것으로 읽힌다.
+    [[ "$output" == *"참고: simplify 는 이 작업에서 이미 본 파일 11개"* ]]
     local sha; sha="$(_delta_commit "$output")"
     [ -n "$sha" ]
 
@@ -185,7 +187,7 @@ _delta_files() { git -C "$REPO_DIR" show --format= --name-only "$1"; }
 }
 
 
-# ── 작업을 가르는 기준: 기준 커밋이 같고, 기록한 커밋이 올리는 커밋의 계보에 있어야 한다 ──
+# ── 작업을 가르는 기준: 기준 커밋이 같고, 기록한 브랜치를 올리거나 기록한 커밋이 그 조상이어야 한다 ──
 
 @test "같은 기준에서 갈라진 다른 브랜치에서 본 기록은 근거가 되지 않는다" {
     # 한 작업 트리에서 티켓 a 를 올리고, main 이 그대로인 채 티켓 b 를 시작하는 흔한 순서다.
@@ -256,4 +258,87 @@ _delta_files() { git -C "$REPO_DIR" show --format= --name-only "$1"; }
     _gate "git push"
     [ "$status" -eq 0 ]
     [[ "$output" == *"이 작업에서 이미 본 파일 11개"* ]]
+}
+
+@test "버린 브랜치에서 본 기록은 근거가 되지 않는다" {
+    # 커밋하고 simplify 까지 돌린 시도를 버리고(브랜치 삭제) 같은 기준에서 다시 시작한 경우다.
+    # 그 커밋은 어느 ref 에도 닿지 않지만 고쳐 쓴(amend) 것이 아니다.
+    git -C "$REPO_DIR" checkout -q -b attempt1
+    _medium_work
+    _record simplify
+    git -C "$REPO_DIR" checkout -q main
+    git -C "$REPO_DIR" branch -q -D attempt1
+    git -C "$REPO_DIR" checkout -q -b attempt2
+    _eleven_files
+    _edit_all "second attempt on the same files"
+    _record code-review
+    _gate "git push origin attempt2"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"- /simplify:"* ]]
+    [[ "$output" != *"이 작업에서 이미 본 파일"* ]]
+}
+
+@test "첫 커밋 전에 본 기록도 다른 브랜치의 작업에는 근거가 되지 않는다" {
+    # 방법론이 권하는 순서(커밋 전에 리뷰)에서는 기록할 때의 커밋이 곧 기준이라 조상 관계로는
+    # 가를 수 없다. 기록한 브랜치로 가른다.
+    git -C "$REPO_DIR" checkout -q -b ticket1
+    _eleven_files
+    _record simplify                            # 아직 커밋 전
+    _commit_all "ticket 1"
+    git -C "$REPO_DIR" checkout -q main
+    git -C "$REPO_DIR" checkout -q -b ticket2
+    _eleven_files
+    _edit_all "ticket 2 on the same files"
+    _record code-review
+    _gate "git push origin ticket2"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"- /simplify:"* ]]
+    [[ "$output" != *"이 작업에서 이미 본 파일"* ]]
+}
+
+@test "작업 브랜치를 지운 뒤 main 을 올려도, 커밋한 뒤 본 기록은 같은 작업이다" {
+    git -C "$REPO_DIR" checkout -q -b feat
+    _medium_work
+    _record simplify
+    _edit_all "simplify fixes"
+    _record code-review
+    git -C "$REPO_DIR" checkout -q main
+    git -C "$REPO_DIR" merge -q --ff-only feat
+    git -C "$REPO_DIR" branch -q -d feat
+    _gate "git push origin main"
+    [ "$status" -eq 0 ]
+}
+
+@test "변경분 커밋을 흉내 낸 커밋을 짚어도 이 작업에서 본 것으로 치지 않는다" {
+    # 게이트가 만든 변경분 커밋만 자기 작업을 안다(게이트 상태에 적어 둔다). 제목과 본문을 흉내 낸
+    # 커밋으로 모든 파일을 "본 것"으로 만들 수 있으면, 근거가 남지 않는 우회가 된다.
+    _medium_work
+    _record code-review
+    local fake base
+    base="$(git -C "$REPO_DIR" rev-parse origin/main)"
+    fake="$(git -C "$REPO_DIR" commit-tree 'HEAD^{tree}' -p origin/main \
+        -m "mangolove review gate: 리뷰 뒤 변경" -m "unit: $base"$'\n'"head: $(git -C "$REPO_DIR" rev-parse HEAD)")"
+    _record simplify "$fake"
+    _edit_all "more work"
+    _record code-review
+    _gate "git push"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"- /simplify:"* ]]
+    [[ "$output" != *"이 작업에서 이미 본 파일"* ]]
+}
+
+@test "넘길 필요가 없던 사소한 수정은 넘긴 것으로 세지 않는다" {
+    # 본 파일 하나를 한 줄 고친 것은 그것만으로 simplify 대상이 아니다. 효능 원장에 넘김으로 적으면
+    # 이 규칙이 실제로 무엇을 넘겼는지 볼 수 없게 된다.
+    _medium_work
+    _record simplify
+    _record code-review
+    echo "export const ONE_LINE = 1" >> "$REPO_DIR/mod1.js"
+    _commit_all "one-line fix"
+    _gate "git push"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"이 작업에서 이미 본 파일"* ]]
+    # 넘긴 것이 하나도 없으면 원장 파일 자체가 없을 수 있다
+    local lg="$MANGOLOVE_DIR/efficacy/proj.jsonl"
+    [ ! -f "$lg" ] || [ "$(grep -c '"kind":"simplify-once"' "$lg")" = "0" ]
 }

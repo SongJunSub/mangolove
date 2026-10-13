@@ -143,7 +143,8 @@ LEDGER_REL=".mangolove/.review-ledger"
 # 리뷰가 본 내용: "<스킬>\t<blob 해시>\t<경로>" 줄들. 내용 주소 기준이라 세션과 무관하다.
 COVERED_REL=".mangolove/.review-covered"
 # 정리 스킬이 어느 작업에서 어느 파일을 봤는가. 한 줄의 모양:
-#   "<스킬>\t<작업의 기준 커밋>\t<경로>\t<그때의 커밋>"
+#   "<스킬>\t<작업의 기준 커밋>\t<경로>\t<그때의 커밋>\t<그때의 브랜치>"
+# 게이트가 만든 변경분 커밋이 어느 작업의 것인지도 여기 적는다(첫 필드가 UNIT_DELTA_ROW, 셋째가 그 커밋).
 # 커버리지와 달리 내용이 아니라 작업에 매인 사실이라 파일을 따로 둔다(PRE_REVIEW_SKILL 위의 주석).
 UNITS_REL=".mangolove/.review-units"
 NOSCOPE_REL=".mangolove/.review-noscope"
@@ -977,7 +978,7 @@ SNAPSHOT_OBJECT_MAX=1048576
 # **스킬 이름을 함께 적는다.** 내용만 적으면 스킬 하나만 돌려도 그 내용이 통째로 covered 가
 # 되어, /simplify 만 돌리고 /code-review 를 건너뛴 push 가 통과한다(실제로 그랬다).
 _snapshot_covered() {
-    local skill="$1" range="" files present hashes f big small large seen="" body base head
+    local skill="$1" range="" files present hashes f big small large seen="" base head branch
     local sp=()
     # 범위(COVERAGE_MODE/COVERAGE_PATHS)는 호출자가 정한다(do_record 가 인자를 한 번만 해석한다).
     # 이 스킬이 이 트리를 보지 않았다면 아무 것도 인정하지 않는다.
@@ -1008,14 +1009,14 @@ _snapshot_covered() {
               }')"
         [ -z "$seen" ] || printf '%s\n' "$seen" >> "$COVERED_REL" 2>/dev/null || true
         _covered_dedupe
-        # 그 변경분이 어느 작업의 것인지는 커밋이 싣고 온다(_review_delta). 지금 서 있는 브랜치로
-        # 정하면, 다른 브랜치의 변경분을 본 기록이 이 브랜치의 작업을 면제한다.
-        if [ "$skill" = "$PRE_REVIEW_SKILL" ] && [ -n "$seen" ]; then
-            body="$(git log -1 --format=%b "$COVERAGE_COMMIT" 2>/dev/null)"
-            base=""; head=""
-            [[ "$body" =~ (^|$'\n')unit:\ ([0-9a-f]{40})($'\n'|$) ]] && base="${BASH_REMATCH[2]}"
-            [[ "$body" =~ (^|$'\n')head:\ ([0-9a-f]{40})($'\n'|$) ]] && head="${BASH_REMATCH[2]}"
-            _note_unit "$skill" "$seen" "$base" "$head"
+        # 그 변경분이 어느 작업의 것인지는 게이트가 그 커밋을 만들 때 적어 둔 것을 읽는다(_note_delta).
+        # 지금 서 있는 브랜치로 정하면, 다른 브랜치의 변경분을 본 기록이 이 브랜치의 작업을 면제한다.
+        # 게이트가 만들지 않은 커밋(제목을 흉내 낸 것)은 적힌 것이 없어 아무 기록도 남기지 않는다.
+        if [ "$skill" = "$PRE_REVIEW_SKILL" ] && [ -n "$seen" ] && [ -s "$UNITS_REL" ]; then
+            base=""; head=""; branch=""
+            IFS=$'\t' read -r base head branch < <(awk -F'\t' -v k="$UNIT_DELTA_ROW" -v c="$COVERAGE_COMMIT" \
+                '$1 == k && $3 == c { print $2 "\t" $4 "\t" $5; exit }' "$UNITS_REL" 2>/dev/null) || true
+            _seen_paths "$seen" | _append_units "$skill" "$base" "$head" "$branch"
         fi
         return 0
     fi
@@ -1099,7 +1100,8 @@ EOF
 
     _covered_dedupe
     if [ "$skill" = "$PRE_REVIEW_SKILL" ] && [ -n "$seen" ]; then
-        _note_unit "$skill" "$seen" "$(_range_unit "$range")" "$(git rev-parse --verify --quiet HEAD 2>/dev/null)"
+        _seen_paths "$seen" | _append_units "$skill" "$(_range_unit "$range")" \
+            "$(git rev-parse --verify --quiet HEAD 2>/dev/null)" "$(git symbolic-ref --quiet HEAD 2>/dev/null)"
     fi
     return 0
 }
@@ -1126,23 +1128,30 @@ _covered_dedupe() {
 # 그대로 본다(리뷰가 본 판본과의 차이가 Medium 이상이면 code-review 를 다시 요구한다). 본 적 없는
 # 파일은 예전처럼 재서, 그것만으로 Medium 이상이면 정리 스킬을 요구한다.
 #
-# "이 작업"은 추정하지 않고 git 사실 둘로 가른다. 커버리지는 push 뒤에도 지워지지 않으므로, 작업을
+# "이 작업"은 추정하지 않고 git 사실로 가른다. 커버리지는 push 뒤에도 지워지지 않으므로, 작업을
 # 가리지 않고 "본 적 있다"만 물으면 지난 작업이나 다른 브랜치의 기록이 새 작업을 면제한다(시제품을
 # 이 레포에 적용했을 때, 그리고 리뷰에서 같은 main 에서 티켓 둘을 이어 시작해 봤을 때 실제로 그랬다).
+# 기록은 둘 다 맞아야 이 작업의 것이다.
 #   1) 기준이 같다: 기록할 때의 범위 기준 커밋이 올릴 때의 경계(`<rev> --not --remotes`) 가운데 하나다.
 #      push 가 되면 경계가 앞으로 가므로 그 뒤의 변경은 새 작업이다. 원격을 merge 로 받으면 경계가
 #      둘이 되고 순서가 바뀌므로 첫째만 보지 않고 전부와 견준다.
-#   2) 계보에 있다: 기록할 때의 커밋이 올리는 커밋의 조상이다. 같은 기준에서 갈라진 다른 브랜치에서
-#      본 기록은 여기서 걸린다. 그 커밋이 어느 ref 에도 닿지 않으면(amend 나 squash 로 고쳐 쓴 경우)
-#      계보를 물을 수 없으니 기준만으로 인정한다. 고쳐 쓴 커밋을 버리면 정상 흐름이 막힌다.
-# 어느 쪽이든 안 맞으면 같은 작업으로 보지 않고 예전 판정으로 돌아간다(rebase 로 기준이 바뀐 경우,
-# 일부만 먼저 push 한 경우). 덜 넘길 뿐 더 넘기지는 않는다.
+#   2) 같은 줄기다: 다음 둘 중 하나.
+#      a) 기록할 때 서 있던 브랜치를 지금 올린다(그 브랜치의 끝이 올리는 커밋이다). 커밋을 고쳐
+#         써도(amend, squash) 브랜치는 그대로라 인정된다.
+#      b) 기록할 때의 커밋이 올리는 커밋의 조상이다. 작업 브랜치를 main 에 합친 뒤 지워도 인정된다.
+#         첫 커밋 전의 기록(그때의 커밋 = 기준)에는 쓰지 않는다: 기준은 그 기준에서 갈라진 모든
+#         브랜치의 조상이라 아무것도 가르지 못한다.
+#      같은 기준에서 갈라진 다른 브랜치, 버리고 지운 브랜치에서 본 기록은 a 와 b 어디에도 맞지 않는다.
+# 안 맞으면 같은 작업으로 보지 않고 예전 판정으로 돌아간다(rebase 로 기준이 바뀐 경우, 일부만 먼저
+# push 한 경우, 브랜치 이름을 바꾼 경우). 덜 넘길 뿐 더 넘기지는 않는다.
 #
 # 남는 한계:
 #   - 정리 뒤에 같은 파일에서 이어 쓴 변경은 정리를 다시 거치지 않는다(사용자 결정, 2026-10-13).
-#   - 첫 커밋 전에 돌린 정리는 기록할 때의 커밋이 곧 기준이라 계보로 가를 수 없다. 그 뒤 같은
-#     기준에서 다른 브랜치를 시작해 같은 파일을 고치면 그 파일은 면제된다.
+#   - 같은 브랜치 이름으로 같은 기준에서 작업을 처음부터 다시 하면(reset --hard, 지우고 같은 이름으로
+#     다시 만들기) 앞 시도에서 본 파일은 면제된다.
 PRE_REVIEW_SKILL="simplify"
+# 작업 기록에서 변경분 커밋의 줄을 가리는 첫 필드. 스킬 이름과 겹치지 않는다.
+UNIT_DELTA_ROW="=delta"
 
 # 범위("<기준>...<rev>")의 기준 커밋 해시. 정할 수 없으면 빈 값.
 # 경계에서 온 기준은 이미 해시라 git 을 부르지 않는다(HEAD...HEAD 나 트렁크 폴백일 때만 부른다).
@@ -1153,45 +1162,58 @@ _range_unit() {
     git rev-parse --verify --quiet "${b}^{commit}" 2>/dev/null || true
 }
 
-# 정리 스킬이 방금 본 파일을 그 작업의 것으로 적는다.
-#   $2 = 방금 적은 커버리지 줄들, $3 = 작업의 기준 커밋, $4 = 그때의 커밋
-# 사라진 파일(_absent)은 적지 않는다: 본 것은 "없음"이지 그 파일의 내용이 아니다.
-# 이미 있는 줄은 덧붙일 때 거른다(파일을 통째로 다시 쓰지 않는다).
-_note_unit() {
-    local skill="$1" lines="$2" base="$3" head="$4"
-    [ -n "$lines" ] && [ -n "$base" ] && [ -n "$head" ] || return 0
-    printf '%s\n' "$lines" | awk -F'\t' -v b="$base" -v h="$head" -v units="$UNITS_REL" '
+# 방금 적은 커버리지 줄들($1)에서 실제로 본 경로만 낸다.
+# 사라진 파일(_absent)은 뺀다: 본 것은 "없음"이지 그 파일의 내용이 아니다.
+_seen_paths() {
+    printf '%s\n' "$1" | awk -F'\t' 'NF >= 3 && $2 != "_absent" { print $3 }'
+}
+
+# 작업 기록을 덧붙인다. 이미 있는 줄은 거른다(파일을 통째로 다시 쓰지 않는다).
+#   $1 = 첫 필드(스킬 이름 또는 UNIT_DELTA_ROW)  $2 = 기준 커밋  $3 = 그때의 커밋  $4 = 그때의 브랜치(없으면 빈 값)
+#   stdin = 셋째 필드를 한 줄에 하나씩(스킬 줄은 경로, 변경분 줄은 그 커밋의 해시)
+_append_units() {
+    [ -n "$2" ] && [ -n "$3" ] || return 0
+    _ensure_regular_file "$UNITS_REL" || return 0
+    awk -v kind="$1" -v b="$2" -v h="$3" -v br="${4:-}" -v units="$UNITS_REL" '
         BEGIN { while ((getline line < units) > 0) have[line] = 1 }
-        NF >= 3 && $2 != "_absent" {
-            line = $1 "\t" b "\t" $3 "\t" h
+        length($0) {
+            line = kind "\t" b "\t" $0 "\t" h "\t" br
             if (!(line in have)) { have[line] = 1; print line }
         }' >> "$UNITS_REL" 2>/dev/null || true
 }
 
-# 스킬 $1 이 기준 $2(공백으로 나열) 아래에서 남긴 기록의 "그때의 커밋" 가운데, 올리는 커밋 $3 의
-# 계보로 인정되는 것들(위 주석의 2번).
-_lineage_heads() {
-    local skill="$1" bases=" $2 " rev="$3" h out=""
-    while IFS= read -r h; do
-        [ -n "$h" ] || continue
-        if git merge-base --is-ancestor "$h" "$rev" 2>/dev/null \
-           || [ -z "$(git for-each-ref --count=1 --format=x --contains "$h" 2>/dev/null)" ]; then
-            out="$out $h"
-        fi
-    done < <(awk -F'\t' -v skill="$skill" -v bases="$bases" \
-                 '$1 == skill && index(bases, " " $2 " ") && !($4 in s) { s[$4] = 1; print $4 }' \
-                 "$UNITS_REL" 2>/dev/null)
-    printf '%s' "${out# }"
+# 게이트가 만든 변경분 커밋($1)이 어느 작업의 것인지 적어 둔다. 그 커밋을 짚어 정리 스킬을 돌리면
+# 기록이 그 작업에 매인다(_snapshot_covered). 커밋 본문이 아니라 게이트 상태에 적는다: 본문은 누구나
+# 흉내 낼 수 있고, 올리는 커밋을 본문에 실으면 같은 변경분이 판정 때마다 다른 커밋이 된다.
+_note_delta() {
+    local rev="${DELTA_REF##*...}"
+    [ -n "$DELTA_REF" ] || return 0
+    printf '%s\n' "$1" | _append_units "$UNIT_DELTA_ROW" "$(_range_unit "$DELTA_REF")" \
+        "$(git rev-parse --verify --quiet "${rev}^{commit}" 2>/dev/null)" \
+        "$(git for-each-ref --points-at "$rev" --count=1 --format='%(refname)' refs/heads 2>/dev/null)"
 }
 
-# _uncovered_plan 의 출력($1)에서, 스킬 $2 가 이 작업(기준 $3, 계보 $4: 둘 다 공백으로 나열)에서
-# 이미 본 경로의 줄을 뺀 나머지를 낸다.
+# _uncovered_plan 의 출력($1)에서 스킬 $2 가 이 작업에서 이미 본 경로의 줄을 뺀 나머지를 낸다.
+#   $3 = 이 범위의 기준들(공백으로 나열)  $4 = 올리는 커밋
 _drop_seen_in_unit() {
-    printf '%s\n' "$1" | awk -F'\t' -v skill="$2" -v bases=" $3 " -v heads=" $4 " -v units="$UNITS_REL" '
+    local plan="$1" skill="$2" bases=" $3 " rev="$4" tips h ok=""
+    tips=" $(git for-each-ref --points-at "$rev" --format='%(refname)' refs/heads 2>/dev/null | tr '\n' ' ')"
+    # 조상 관계는 브랜치로 인정되지 않은 기록에만, 그리고 첫 커밋 뒤의 기록에만 묻는다(위 주석의 2-b).
+    while IFS= read -r h; do
+        [ -n "$h" ] || continue
+        ! git merge-base --is-ancestor "$h" "$rev" 2>/dev/null || ok="$ok $h"
+    done < <(awk -F'\t' -v skill="$skill" -v bases="$bases" -v tips="$tips" '
+                 $1 == skill && index(bases, " " $2 " ") && $4 != $2 \
+                     && !($5 != "" && index(tips, " " $5 " ")) && !($4 in asked) { asked[$4] = 1; print $4 }
+             ' "$UNITS_REL" 2>/dev/null)
+    printf '%s\n' "$plan" | awk -F'\t' -v skill="$skill" -v bases="$bases" -v tips="$tips" \
+                                 -v heads="$ok " -v units="$UNITS_REL" '
         BEGIN {
             while ((getline line < units) > 0) {
                 split(line, f, "\t")
-                if (f[1] == skill && index(bases, " " f[2] " ") && index(heads, " " f[4] " ")) seen[f[3]] = 1
+                if (f[1] != skill || !index(bases, " " f[2] " ")) continue
+                if ((f[5] != "" && index(tips, " " f[5] " ")) || (f[4] != f[2] && index(heads, " " f[4] " ")))
+                    seen[f[3]] = 1
             }
         }
         NF && !($6 in seen)'
@@ -1263,12 +1285,12 @@ _uncovered_plan() {
 DELTA_COMMIT=""
 # 직전 호출의 입력. 같으면 DELTA_COMMIT 이 그대로 그 결과다(빈 값 = 못 만든다).
 DELTA_KEY=""
-# 판정 중인 범위(_analyze 가 채운다). 변경분 커밋이 자기가 어느 작업의 것인지 싣고 가게 한다.
+# 판정 중인 범위(_analyze 가 채운다). 변경분 커밋이 어느 작업의 것인지 적는 데 쓴다(_note_delta).
 DELTA_REF=""
 _review_delta() {
     local plan="$1" partial="${2:-0}" have smode dmode ssha dsha spath path cands c ok best mode
-    local la="" lb="" idx ta tb ca i j cmpa="" cmpb="" picks="" base head
-    local -a oks unit=()
+    local la="" lb="" idx ta tb ca i j cmpa="" cmpb="" picks=""
+    local -a oks
     [ -n "$STATE_DIR" ] && [ -n "$plan" ] || return 1
     if [ "$partial$DELTA_REF$plan" = "$DELTA_KEY" ]; then [ -n "$DELTA_COMMIT" ]; return; fi
     DELTA_KEY="$partial$DELTA_REF$plan"; DELTA_COMMIT=""
@@ -1352,13 +1374,9 @@ EOF
     rm -f "$idx.a" "$idx.b" "$idx.a.lock" "$idx.b.lock" 2>/dev/null
     [ -n "$ta" ] && [ -n "$tb" ] || return 1
     ca="$(_delta_commit_tree "$ta" -m "mangolove review gate: 리뷰가 본 판본")" || return 1
-    # 이 변경분이 어느 작업의 것인지를 본문에 싣는다. 이 커밋을 짚어 정리 스킬을 돌리면 기록이 그 작업에
-    # 매인다(_snapshot_covered). 그때 서 있는 브랜치는 이 변경분의 브랜치가 아닐 수 있다.
-    base="$(_range_unit "$DELTA_REF")"
-    head="$(git rev-parse --verify --quiet "${DELTA_REF##*...}^{commit}" 2>/dev/null)"
-    [ -z "$base" ] || [ -z "$head" ] || unit=(-m "unit: $base"$'\n'"head: $head")
-    DELTA_COMMIT="$(_delta_commit_tree "$tb" -p "$ca" -m "$DELTA_SUBJECT" ${unit[@]+"${unit[@]}"})"
-    [ -n "$DELTA_COMMIT" ]
+    DELTA_COMMIT="$(_delta_commit_tree "$tb" -p "$ca" -m "$DELTA_SUBJECT")"
+    [ -n "$DELTA_COMMIT" ] || return 1
+    _note_delta "$DELTA_COMMIT"
 }
 
 # 리뷰 뒤 변경 커밋을 재서 DELTA_TRACK, DELTA_REQ, DELTA_FILES 에 둔다. 잴 수 없으면 1.
@@ -1488,6 +1506,18 @@ _track_and_required() {
         "$(required_skills "$t" "$(_json_field "$j" db)" "$(_json_field "$j" auth)" "$(_json_field "$j" ext)")"
 }
 
+# plan 의 경로들과 "이 스킬이 본 판본이 하나라도 있는가"를 호출자(_analyze)의 paths, seen 에 채운다.
+_plan_paths() {
+    local p c
+    paths=(); seen=0
+    while IFS=$'\t' read -r _ _ _ _ _ p c; do
+        [ -n "$p" ] || continue
+        paths+=("$p"); [ -z "$c" ] || seen=1
+    done <<PLAN
+$1
+PLAN
+}
+
 REVIEW_TRACK=""; REVIEW_JSON=""; REVIEW_REQUIRED=""; REVIEW_MISSING=""; REVIEW_RANGE=""; REVIEW_DETAIL=""
 # 차단 사유. 효능 원장에서 둘을 갈라 봐야 "엄격해진 기본값이 오탐 차단을 늘리고 있는가"를
 # 논쟁이 아니라 데이터로 답할 수 있다. 그게 안 보이면 safe-by-default 가 조용히
@@ -1533,22 +1563,8 @@ _analyze() {
     #   - /simplify 만 돌리고 /code-review 를 건너뛴 push
     #   - 리뷰를 한 번 돌린 뒤 계속 새로 써서 push
     for s in $REVIEW_REQUIRED; do
-        paths=(); seen=0; plan="$(_uncovered_plan "$s" "$raw")"
-        # 정리 스킬이 이 작업에서 이미 본 파일은 미검토분에서 뺀다. 남은 것(본 적 없는 파일)만 아래에서 잰다.
-        if [ "$s" = "$PRE_REVIEW_SKILL" ] && [ -n "$plan" ] && [ -n "$bases" ] && [ -s "$UNITS_REL" ]; then
-            kept="$(_drop_seen_in_unit "$plan" "$s" "$bases" "$(_lineage_heads "$s" "$bases" "${ref##*...}")")"
-            if [ "$kept" != "$plan" ]; then
-                REVIEW_ONCE_NOTE="  ${s} 는 이 작업에서 이미 본 파일 $(( $(printf '%s\n' "$plan" | grep -c .) - $(printf '%s\n' "$kept" | grep -c .) ))개의 이후 변경을 다시 요구하지 않습니다 (그 변경은 code-review 가 봅니다)
-"
-                plan="$kept"
-            fi
-        fi
-        while IFS=$'\t' read -r _ _ _ _ _ p c; do
-            [ -n "$p" ] || continue
-            paths+=("$p"); [ -z "$c" ] || seen=1
-        done <<EOF
-$plan
-EOF
+        plan="$(_uncovered_plan "$s" "$raw")"
+        _plan_paths "$plan"
         [ "${#paths[@]}" -eq 0 ] && continue
 
         # 미검토분 자체가 그 스킬을 요구하지 않는 수준(Trivial/Small)이면 통과시킨다.
@@ -1573,6 +1589,24 @@ EOF
             *" $s "*) ;;
             *) continue ;;
         esac
+
+        # 정리 스킬이 이 작업에서 이미 본 파일은 미검토분에서 뺀다(PRE_REVIEW_SKILL 위의 주석). 위 판정이
+        # 통과시킨 것은 여기 오지 않으므로, 넘겼다고 적는 것은 넘기지 않았으면 요구됐을 때뿐이다.
+        # 남은 것(본 적 없는 파일)은 그것만으로 다시 잰다.
+        if [ "$s" = "$PRE_REVIEW_SKILL" ] && [ -n "$bases" ] && [ -s "$UNITS_REL" ]; then
+            kept="$(_drop_seen_in_unit "$plan" "$s" "$bases" "${ref##*...}")"
+            if [ "$kept" != "$plan" ]; then
+                REVIEW_ONCE_NOTE="  ${s} 는 이 작업에서 이미 본 파일 $(( ${#paths[@]} - $(printf '%s\n' "$kept" | grep -c .) ))개의 이후 변경을 다시 요구하지 않습니다 (그 변경은 code-review 가 봅니다)
+"
+                plan="$kept"
+                _plan_paths "$plan"
+                [ "${#paths[@]}" -eq 0 ] && continue
+                rj="$(bash "$IMPACT" score "$ref" -- "${paths[@]}" 2>/dev/null)" || return 1
+                tr="$(_track_and_required "$rj")"
+                rt="${tr%%	*}"; rreq="${tr#*	}"
+                case " $rreq " in *" $s "*) ;; *) continue ;; esac
+            fi
+        fi
 
         # 막기 전에, 이 스킬이 본 판본과 지금 내용의 차이만 따로 잰다. 기준은 위와 같은 required_skills 다.
         # 위 판정이 통과시킨 것은 여기 오지 않으므로, 이 단계 때문에 전보다 엄격해지는 경우는 없다.
@@ -1689,8 +1723,10 @@ _emit_block() {
         echo "  ${REVIEW_JSON}"
         echo ""
         echo "${REVIEW_TRACK} 트랙에 필요한 리뷰 중 아직 이 내용을 보지 않은 것:"
-        printf '%s' "${REVIEW_DETAIL}${REVIEW_ONCE_NOTE}"
+        printf '%s' "${REVIEW_DETAIL}"
         echo ""
+        # 넘긴 사실은 목록 밖에 적는다. 목록 안에 있으면 그 스킬이 남은 것으로 읽힌다.
+        [ -z "$REVIEW_ONCE_NOTE" ] || printf '참고: %s\n' "${REVIEW_ONCE_NOTE#  }"
         case "$REVIEW_BLOCK_KIND" in
             missing)
                 echo "이 스킬들은 이 작업 트리에서 실행된 기록이 없습니다. 그냥 실행하세요."

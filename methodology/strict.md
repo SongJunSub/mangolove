@@ -159,6 +159,7 @@ mangolove impact            # 워킹트리의 결정적 트랙(track_floor)
 - 스킬 이름은 **실존하는 것만** 쓴다: `simplify`, `code-review`, `security-review`. `/plan` 과 `/review` 라는 스킬은 없다. 계획은 `EnterPlanMode` 도구, 코드 리뷰는 `code-review` 다.
 - "3인 탈상관 리뷰"는 **Large 전용**이며 위 스킬과 별개다(상세는 `mangolove-large-review`). Medium 에 3인 리뷰를 요구하지 않는다.
 - `code-review` 와 `security-review` 는 병렬로 실행한다.
+- 레포 규칙이 Trivial/Small 변경에도 `simplify` 를 요구하면(이 표는 요구하지 않는다) 스킬은 호출하되 리뷰 에이전트를 띄우지 않는다. 메인 세션이 그 변경을 스킬의 네 관점(재사용, 단순화, 효율, 고도)으로 한 번 보고 고친다. 스킬 본문은 에이전트 4개를 띄우라고 하지만 그 구성은 Medium 이상의 변경에 맞는 것이다. 변경분의 트랙은 `mangolove impact` 로 확정한다(실측: 2개 파일짜리 변경에도 4개가 떴고, Trivial/Small 변경분 4회차의 대기만 27.9분이었다).
 
 ### 리뷰 발견 처리와 종료 조건
 

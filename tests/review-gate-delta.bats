@@ -119,11 +119,19 @@ load review_gate_helper
     _review_fix
     _gate "git push"
     [ "$status" -eq 2 ]
-    local sha; sha="$(_delta_commit "$output")"
+    local blocked="$output" sha
+    sha="$(_delta_commit "$(printf '%s\n' "$blocked" | grep -- '- /code-review:')")"
     [ -n "$sha" ]
     run git -C "$REPO_DIR" show --format= --numstat "$sha"
     # client.js 는 고친 한 줄만, 본 적 없는 두 파일은 범위의 기준 쪽 판본과의 차이 전체다
     [ "$(printf '%s\n' "$output" | sort)" = "$(printf '1\t0\tclient.js\n1\t0\tother.js\n1\t1\tseed.txt\n')" ]
+
+    # simplify 의 미검토분에는 client.js 가 없다: 이 작업에서 이미 본 파일이라 이후 변경은 code-review 가
+    # 본다(tests/review-gate-simplify-once.bats). 본 적 없는 두 파일은 simplify 에도 그대로 남는다.
+    sha="$(_delta_commit "$(printf '%s\n' "$blocked" | grep -- '- /simplify:')")"
+    [ -n "$sha" ]
+    run git -C "$REPO_DIR" show --format= --numstat "$sha"
+    [ "$(printf '%s\n' "$output" | sort)" = "$(printf '1\t0\tother.js\n1\t1\tseed.txt\n')" ]
 }
 
 @test "리뷰 뒤에 새로 만든 파일만 있어도 그 변경만 담은 커밋을 알려 준다" {

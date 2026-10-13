@@ -51,6 +51,8 @@
 # 리뷰 뒤에 고친 내용에도 같은 기준을 쓴다: 리뷰가 본 판본과 지금 내용의 차이만 따로 재서, 그 차이가
 # Trivial/Small 이면 다시 요구하지 않는다(_review_delta). 리뷰 지적을 반영할 때마다 원래 트랙으로 다시
 # 막으면 재리뷰가 끝나지 않는다.
+# 정리 스킬(simplify)만은 내용이 아니라 "이 작업에서 그 파일을 한 번이라도 봤는가"로 본다. 코드를
+# 고치는 스킬이라 내용으로 재면 자기 수정 때문에 스스로 어긴다(_drop_seen_in_unit 위의 주석).
 #
 # 계약:
 #   review-gate.sh record       stdin=PostToolUse JSON. 항상 exit 0 (게이트가 작업을 막지 않는다).
@@ -140,6 +142,9 @@ LEDGER_REL=".mangolove/.review-ledger"
 # 커버리지는 내용 주소(blob 해시)라, 리뷰가 본 내용과 올리는 내용이 같으면 누가 언제 돌렸든 리뷰된 것이다.
 # 리뷰가 본 내용: "<스킬>\t<blob 해시>\t<경로>" 줄들. 내용 주소 기준이라 세션과 무관하다.
 COVERED_REL=".mangolove/.review-covered"
+# 정리 스킬이 어느 작업에서 어느 파일을 봤는가: "<스킬>\t<작업의 기준 커밋>\t<경로>" 줄들.
+# 커버리지와 달리 내용이 아니라 작업에 매인 사실이라 파일을 따로 둔다(_seen_in_unit 주석 참조).
+UNITS_REL=".mangolove/.review-units"
 NOSCOPE_REL=".mangolove/.review-noscope"
 # 우회를 방금 썼다는 표시(찍힌 시각). 게이트 둘이 직렬로 걸리는데(에이전트 경로,
 # 터미널 경로) 앞쪽이 마커를 소비하면 뒤쪽이 근거 없이 다시 막아 한 번의 공유에 우회가
@@ -172,6 +177,7 @@ _ml_init_state() {
     [ -n "$top" ] && SKIP_REL="$top/.mangolove/.review-skip"
     LEDGER_REL="$STATE_DIR/.review-ledger"
     COVERED_REL="$STATE_DIR/.review-covered"
+    UNITS_REL="$STATE_DIR/.review-units"
     NOSCOPE_REL="$STATE_DIR/.review-noscope"
     USED_REL="$STATE_DIR/.review-skip.used"
 }
@@ -968,7 +974,7 @@ SNAPSHOT_OBJECT_MAX=1048576
 # **스킬 이름을 함께 적는다.** 내용만 적으면 스킬 하나만 돌려도 그 내용이 통째로 covered 가
 # 되어, /simplify 만 돌리고 /code-review 를 건너뛴 push 가 통과한다(실제로 그랬다).
 _snapshot_covered() {
-    local skill="$1" range files present hashes f big small large
+    local skill="$1" range="" files present hashes f big small large seen=""
     local sp=()
     # 범위(COVERAGE_MODE/COVERAGE_PATHS)는 호출자가 정한다(do_record 가 인자를 한 번만 해석한다).
     # 이 스킬이 이 트리를 보지 않았다면 아무 것도 인정하지 않는다.
@@ -992,12 +998,14 @@ _snapshot_covered() {
     fi
     # 리뷰 뒤 변경 커밋을 짚었으면 그 커밋이 부모와 달라진 파일의 올리는 쪽 내용만 적는다.
     if [ "$COVERAGE_MODE" = "commit" ]; then
-        git -c core.quotePath=false diff-tree -r --no-renames "${COVERAGE_COMMIT}^" "$COVERAGE_COMMIT" 2>/dev/null \
+        seen="$(git -c core.quotePath=false diff-tree -r --no-renames "${COVERAGE_COMMIT}^" "$COVERAGE_COMMIT" 2>/dev/null \
             | awk -F'\t' -v s="$skill" '{
                   split($1, a, " ")
                   print s "\t" (a[4] ~ /^0+$/ ? "_absent" : a[4]) "\t" $2
-              }' >> "$COVERED_REL" 2>/dev/null || true
+              }')"
+        [ -z "$seen" ] || printf '%s\n' "$seen" >> "$COVERED_REL" 2>/dev/null || true
         _covered_dedupe
+        _note_unit "$skill" "$seen"
         return 0
     fi
     # 짚은 경로가 있으면 git pathspec 으로 넘긴다. 손으로 "이 파일이 이 경로 아래인가"를
@@ -1068,10 +1076,10 @@ EOF
         # (검사와 해싱 사이에 파일이 사라지면 실제로 난다.) 그럴 땐 통째로 버린다:
         # 커버리지가 비면 불필요한 차단이지만, 어긋나면 조용한 통과다.
         if [ "$(printf '%s' "$hashes" | grep -c '')" -eq "$(printf '%s' "$present" | grep -c '')" ]; then
-            paste <(printf '%s' "$hashes") <(printf '%s' "$present") \
+            seen="$(paste <(printf '%s' "$hashes") <(printf '%s' "$present") \
                 | awk -v s="$skill" -v top="$top/" -F'\t' \
-                      'NF>=2 { p = $2; sub("^" top, "", p); print s "\t" $1 "\t" p }' \
-                >> "$COVERED_REL" 2>/dev/null || true
+                      'NF>=2 { p = $2; sub("^" top, "", p); print s "\t" $1 "\t" p }')"
+            [ -z "$seen" ] || printf '%s\n' "$seen" >> "$COVERED_REL" 2>/dev/null || true
         fi
     fi
     # 사라진 파일은 push 시점에도 _absent 로 계산되므로 같은 표기로 남긴다.
@@ -1079,17 +1087,75 @@ EOF
         | awk -v s="$skill" 'NF {print s "\t_absent\t" $0}' >> "$COVERED_REL" 2>/dev/null || true
 
     _covered_dedupe
+    _note_unit "$skill" "$seen" "$range"
     return 0
 }
 
-# 여러 스킬이 같은 내용을 보므로 중복이 쌓인다. 집합으로 유지한다.
+# 여러 스킬이 같은 내용을 보므로 중복이 쌓인다. 집합으로 유지한다. $1 을 주면 그 파일을 정리한다.
 # sort 가 실패하면 원본을 남긴다: 커버리지 유실은 곧 불필요한 차단이다.
 _covered_dedupe() {
-    [ -f "$COVERED_REL" ] || return 0
-    if sort -u "$COVERED_REL" 2>/dev/null > "$COVERED_REL.tmp"; then
-        mv -f "$COVERED_REL.tmp" "$COVERED_REL" 2>/dev/null || true
+    local f="${1:-$COVERED_REL}"
+    [ -f "$f" ] || return 0
+    if sort -u "$f" 2>/dev/null > "$f.tmp"; then
+        mv -f "$f.tmp" "$f" 2>/dev/null || true
     fi
-    rm -f "$COVERED_REL.tmp" 2>/dev/null || true
+    rm -f "$f.tmp" 2>/dev/null || true
+}
+
+# ── 정리 스킬은 한 작업에서 한 번 본 파일을 다시 요구받지 않는다 ─────────────
+# simplify 는 코드를 고치는 스킬인데 커버리지는 호출 시점(리뷰 에이전트가 돌기 전)의 내용이다.
+# 그래서 simplify 가 지적을 반영해 고친 파일이 simplify 자신에게 "보지 않은 변경"이 되고, 그 변경이
+# Medium 이상이면 push 가 simplify 부족으로 막힌다. 실제 사례를 복원해 확인했다(CRS 2026-10-13:
+# 막힌 36개 파일 가운데 25개가 simplify 자신이 리뷰 전에 고친 파일). 2026-10-10 과 이 레포의
+# 2026-10-13 작업도 같은 사유로 우회했다. 스스로 어기게 돼 있는 기준은 우회를 일상으로 만든다.
+#
+# 그래서 정리 스킬은 내용이 아니라 "이 작업에서 그 파일을 한 번이라도 봤는가"로 본다. 본 파일의
+# 이후 변경(자신의 수정, 리뷰 지적 반영)은 다시 요구하지 않는다. 그 변경은 리뷰 스킬 자신의 판정이
+# 그대로 본다(리뷰가 본 판본과의 차이가 Medium 이상이면 code-review 를 다시 요구한다). 본 적 없는
+# 파일은 예전처럼 재서, 그것만으로 Medium 이상이면 정리 스킬을 요구한다.
+#
+# 작업은 push 범위의 기준 커밋(원격이 이미 가진 부모)으로 가른다. 커버리지는 push 뒤에도 지워지지
+# 않으므로, 작업을 가리지 않고 "본 적 있다"만 물으면 지난 작업에서 본 파일을 다시 고치는 새 작업이
+# 정리를 한 번도 돌리지 않고 통과한다(시제품을 이 레포에 적용했을 때 실제로 그랬다). push 가 되면
+# 기준이 앞으로 가므로 그 뒤의 변경은 새 작업이다. 기록 시점의 기준과 push 시점의 기준이 같아야
+# 같은 작업이다: 추정이 아니라 `<rev> --not --remotes` 의 경계라는 git 사실 둘을 견준다.
+#   - 커밋 전에 돌린 정리: 그때의 범위는 비어 있고(HEAD...HEAD) 그 HEAD 가 곧 나중의 경계다.
+#   - 작업 브랜치에서 돌리고 main 에 fast-forward 로 합쳐 올리는 흐름: 경계가 같다.
+#   - 기준이 달라지는 경우(원격을 받아 rebase, 일부만 먼저 push): 같은 작업으로 보지 않고 예전
+#     판정으로 돌아간다. 덜 넘길 뿐 더 넘기지는 않는다.
+# 받아들인 한계(사용자 결정, 2026-10-13): 정리 뒤에 같은 파일에서 이어 쓴 변경은 정리를 다시 거치지
+# 않는다. 한 작업 트리에서 같은 기준에서 갈라진 다른 브랜치가 같은 파일을 고칠 때도 그렇다.
+PRE_REVIEW_SKILL="simplify"
+
+# 범위("<기준>...<rev>")가 속한 작업: 기준 커밋의 해시. 정할 수 없으면 빈 값.
+_range_unit() {
+    git rev-parse --verify --quiet "${1%%...*}^{commit}" 2>/dev/null || true
+}
+
+# 정리 스킬이 방금 본 파일을 이 작업의 것으로 적는다.
+#   $2 = 방금 적은 커버리지 줄들, $3 = 기록 시점의 범위(안 주면 구한다)
+# 사라진 파일(_absent)은 적지 않는다: 본 것은 "없음"이지 그 파일의 내용이 아니다.
+_note_unit() {
+    local skill="$1" lines="$2" range="${3:-}" unit
+    [ "$skill" = "$PRE_REVIEW_SKILL" ] && [ -n "$lines" ] || return 0
+    if [ -z "$range" ]; then _push_scope HEAD; range="$SCOPE_RANGE"; fi
+    unit="$(_range_unit "$range")"
+    [ -n "$unit" ] || return 0
+    printf '%s\n' "$lines" | awk -F'\t' -v u="$unit" \
+        'NF >= 3 && $2 != "_absent" { print $1 "\t" u "\t" $3 }' >> "$UNITS_REL" 2>/dev/null || true
+    _covered_dedupe "$UNITS_REL"
+}
+
+# _uncovered_plan 의 출력($1)에서, 스킬 $2 가 작업 $3 에서 이미 본 경로의 줄을 뺀 나머지를 낸다.
+_drop_seen_in_unit() {
+    printf '%s\n' "$1" | awk -F'\t' -v skill="$2" -v unit="$3" -v units="$UNITS_REL" '
+        BEGIN {
+            while ((getline line < units) > 0) {
+                split(line, f, "\t")
+                if (f[1] == skill && f[2] == unit) seen[f[3]] = 1
+            }
+        }
+        NF && !($6 in seen)'
 }
 
 # 범위의 git diff --raw 줄들: ":<기준 모드> <올리는 모드> <기준 blob> <올리는 blob> <상태>\t<경로>[\t<새 경로>]".
@@ -1356,6 +1422,8 @@ _record_skill() {
     _ensure_regular_file "$LEDGER_REL" || return 0
     _ensure_regular_file "$COVERED_REL" || return 0
     _ensure_regular_file "$COVERED_REL.tmp" || return 0
+    _ensure_regular_file "$UNITS_REL" || return 0
+    _ensure_regular_file "$UNITS_REL.tmp" || return 0
     _ml_seed_gitignore "${SKIP_REL%/*}"
     # 같은 스킬을 여러 번 호출해도 한 줄만 남긴다: 원장은 집합이지 호출 로그가 아니다.
     grep -qxF "$skill" "$LEDGER_REL" 2>/dev/null || printf '%s\n' "$skill" >> "$LEDGER_REL" 2>/dev/null || true
@@ -1388,11 +1456,13 @@ REVIEW_BLOCK_KIND=""
 REVIEW_DELTA_NOTE=""
 # 차단 목록에 리뷰 뒤 변경 커밋을 실었는가. 안내 문구가 갈린다(그 변경만 다시 보라 / 예전 문구).
 REVIEW_DELTA_SHOWN=""
+# 정리 스킬이 이 작업에서 이미 본 파일이라 다시 요구하지 않은 것이 있으면 그 사실 한 줄(_drop_seen_in_unit).
+REVIEW_ONCE_NOTE=""
 _analyze() {
     local ref="${1:-}" json tr s missing="" detail="" p sp=()
     local total paths=() key rj rt rreq cache_key="" cache_rt="" cache_rreq=""
-    local raw plan dc c seen partial
-    REVIEW_BLOCK_KIND=""; REVIEW_DELTA_NOTE=""; REVIEW_DELTA_SHOWN=""
+    local raw plan dc c seen partial unit kept
+    REVIEW_BLOCK_KIND=""; REVIEW_DELTA_NOTE=""; REVIEW_DELTA_SHOWN=""; REVIEW_ONCE_NOTE=""
     # 범위와 경로 제한(SCOPE_PATHS)은 호출자가 _push_scope 로 정한다. 여기서 다시 구하지 않는다.
     [ -z "$ref" ] && return 1
     REVIEW_RANGE="$ref"
@@ -1415,6 +1485,16 @@ _analyze() {
     #   - 리뷰를 한 번 돌린 뒤 계속 새로 써서 push
     for s in $REVIEW_REQUIRED; do
         paths=(); seen=0; plan="$(_uncovered_plan "$s" "$raw")"
+        # 정리 스킬이 이 작업에서 이미 본 파일은 미검토분에서 뺀다. 남은 것(본 적 없는 파일)만 아래에서 잰다.
+        if [ "$s" = "$PRE_REVIEW_SKILL" ] && [ -n "$plan" ] && [ -s "$UNITS_REL" ]; then
+            unit="$(_range_unit "$ref")"
+            [ -z "$unit" ] || kept="$(_drop_seen_in_unit "$plan" "$s" "$unit")"
+            if [ -n "$unit" ] && [ "$kept" != "$plan" ]; then
+                REVIEW_ONCE_NOTE="  ${s} 는 이 작업에서 이미 본 파일 $(( $(printf '%s\n' "$plan" | grep -c .) - $(printf '%s\n' "$kept" | grep -c .) ))개의 이후 변경을 다시 요구하지 않습니다 (그 변경은 code-review 가 봅니다)
+"
+                plan="$kept"
+            fi
+        fi
         while IFS=$'\t' read -r _ _ _ _ _ p c; do
             [ -n "$p" ] || continue
             paths+=("$p"); [ -z "$c" ] || seen=1
@@ -1561,7 +1641,7 @@ _emit_block() {
         echo "  ${REVIEW_JSON}"
         echo ""
         echo "${REVIEW_TRACK} 트랙에 필요한 리뷰 중 아직 이 내용을 보지 않은 것:"
-        printf '%s' "${REVIEW_DETAIL}"
+        printf '%s' "${REVIEW_DETAIL}${REVIEW_ONCE_NOTE}"
         echo ""
         case "$REVIEW_BLOCK_KIND" in
             missing)
@@ -1611,10 +1691,15 @@ _judge_rev() {
         [ -z "$REVIEW_REQUIRED" ] || echo "MangoLove review gate: ${REVIEW_TRACK} 필수 리뷰 충족 (${REVIEW_REQUIRED})" >&2
         # 리뷰 뒤 변경을 따로 재서 넘긴 것은 "강제할 수 있었으나 넘긴 시점"이다. 이 빈도가 안 보이면
         # 그 판정이 느슨한지 알 방법이 없다. 두 훅(에이전트, 터미널)이 이어 도는 push 는 각자 한 번씩 적는다.
+        local rec="$GATE_DIR/efficacy-recorder.sh"
         if [ -n "$REVIEW_DELTA_NOTE" ]; then
             printf '%s' "$REVIEW_DELTA_NOTE" >&2
-            local rec="$GATE_DIR/efficacy-recorder.sh"
             if [ -f "$rec" ]; then bash "$rec" record-skip review "delta" 2>/dev/null || true; fi
+        fi
+        # 정리 스킬을 다시 요구하지 않고 넘긴 것도 같은 이유로 따로 센다.
+        if [ -n "$REVIEW_ONCE_NOTE" ]; then
+            printf '%s' "$REVIEW_ONCE_NOTE" >&2
+            if [ -f "$rec" ]; then bash "$rec" record-skip review "simplify-once" 2>/dev/null || true; fi
         fi
         return 0
     fi
@@ -1785,7 +1870,7 @@ do_status() {
         echo "  판정: BLOCK, 부족: ${REVIEW_MISSING}"
         printf '%s' "${REVIEW_DETAIL}"
     fi
-    printf '%s' "${REVIEW_DELTA_NOTE}"
+    printf '%s' "${REVIEW_DELTA_NOTE}${REVIEW_ONCE_NOTE}"
 }
 
 main() {

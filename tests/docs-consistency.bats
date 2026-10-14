@@ -124,10 +124,25 @@ setup() {
     local core="$REPO/methodology/core.md"
     grep -q '### 리뷰 발견 처리와 종료 조건' "$core"
     grep -qF '범위 전체를 보는 리뷰는 **한 번**이다' "$core"
-    grep -qF '| Minor | 고치지 않는다.' "$core"
+    grep -qE '^\| Minor \|.*\| 고치지 않는다\.' "$core"
     grep -q 'mangolove review status' "$core"
     # 어느 리뷰가 실제 결함을 찾는지는 이 줄이 쌓여야 알 수 있다. 작업 로그에서 이 머리말로 찾는다.
     grep -qF '리뷰 출처별 고침(단독):' "$core"
+}
+
+@test "methodology: Minor 의 정의와 개선 단계가 코어에 상주한다" {
+    # 회귀 (CRS-1153): 코어에 Minor 의 정의가 없어, 예약 금액이 틀리는 지적과 시스템 사이 값이
+    # 어긋나는 지적을 Minor 로 넘기고 보고만 했다. 정의는 Large 스킬에만 있어 Medium 에서는 보이지 않았다.
+    local core="$REPO/methodology/core.md"
+    grep -qE '^\| 개선 \|.*\| 고친다\.' "$core"
+    grep -qE '^\| Minor \| 개선에 해당하지 않는 지적' "$core"
+    grep -qF 'Minor 로 넘기기 전에' "$core"
+    # CRS 에서 사용자가 승인한 기준과 반대되는 문장: 범위 밖 개선을 보고만 하게 하던 줄
+    run grep -n '범위 밖 개선)은 고치지 않고' "$REPO/methodology/strict.md"
+    [ "$status" -eq 1 ]
+    # 심각도 정의는 코어 한 곳에만 둔다. 스킬 쪽 표가 다시 생기면 두 정의가 갈라진다.
+    run grep -n '^| \*\*Minor\*\* |' "$REPO/methodology/strict.md"
+    [ "$status" -eq 1 ]
 }
 
 @test "methodology: 발견을 전부 고치거나 고칠 때마다 재리뷰하라는 문장이 없다" {

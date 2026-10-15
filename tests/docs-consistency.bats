@@ -124,7 +124,7 @@ setup() {
     local core="$REPO/methodology/core.md"
     grep -q '### 리뷰 발견 처리와 종료 조건' "$core"
     grep -qF '범위 전체를 보는 리뷰는 **한 번**이다' "$core"
-    grep -qE '^\| Minor \|.*\| 고치지 않는다\.' "$core"
+    grep -qE '^\| Minor \|.*\| 맞는 지적이고' "$core"
     grep -q 'mangolove review status' "$core"
     # 어느 리뷰가 실제 결함을 찾는지는 이 줄이 쌓여야 알 수 있다. 작업 로그에서 이 머리말로 찾는다.
     grep -qF '리뷰 출처별 고침(단독):' "$core"
@@ -143,6 +143,20 @@ setup() {
     # 심각도 정의는 코어 한 곳에만 둔다. 스킬 쪽 표가 다시 생기면 두 정의가 갈라진다.
     run grep -n '^| \*\*Minor\*\* |' "$REPO/methodology/strict.md"
     [ "$status" -eq 1 ]
+}
+
+@test "methodology: 고칠 Minor 는 사용자 지시 없이 에이전트가 판정해 고친다" {
+    # 사용자 요구 (2026-10-15): "사소한 것도 고쳐라", "리뷰 Minor 도 고쳐라" 를 말하지 않아도
+    # 고쳐야 맞는 Minor 는 알아서 고친다. 지시를 조건으로 거는 문장이 돌아오면 다시 묻게 된다.
+    local md="$REPO/methodology/strict.md"
+    run grep -n '사소한 것도 고쳐라' "$md" "$REPO/prompts/system-prompt.md"
+    [ "$status" -eq 1 ]
+    run grep -n '사용자가 고르게 한다' "$md"
+    [ "$status" -eq 1 ]
+    run grep -n 'Minor 는 목록으로 보고한다' "$REPO/prompts/system-prompt.md"
+    [ "$status" -eq 1 ]
+    # 연쇄 방지: Minor 를 고친 변경은 다시 리뷰하지 않는다
+    grep -qF 'Minor 를 고친 변경은 다시 리뷰하지 않는다' "$REPO/methodology/core.md"
 }
 
 @test "methodology: 발견을 전부 고치거나 고칠 때마다 재리뷰하라는 문장이 없다" {

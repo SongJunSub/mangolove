@@ -1131,7 +1131,7 @@ _covered_dedupe() {
 # "이 작업"은 추정하지 않고 git 사실로 가른다. 커버리지는 push 뒤에도 지워지지 않으므로, 작업을
 # 가리지 않고 "본 적 있다"만 물으면 지난 작업이나 다른 브랜치의 기록이 새 작업을 면제한다(시제품을
 # 이 레포에 적용했을 때, 그리고 리뷰에서 같은 main 에서 티켓 둘을 이어 시작해 봤을 때 실제로 그랬다).
-# 기록은 둘 다 맞아야 이 작업의 것이다.
+# 1 과 2 가 모두 맞거나 3 이 맞아야 이 작업의 기록이다.
 #   1) 기준이 같다: 기록할 때의 범위 기준 커밋이 올릴 때의 경계(`<rev> --not --remotes`) 가운데 하나다.
 #      push 가 되면 경계가 앞으로 가므로 그 뒤의 변경은 새 작업이다. 원격을 merge 로 받으면 경계가
 #      둘이 되고 순서가 바뀌므로 첫째만 보지 않고 전부와 견준다.
@@ -1142,13 +1142,33 @@ _covered_dedupe() {
 #         첫 커밋 전의 기록(그때의 커밋 = 기준)에는 쓰지 않는다: 기준은 그 기준에서 갈라진 모든
 #         브랜치의 조상이라 아무것도 가르지 못한다.
 #      같은 기준에서 갈라진 다른 브랜치, 버리고 지운 브랜치에서 본 기록은 a 와 b 어디에도 맞지 않는다.
-# 안 맞으면 같은 작업으로 보지 않고 예전 판정으로 돌아간다(rebase 로 기준이 바뀐 경우, 일부만 먼저
-# push 한 경우, 브랜치 이름을 바꾼 경우). 덜 넘길 뿐 더 넘기지는 않는다.
+#   3) 1 이 안 맞아도, 올리기 전에 앞으로 나아간 기준 위로 리베이스한 같은 작업이면 인정한다
+#      (_carried_units). 기준이 바뀌는 것은 같으므로 브랜치의 reflog 로 가른다. 다음이 모두 맞아야 한다.
+#      a) 기록할 때 서 있던 브랜치를 지금 올린다(2-a).
+#      b) 기록할 때의 커밋이 그 브랜치의 reflog 에 있다. 브랜치를 지우면 reflog 도 지워지므로,
+#         지우고 같은 이름으로 다른 커밋에서 다시 만든 브랜치는 여기서 빠진다.
+#      c) 그때의 기준이 지금 경계 가운데 하나의 조상이다(기준이 옆이 아니라 앞으로 갔다).
+#      d) 기록할 때의 커밋과 그 뒤 브랜치 reflog 에 나온 커밋이 어느 원격 브랜치에도 없다(기준 커밋은
+#         원래 원격에 있으므로 뺀다). 작업이 이 머신을 떠난 적이 없다는 뜻이다. 기록할 때의 커밋도 보는
+#         것은, 커밋한 뒤에 돌린 기록이면 그 커밋이 작업의 일부라서다. 올린 뒤 이어 쓴 작업, 합쳐진 뒤
+#         같은 이름을 기준으로 되돌려 시작한 작업(`git switch -C <브랜치> origin/develop`)은 앞 작업의
+#         커밋이 원격에 있어 여기서 빠진다. 커밋 없이 원격 끝으로 당긴 경우(fast-forward)도 빠진다.
+#         squash 머지는 이 브랜치의 커밋을 원격에 남기지 않으므로, upstream 설정이 남아 있는데 그 ref 가
+#         사라졌으면(`[gone]`, `push -u` 뒤 prune) 떠난 작업으로 본다.
+#      실제 사례(CRS 2026-10-16): 커밋 전에 simplify 를 돌리고 그사이 develop 에 들어온 남의 커밋
+#      3개 위로 리베이스하자, simplify 가 본 14개를 포함한 20개를 미검토로 세어 다시 요구했다
+#      (simplify 뒤에 처음 손댄 6개만 재면 Small). 그 리뷰 에이전트 4개에 63만 토큰을 썼다.
+# 안 맞으면 같은 작업으로 보지 않고 예전 판정으로 돌아간다(일부만 먼저 push 한 경우, 브랜치 이름을
+# 바꾼 경우, reflog 가 없거나 만료된 경우). 덜 넘길 뿐 더 넘기지는 않는다.
 #
 # 남는 한계:
 #   - 정리 뒤에 같은 파일에서 이어 쓴 변경은 정리를 다시 거치지 않는다(사용자 결정, 2026-10-13).
-#   - 같은 브랜치 이름으로 같은 기준에서 작업을 처음부터 다시 하면(reset --hard, 지우고 같은 이름으로
-#     다시 만들기) 앞 시도에서 본 파일은 면제된다.
+#   - 올리지 않은 브랜치에서 작업을 처음부터 다시 하면(reset --hard) 앞 시도에서 본 파일은 면제된다.
+#     지우고 같은 이름으로 같은 커밋에서 다시 만든 브랜치도 그렇다(첫 커밋 전의 기록은 그때의 커밋이
+#     곧 기준이라 3-b 로 가를 수 없다).
+#   - "올렸다"는 원격 추적 ref 로만 안다. URL 로 올리거나, -u 없이 올린 브랜치가 squash 머지되고
+#     prune 되면 올린 흔적이 남지 않아 같은 작업으로 본다. 1 도 같은 사실에 기대므로 리베이스하지
+#     않은 같은 경우는 이 규칙 전에도 같은 작업이었다.
 PRE_REVIEW_SKILL="simplify"
 # 작업 기록에서 변경분 커밋의 줄을 가리는 첫 필드. 스킬 이름과 겹치지 않는다.
 UNIT_DELTA_ROW="=delta"
@@ -1193,10 +1213,80 @@ _note_delta() {
         "$(git for-each-ref --points-at "$rev" --count=1 --format='%(refname)' refs/heads 2>/dev/null)"
 }
 
+# $1 이 나머지 인자 가운데 하나의 조상인가.
+_ancestor_of_any() {
+    local c="$1" x
+    shift
+    for x in "$@"; do
+        ! git merge-base --is-ancestor "$c" "$x" 2>/dev/null || return 0
+    done
+    return 1
+}
+
+# 기준이 지금 경계와 다르지만, 올리기 전에 앞으로 나아간 기준 위로 리베이스한 같은 작업의 기록을
+# "<기준>:<그때의 커밋>:<브랜치>" 로 한 줄씩 낸다(PRE_REVIEW_SKILL 위 주석의 3). ':' 는 ref 이름에 쓸 수 없다.
+#   $1 = 스킬  $2 = 이 범위의 기준들(앞뒤 공백 포함)  $3 = 올리는 커밋을 가리키는 브랜치들(앞뒤 공백 포함)
+_carried_units() {
+    local skill="$1" bases="$2" tips="$3" b0 h0 br lbr="" log="" gone="" newer c
+    local -a contains
+    while IFS=$'\t' read -r b0 h0 br; do
+        # 후보는 대개 올리는 브랜치 하나의 것이라 reflog 는 브랜치가 바뀔 때만 다시 읽는다.
+        if [ "$br" != "$lbr" ]; then
+            lbr="$br"
+            log="$(git reflog show --format=%H "$br" -- 2>/dev/null)" || log=""
+            gone="$(git for-each-ref --format='%(upstream:track)' "$br" 2>/dev/null)"
+        fi
+        # d) upstream 이 사라진 브랜치(올린 뒤 prune)는 이미 떠난 작업이다.
+        [ "$gone" != "[gone]" ] || continue
+        # b, d) reflog 는 최신순이다. 첫 줄부터 그때의 커밋이 처음 나온 자리(가장 오래된 자리)까지가
+        # 기록할 때와 그 뒤의 이력이다. 그때의 커밋이 없으면 b 에서 빠진다.
+        newer="$(printf '%s\n' "$log" | awk -v h="$h0" -v b="$b0" '
+            { line[NR] = $0 } $0 == h { last = NR }
+            END { if (!last) exit 1; for (i = 1; i <= last; i++) if (line[i] != b) print line[i] }')" \
+            || continue
+        # c) 그때의 기준이 지금 경계 가운데 하나의 조상이다.
+        # shellcheck disable=SC2086  # 기준들은 공백으로 나열한 해시다
+        _ancestor_of_any "$b0" $bases || continue
+        # d) 그 이력의 커밋이 어느 원격 브랜치에도 없다. --contains 를 여럿 주면 하나라도 포함하는
+        # ref 를 낸다. 하나도 주지 않으면 모든 ref 를 내므로 이력이 비었을 때는 묻지 않는다.
+        if [ -n "$newer" ]; then
+            contains=()
+            while IFS= read -r c; do contains+=("--contains=$c"); done <<< "$newer"
+            c="$(git for-each-ref --count=1 --format=x "${contains[@]}" refs/remotes 2>/dev/null)" || continue
+            [ -z "$c" ] || continue
+        fi
+        printf '%s:%s:%s\n' "$b0" "$h0" "$br"
+    done < <(awk -F'\t' -v skill="$skill" -v bases="$bases" -v tips="$tips" '
+                 $1 == skill && $4 != "" && $5 != "" && !index(bases, " " $2 " ") && index(tips, " " $5 " ") \
+                     && !(($2, $4, $5) in asked) { asked[$2, $4, $5] = 1; print $2 "\t" $4 "\t" $5 }
+             ' "$UNITS_REL" 2>/dev/null | sort -t "$(printf '\t')" -k3,3)
+}
+
+# plan($1)에서 스킬 $2 의 기록이 이 작업에서 이미 본 경로의 줄을 뺀다.
+#   $3 = 기준들  $4 = 올리는 커밋의 브랜치들  $5 = 조상으로 인정된 그때의 커밋들
+#   $6 = 리베이스한 같은 작업으로 인정된 기록들(_carried_units, 공백으로 나열)
+_unit_filter() {
+    printf '%s\n' "$1" | awk -F'\t' -v skill="$2" -v bases="$3" -v tips="$4" \
+                              -v heads="$5 " -v carried=" $6 " -v units="$UNITS_REL" '
+        BEGIN {
+            while ((getline line < units) > 0) {
+                split(line, f, "\t")
+                if (f[1] != skill) continue
+                if (index(bases, " " f[2] " ")) {
+                    if ((f[5] != "" && index(tips, " " f[5] " ")) || (f[4] != f[2] && index(heads, " " f[4] " ")))
+                        seen[f[3]] = 1
+                } else if (index(carried, " " f[2] ":" f[4] ":" f[5] " ")) {
+                    seen[f[3]] = 1          # 리베이스한 같은 작업(위 주석의 3)
+                }
+            }
+        }
+        NF && !($6 in seen)'
+}
+
 # _uncovered_plan 의 출력($1)에서 스킬 $2 가 이 작업에서 이미 본 경로의 줄을 뺀 나머지를 낸다.
 #   $3 = 이 범위의 기준들(공백으로 나열)  $4 = 올리는 커밋
 _drop_seen_in_unit() {
-    local plan="$1" skill="$2" bases=" $3 " rev="$4" tips h ok=""
+    local plan="$1" skill="$2" bases=" $3 " rev="$4" tips h ok="" kept carried
     tips=" $(git for-each-ref --points-at "$rev" --format='%(refname)' refs/heads 2>/dev/null | tr '\n' ' ')"
     # 조상 관계는 브랜치로 인정되지 않은 기록에만, 그리고 첫 커밋 뒤의 기록에만 묻는다(위 주석의 2-b).
     while IFS= read -r h; do
@@ -1206,17 +1296,13 @@ _drop_seen_in_unit() {
                  $1 == skill && index(bases, " " $2 " ") && $4 != $2 \
                      && !($5 != "" && index(tips, " " $5 " ")) && !($4 in asked) { asked[$4] = 1; print $4 }
              ' "$UNITS_REL" 2>/dev/null)
-    printf '%s\n' "$plan" | awk -F'\t' -v skill="$skill" -v bases="$bases" -v tips="$tips" \
-                                 -v heads="$ok " -v units="$UNITS_REL" '
-        BEGIN {
-            while ((getline line < units) > 0) {
-                split(line, f, "\t")
-                if (f[1] != skill || !index(bases, " " f[2] " ")) continue
-                if ((f[5] != "" && index(tips, " " f[5] " ")) || (f[4] != f[2] && index(heads, " " f[4] " ")))
-                    seen[f[3]] = 1
-            }
-        }
-        NF && !($6 in seen)'
+    kept="$(_unit_filter "$plan" "$skill" "$bases" "$tips" "$ok" "")"
+    # 같은 기준의 기록이 다 덮었으면 리베이스 판정(reflog, 원격 대조)은 하지 않는다.
+    if [ -n "$kept" ]; then
+        carried="$(_carried_units "$skill" "$bases" "$tips" | tr '\n' ' ')"
+        [ -z "${carried// /}" ] || kept="$(_unit_filter "$kept" "$skill" "$bases" "$tips" "$ok" "$carried")"
+    fi
+    printf '%s\n' "$kept"
 }
 
 # 범위의 git diff --raw 줄들: ":<기준 모드> <올리는 모드> <기준 blob> <올리는 blob> <상태>\t<경로>[\t<새 경로>]".

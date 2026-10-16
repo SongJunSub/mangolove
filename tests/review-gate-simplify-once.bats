@@ -14,13 +14,6 @@ load review_gate_helper
 # 위험 신호 없이 파일 수만으로 Medium 인 작업(필수 리뷰: simplify, code-review)을 커밋한다.
 _medium_work() { _eleven_files; _commit_all "work"; }
 
-# 이미 있는 mod*.js 를 전부 고친다(그 변경만으로 Medium). $1 이 있으면 그 제목으로 커밋한다.
-_edit_all() {
-    local f
-    for f in "$REPO_DIR"/mod*.js; do echo "export const EDITED = '${1:-edit}'" >> "$f"; done
-    [ -z "${1:-}" ] || _commit_all "$1"
-}
-
 _delta_files() { git -C "$REPO_DIR" show --format= --name-only "$1"; }
 
 @test "simplify 가 고친 내용 때문에 simplify 를 다시 요구하지 않는다" {
@@ -248,12 +241,7 @@ _delta_files() { git -C "$REPO_DIR" show --format= --name-only "$1"; }
     _record simplify
     _edit_all "simplify fixes"
     _record code-review
-    git -C "$REPO_DIR" checkout -q -b upstream origin/main
-    echo upstream > "$REPO_DIR/upstream.txt"
-    _commit_all "upstream work"
-    git -C "$REPO_DIR" update-ref refs/remotes/origin/main HEAD
-    git -C "$REPO_DIR" checkout -q main
-    git -C "$REPO_DIR" branch -q -D upstream
+    _advance_upstream work
     git -C "$REPO_DIR" merge -q --no-edit origin/main
     _gate "git push"
     [ "$status" -eq 0 ]

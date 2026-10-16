@@ -139,6 +139,27 @@ _commit_all() {
     git -C "$REPO_DIR" commit -qm "$1"
 }
 
+# 이미 있는 mod*.js 를 전부 고친다(그 변경만으로 Medium). $1 이 있으면 그 제목으로 커밋한다.
+_edit_all() {
+    local f
+    for f in "$REPO_DIR"/mod*.js; do echo "export const EDITED = '${1:-edit}'" >> "$f"; done
+    [ -z "${1:-}" ] || _commit_all "$1"
+}
+
+# 남이 origin/main 에 올린 커밋 하나(작업과 겹치지 않는 파일). 지금 자리로 돌아온다.
+# 그 파일만 커밋한다: 커밋하지 않은 작업 변경은 따라가지 않고 작업 트리에 그대로 남는다.
+_advance_upstream() {
+    local back
+    back="$(git -C "$REPO_DIR" symbolic-ref -q --short HEAD || git -C "$REPO_DIR" rev-parse HEAD)"
+    git -C "$REPO_DIR" checkout -q -B upstream-tmp origin/main
+    echo "$1" > "$REPO_DIR/upstream-$1.txt"
+    git -C "$REPO_DIR" add "upstream-$1.txt"
+    git -C "$REPO_DIR" commit -qm "upstream $1"
+    git -C "$REPO_DIR" update-ref refs/remotes/origin/main HEAD
+    git -C "$REPO_DIR" checkout -q "$back"
+    git -C "$REPO_DIR" branch -q -D upstream-tmp
+}
+
 # 리뷰 뒤에 주석 한 줄만 고쳐 커밋한다(그 차이만으로는 Trivial). $1 은 고칠 파일.
 _review_fix() {
     echo "// 타임아웃은 호출부가 정한다" >> "$REPO_DIR/${1:-client.js}"

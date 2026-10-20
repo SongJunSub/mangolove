@@ -418,10 +418,7 @@ _ml_heal_install_gitignore() {
     git -C "$dir" checkout -q -- .gitignore 2>/dev/null || true
 }
 
-# 방금 받아 온 것(FETCH_HEAD)으로 설치본을 올린다. fetch 는 호출한 쪽이 먼저 한다. $@ 는
-# git merge 에 그대로 넘긴다(--quiet 등).
-#   FETCH_HEAD: origin/main 추적 참조는 클론의 fetch 설정이 main 을 매핑할 때만 갱신된다.
-#              단일 브랜치 클론에서는 낡은 참조로 "이미 최신"이 나온다.
+# $1=폴더를 $2=커밋으로 fast-forward 한다. 나머지 인자는 git merge 에 그대로 넘긴다(--quiet 등).
 #   --ff-only: 올릴 수 없으면 트리를 건드리지 않고 실패한다. 병합 충돌이 스크립트에 충돌 표시를
 #              남기면 게이트가 구문 오류로 죽은 채 세션이 뜬다.
 #   merge.autostash=false: 로컬 수정을 치웠다 되돌리는 autostash 를 쓰지 않는다. 되돌리다
@@ -429,9 +426,18 @@ _ml_heal_install_gitignore() {
 #              설정에 켜져 있어도 여기서는 끈다.
 # 사용자가 직접 고친 파일을 새 버전이 건드리면 git 이 아무것도 바꾸지 않고 거부하고, 호출한
 # 쪽이 그 사실을 알린다.
+_ml_ff_to() {
+    local dir="$1" rev="$2"
+    shift 2
+    git -C "$dir" -c merge.autostash=false merge --ff-only "$@" "$rev"
+}
+
+# 방금 받아 온 것(FETCH_HEAD)으로 설치본을 올린다. fetch 는 호출한 쪽이 먼저 한다.
+#   FETCH_HEAD: origin/main 추적 참조는 클론의 fetch 설정이 main 을 매핑할 때만 갱신된다.
+#              단일 브랜치 클론에서는 낡은 참조로 "이미 최신"이 나온다.
 _ml_ff_install() {
     _ml_heal_install_gitignore "$MANGOLOVE_DIR"
-    git -C "$MANGOLOVE_DIR" -c merge.autostash=false merge --ff-only "$@" FETCH_HEAD
+    _ml_ff_to "$MANGOLOVE_DIR" FETCH_HEAD "$@"
 }
 
 _sync_after_pull() {

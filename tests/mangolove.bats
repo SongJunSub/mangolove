@@ -922,3 +922,152 @@ FAKE
     [[ "$output" == *"Project not found"* ]]
     [ ! -e "$TEST_DIR/switch-calls" ]
 }
+
+# ─────────────────────────────────────────────
+# 프로젝트 당겨 오기: 세션을 띄우기 전에 지금 브랜치를 같은 이름의 원격 브랜치로 fast-forward
+# ─────────────────────────────────────────────
+
+# origin 과 develop 브랜치를 추적하는 클론을 만든다. PSEED(원격에 올리는 쪽), PROJ 를 남긴다.
+_project_with_origin() {
+    PSEED="$TEST_DIR/pseed"; PROJ="$TEST_DIR/proj"
+    git init -q -b develop "$PSEED"
+    git -C "$PSEED" config user.email t@example.com
+    git -C "$PSEED" config user.name t
+    printf 'v1\n' > "$PSEED/CLAUDE.md"
+    git -C "$PSEED" add -A
+    git -C "$PSEED" commit -q -m init
+    git clone -q --bare "$PSEED" "$TEST_DIR/porigin.git"
+    git -C "$PSEED" remote add origin "$TEST_DIR/porigin.git"
+    git clone -q "$TEST_DIR/porigin.git" "$PROJ"
+    git -C "$PROJ" config user.email t@example.com
+    git -C "$PROJ" config user.name t
+}
+
+# 원격 develop 에 커밋 하나를 더한다. $1=CLAUDE.md 에 쓸 내용
+_origin_advances() {
+    printf '%s\n' "$1" > "$PSEED/CLAUDE.md"
+    git -C "$PSEED" commit -q -am "docs: $1"
+    git -C "$PSEED" push -q origin develop
+}
+
+# 당겨 오기를 돌리고, 실패로 끝나지 않고 다음 단계로 넘어갔는지 확인한다.
+# $1=당겨 오기 전에 실행할 문장(설정을 바꿀 때)
+_run_sync() {
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'; ${1:-} cd '$PROJ' && _ml_sync_project; echo AFTER-SYNC"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"AFTER-SYNC"* ]]
+}
+
+@test "sync: 깨끗한 브랜치는 같은 이름의 원격 브랜치로 당겨 온다" {
+    _project_with_origin
+    _origin_advances v2
+    _origin_advances v3
+    _run_sync
+    [[ "$output" == *"2커밋"* ]]
+    [ "$(git -C "$PROJ" rev-parse HEAD)" = "$(git -C "$PSEED" rev-parse HEAD)" ]
+    [ "$(cat "$PROJ/CLAUDE.md")" = "v3" ]
+}
+
+@test "sync: 이미 최신이면 아무것도 출력하지 않는다" {
+    _project_with_origin
+    _run_sync
+    [ "$output" = "AFTER-SYNC" ]
+}
+
+@test "sync: 추적 파일에 변경이 있으면 당기지 않고 뒤처진 커밋 수를 알린다" {
+    _project_with_origin
+    printf 'mine\n' > "$PROJ/CLAUDE.md"
+    local before; before="$(git -C "$PROJ" rev-parse HEAD)"
+    _origin_advances v2
+    _run_sync
+    [[ "$output" == *"로컬 변경"* ]]
+    [[ "$output" == *"1커밋"* ]]
+    [ "$(git -C "$PROJ" rev-parse HEAD)" = "$before" ]
+    [ "$(cat "$PROJ/CLAUDE.md")" = "mine" ]
+}
+
+# 추적하지 않는 파일은 다른 세션의 메모, 빌드 산출물 같은 것이라 당기기를 막지 않는다.
+@test "sync: 추적하지 않는 파일만 있으면 당겨 온다" {
+    _project_with_origin
+    printf 'note\n' > "$PROJ/note.txt"
+    _origin_advances v2
+    _run_sync
+    [ "$(git -C "$PROJ" rev-parse HEAD)" = "$(git -C "$PSEED" rev-parse HEAD)" ]
+    [ -f "$PROJ/note.txt" ]
+}
+
+@test "sync: 로컬에만 있는 커밋이 있으면 당기지 않고 알린다" {
+    _project_with_origin
+    printf 'x\n' > "$PROJ/local.txt"
+    git -C "$PROJ" add local.txt
+    git -C "$PROJ" commit -q -m local
+    local before; before="$(git -C "$PROJ" rev-parse HEAD)"
+    _origin_advances v2
+    _run_sync
+    [[ "$output" == *"로컬 커밋"* ]]
+    [[ "$output" == *"1커밋"* ]]
+    [ "$(git -C "$PROJ" rev-parse HEAD)" = "$before" ]
+}
+
+# `git worktree add -b X origin/develop` 같은 브랜치는 develop 을 추적한다. 이름을 보지 않으면
+# 기능 브랜치에 develop 이 조용히 들어간다.
+@test "sync: upstream 이름이 브랜치 이름과 다르면 건드리지 않는다" {
+    _project_with_origin
+    git -C "$PROJ" checkout -q -b CRS-1 --track origin/develop
+    local before; before="$(git -C "$PROJ" rev-parse HEAD)"
+    _origin_advances v2
+    _run_sync
+    [ "$output" = "AFTER-SYNC" ]
+    [ "$(git -C "$PROJ" rev-parse HEAD)" = "$before" ]
+}
+
+@test "sync: git 저장소가 아니거나 브랜치가 없으면 조용히 넘어간다" {
+    PROJ="$TEST_DIR/plain"; mkdir -p "$PROJ"
+    _run_sync
+    [ "$output" = "AFTER-SYNC" ]
+    _project_with_origin
+    git -C "$PROJ" checkout -q --detach
+    _origin_advances v2
+    _run_sync
+    [ "$output" = "AFTER-SYNC" ]
+}
+
+@test "sync: MANGOLOVE_PROJECT_SYNC=off 면 받아 오지도 않는다" {
+    _project_with_origin
+    local before; before="$(git -C "$PROJ" rev-parse HEAD)"
+    _origin_advances v2
+    _run_sync 'MANGOLOVE_PROJECT_SYNC=off;'
+    [ "$output" = "AFTER-SYNC" ]
+    # 받아 오지도 않았다: 추적 참조가 그대로다
+    [ "$(git -C "$PROJ" rev-parse origin/develop)" = "$before" ]
+}
+
+@test "sync: 받아 오지 못하면 한 줄 알리고 실행을 계속한다" {
+    _project_with_origin
+    git -C "$PROJ" remote set-url origin "$TEST_DIR/missing.git"
+    _run_sync
+    [[ "$output" == *"받아 오지 못"* ]]
+}
+
+# 응답하지 않는 원격이 세션 시작을 붙잡지 않는다. ext:: 는 공백으로 인자를 나누므로
+# `sh -c "..."` 처럼 따옴표를 쓰면 곧바로 실패해 시간 초과 경로를 타지 않는다.
+@test "sync: 받아 오기가 시간을 넘기면 끊고 실행을 계속한다" {
+    _project_with_origin
+    git -C "$PROJ" config protocol.ext.allow always
+    git -C "$PROJ" remote set-url origin 'ext::sleep 3'
+    local start; start="$(date +%s)"
+    _run_sync 'ML_SYNC_TIMEOUT=1;'
+    [[ "$output" == *"받아 오지 못"* ]]
+    [ "$(( $(date +%s) - start ))" -lt 3 ]
+}
+
+@test "sync: mangolove 를 실행하면 세션을 띄우기 전에 당겨 온다" {
+    _fake_claude_recording
+    _project_with_origin
+    _origin_advances v2
+    cd "$PROJ"
+    run env HOME="$TEST_DIR" PATH="$TEST_DIR/fakebin:$PATH" bash "$MANGOLOVE_DIR/bin/mangolove" "hi" </dev/null
+    [ "$status" -eq 0 ]
+    [ -e "$TEST_DIR/switch-calls" ]
+    [ "$(cat "$PROJ/CLAUDE.md")" = "v2" ]
+}

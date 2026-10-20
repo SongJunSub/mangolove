@@ -59,3 +59,10 @@ MANGOLOVE_REVIEW_GATE=on
 #   예상 비용이 1달러 미만이거나 캐시가 살아 있으면 아무것도 표시하지 않는다.
 #   :- 형태로 둔다: `MANGOLOVE_RESUME_NOTICE=off mangolove -c` 처럼 환경변수로도 끌 수 있다.
 MANGOLOVE_RESUME_NOTICE="${MANGOLOVE_RESUME_NOTICE:-on}"
+
+# Project sync (on / off): 세션을 띄우기 전에 지금 폴더의 브랜치를 원격 최신으로 당겨 온다
+#   세션이 읽는 CLAUDE.md 와 스킬이 원격보다 뒤처지지 않게 한다. 같은 이름의 원격 브랜치를
+#   추적하는 브랜치만 fast-forward 하고, 추적 파일 변경이나 로컬 커밋이 있으면 당기지 않고
+#   한 줄 알린다. 받아 오기는 최대 8초 기다리며, 실패해도 세션은 그대로 뜬다.
+#   :- 형태로 둔다: `MANGOLOVE_PROJECT_SYNC=off mangolove` 처럼 환경변수로도 끌 수 있다.
+MANGOLOVE_PROJECT_SYNC="${MANGOLOVE_PROJECT_SYNC:-on}"

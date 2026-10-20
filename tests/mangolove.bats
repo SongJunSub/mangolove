@@ -947,13 +947,14 @@ _project_with_origin() {
 _origin_advances() {
     printf '%s\n' "$1" > "$PSEED/CLAUDE.md"
     git -C "$PSEED" commit -q -am "docs: $1"
-    git -C "$PSEED" push -q origin develop
+    git -C "$PSEED" push -q origin HEAD:refs/heads/develop
 }
 
-# 당겨 오기를 돌리고, 실패로 끝나지 않고 다음 단계로 넘어갔는지 확인한다.
+# 당겨 오기를 돌리고, 실패로 끝나지 않고 다음 단계로 넘어갔는지 확인한다. main 처럼 단독 문장으로
+# 부른다: && 목록 안에서 부르면 함수 안의 errexit 가 꺼져, 실행을 끝내는 명령을 놓친다.
 # $1=당겨 오기 전에 실행할 문장(설정을 바꿀 때)
 _run_sync() {
-    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'; ${1:-} cd '$PROJ' && _ml_sync_project; echo AFTER-SYNC"
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'; ${1:-} cd '$PROJ'; _ml_sync_project; echo AFTER-SYNC"
     [ "$status" -eq 0 ]
     [[ "$output" == *"AFTER-SYNC"* ]]
 }
@@ -1054,11 +1055,35 @@ _run_sync() {
 @test "sync: 받아 오기가 시간을 넘기면 끊고 실행을 계속한다" {
     _project_with_origin
     git -C "$PROJ" config protocol.ext.allow always
-    git -C "$PROJ" remote set-url origin 'ext::sleep 3'
+    # 남은 프로세스를 찾을 수 있게 이 테스트에만 쓰는 값으로 잠든다
+    git -C "$PROJ" remote set-url origin 'ext::sleep 3.0137'
     local start; start="$(date +%s)"
     _run_sync 'ML_SYNC_TIMEOUT=1;'
     [[ "$output" == *"받아 오지 못"* ]]
     [ "$(( $(date +%s) - start ))" -lt 3 ]
+    # fetch 만 죽이면 전송 프로세스가 고아로 남아 세션이 뜬 뒤에도 터미널을 붙잡는다
+    run pgrep -f 'sleep 3.0137'
+    [ "$status" -ne 0 ]
+}
+
+# 짧은 이름으로 받으면 같은 이름의 태그를 받는다
+@test "sync: 같은 이름의 태그가 있어도 브랜치를 당겨 온다" {
+    _project_with_origin
+    git -C "$PSEED" tag develop
+    git -C "$PSEED" push -q origin refs/tags/develop
+    _origin_advances v2
+    _run_sync
+    [ "$(git -C "$PROJ" rev-parse HEAD)" = "$(git -C "$PSEED" rev-parse refs/heads/develop)" ]
+}
+
+# `mangolove -p ... > out.txt` 의 출력에 섞이지 않는다
+@test "sync: 알림은 표준 오류로 낸다" {
+    _project_with_origin
+    _origin_advances v2
+    run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'; cd '$PROJ'; _ml_sync_project 2>'$TEST_DIR/err'"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+    grep -q '1커밋' "$TEST_DIR/err"
 }
 
 @test "sync: mangolove 를 실행하면 세션을 띄우기 전에 당겨 온다" {

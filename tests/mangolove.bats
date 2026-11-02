@@ -835,16 +835,18 @@ _run_auto_update() {
 
 # 응답하지 않는 원격이 하루 한 번의 업데이트 확인에서 세션 시작을 붙잡지 않는다.
 # ext:: 는 공백으로 인자를 나눈다(sync 의 시간 초과 테스트 참조).
+# 원격은 끊는 시점(1초)보다 훨씬 오래 잠든다. 걸린 시간은 초 단위로 재므로 여유가 1~2초면
+# 느린 러너에서 끊었는데도 실패한다(2026-11-02 macOS CI). 끊지 못했으면 10초를 다 기다린다.
 @test "update: 받아 오기가 시간을 넘기면 끊고 실행을 계속한다" {
     _install_with_origin "$TEST_DIR"
     git -C "$INST" config protocol.ext.allow always
-    git -C "$INST" remote set-url origin 'ext::sleep 3.0251'
+    git -C "$INST" remote set-url origin 'ext::sleep 10.0251'
     local start; start="$(date +%s)"
     run bash -c "source '$MANGOLOVE_DIR/bin/mangolove'; MANGOLOVE_DIR='$INST'; ML_FETCH_TIMEOUT=1; auto_update_check; echo AFTER-CHECK"
     [ "$status" -eq 0 ]
     [[ "$output" == *"AFTER-CHECK"* ]]
-    [ "$(( $(date +%s) - start ))" -lt 3 ]
-    run pgrep -f 'sleep 3.0251'
+    [ "$(( $(date +%s) - start ))" -lt 8 ]
+    run pgrep -f 'sleep 10.0251'
     [ "$status" -ne 0 ]
     # 받아 오지 못한 경우와 같이 하루 뒤에 다시 확인한다
     [ "$(( $(date +%s) - $(cat "$INST/.last_update_check") ))" -lt 60 ]
@@ -1075,13 +1077,13 @@ _run_sync() {
     _project_with_origin
     git -C "$PROJ" config protocol.ext.allow always
     # 남은 프로세스를 찾을 수 있게 이 테스트에만 쓰는 값으로 잠든다
-    git -C "$PROJ" remote set-url origin 'ext::sleep 3.0137'
+    git -C "$PROJ" remote set-url origin 'ext::sleep 10.0137'
     local start; start="$(date +%s)"
     _run_sync 'ML_FETCH_TIMEOUT=1;'
     [[ "$output" == *"받아 오지 못"* ]]
-    [ "$(( $(date +%s) - start ))" -lt 3 ]
+    [ "$(( $(date +%s) - start ))" -lt 8 ]
     # fetch 만 죽이면 전송 프로세스가 고아로 남아 세션이 뜬 뒤에도 터미널을 붙잡는다
-    run pgrep -f 'sleep 3.0137'
+    run pgrep -f 'sleep 10.0137'
     [ "$status" -ne 0 ]
 }
 

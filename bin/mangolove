@@ -807,6 +807,21 @@ do_doctor() {
         fi
     fi
 
+    # 옛 init이 프로젝트에 깔아 둔 비가역 가드 사본. 가드는 없앴지만(위험 명령은 Claude Code
+    # 검사에 맡긴다) 사본과 그 훅은 프로젝트에 남아 정상 삭제를 계속 막는다.
+    local old_guard="" f
+    for f in .mangolove/hooks/irreversible-guard.sh .claude/settings.json .claude/settings.local.json; do
+        case "$f" in
+            *.sh) [ -f "$f" ] && old_guard="$old_guard $f" ;;
+            *) grep -q "irreversible-guard" "$f" 2>/dev/null && old_guard="$old_guard $f" ;;
+        esac
+    done
+    if [ -n "$old_guard" ]; then
+        echo ""
+        echo -e "  \033[38;5;220m△\033[0m 옛 init의 비가역 가드가 남아 있습니다:${old_guard}"
+        echo -e "    \033[2m이 프로젝트에서는 여전히 명령을 막습니다. settings의 irreversible-guard 훅과 사본 파일을 지우세요.\033[0m"
+    fi
+
     echo ""
     echo -e "\033[2m──────────────────────────────────────\033[0m"
     echo ""
@@ -1063,7 +1078,7 @@ main() {
         eval)
             shift
             bash "$EVAL_SCRIPT" "${1:-report}"
-            exit 0
+            exit $?
             ;;
         ab)
             shift
@@ -1087,7 +1102,7 @@ main() {
             ;;
         projects)
             bash "$PROFILE_MANAGER" list
-            exit $?
+            exit 0
             ;;
         profile)
             shift

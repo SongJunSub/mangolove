@@ -116,6 +116,20 @@ teardown() {
     [[ "$output" == *"Modes"* ]]
 }
 
+# 옛 init이 깔아 둔 가드 사본은 가드를 없앤 뒤에도 그 프로젝트에서 계속 막는다
+@test "doctor: 옛 init이 남긴 가드 사본과 훅을 알린다" {
+    local proj="$TEST_DIR/doctor-old-guard"
+    mkdir -p "$proj/.mangolove/hooks" "$proj/.claude"
+    cd "$proj"
+    run bash "$MANGOLOVE_DIR/bin/mangolove" doctor
+    [[ "$output" != *"옛 init의 비가역 가드"* ]]
+    echo 'exit 0' > .mangolove/hooks/irreversible-guard.sh
+    echo '{"hooks":{"PreToolUse":[{"hooks":[{"command":"bash .mangolove/hooks/irreversible-guard.sh"}]}]}}' > .claude/settings.json
+    run bash "$MANGOLOVE_DIR/bin/mangolove" doctor
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"옛 init의 비가역 가드가 남아 있습니다: .mangolove/hooks/irreversible-guard.sh .claude/settings.json"* ]]
+}
+
 @test "doctor: reports installed project quality gate in cwd" {
     local proj="$TEST_DIR/doctor-gate"
     mkdir -p "$proj/.mangolove/hooks"

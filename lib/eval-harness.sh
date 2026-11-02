@@ -11,7 +11,7 @@
 # 정직성 원칙:
 # - 점수를 부풀리지 않도록 **known-gap 픽스처**(커버 안 되는 스택 등 결정적 부품이 *원리상*
 #   못 잡는 경우)를 함께 싣고, 별도로 표기한다(회귀 임계엔 미포함, 리포트엔 노출: 침묵 캡 금지).
-# - 이 하니스는 **결정적 계층만** 측정한다. "방법론이 모델 행동을 바꾸는가"의 end-to-end A/B 는
+# - 이 하네스는 **결정적 계층만** 측정한다. "방법론이 모델 행동을 바꾸는가"의 end-to-end A/B는
 #   실세션이 필요하므로 v2 범위(여기서 측정하지 않음: 과장 금지).
 #
 # 사용:
@@ -78,6 +78,10 @@ $(_impact_fixtures)
 EOF
 }
 
+# 회귀 판정은 여기 한 곳에서만 한다(report와 impact가 같은 기준을 쓴다).
+# 측정한 픽스처가 없으면 통과가 아니다: 전부 known-gap이면 아무것도 재지 않은 것이다.
+_impact_ok() { [ "$IMP_TOTAL" -gt 0 ] && [ "$IMP_MATCH" -eq "$IMP_TOTAL" ]; }
+
 # 백분율 정수 (분모 0 → 0)
 _pct() { if [ "${2:-0}" -gt 0 ]; then echo $(( $1 * 100 / $2 )); else echo 0; fi; }
 
@@ -100,7 +104,7 @@ report() {
     fi
 
     echo ""
-    if [ "$IMP_MATCH" -ge "$IMP_TOTAL" ]; then
+    if _impact_ok; then
         echo "결과: 회귀 없음 (결정적 부품이 스펙대로 동작). end-to-end 모델 A/B 는 v2 범위, 여기서 측정 안 함."
         return 0
     else
@@ -116,7 +120,7 @@ main() {
             eval_impact
             printf 'impact 트랙 보정도: 적합 %s/%s, known-gap %s\n' "$IMP_MATCH" "$IMP_TOTAL" "$IMP_GAP_TOTAL"
             [ -n "$IMP_MISS" ] && printf '%b\n' "$IMP_MISS"
-            [ "$IMP_MATCH" -lt "$IMP_TOTAL" ] && return 1 || return 0
+            _impact_ok
             ;;
         *) echo "usage: eval-harness.sh {report|impact}" >&2; exit 2 ;;
     esac

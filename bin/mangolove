@@ -1087,7 +1087,7 @@ main() {
             ;;
         projects)
             bash "$PROFILE_MANAGER" list
-            exit 0
+            exit $?
             ;;
         profile)
             shift

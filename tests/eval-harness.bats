@@ -2,7 +2,7 @@
 # ─────────────────────────────────────────────
 # MangoLove: Deterministic Self-Eval Harness (Phase 4 / v1)
 # 결정적 부품(impact-score 보정도)을 라벨 픽스처로 측정하고,
-# 하니스가 회귀를 실제로 잡는지(teeth)까지 검증한다.
+# 하네스가 회귀를 실제로 잡는지(teeth)까지 검증한다.
 # ─────────────────────────────────────────────
 
 load test_helper
@@ -35,7 +35,7 @@ EVAL() { echo "$MANGOLOVE_DIR/lib/eval-harness.sh"; }
     [[ "$output" == *"known-gap"* ]]
 }
 
-# ── 하니스가 회귀를 실제로 잡는가 (teeth): 항상 초록인 eval 은 허영 ──
+# ── 하네스가 회귀를 실제로 잡는가 (teeth): 항상 초록인 eval은 허영 ──
 
 @test "eval: a broken impact-score is caught as a regression (exit 1, MISS reported)" {
     # impact-score 를 항상 Trivial 로 → db/auth/ext 픽스처 불일치 → MISS → 회귀
@@ -59,4 +59,13 @@ EVAL() { echo "$MANGOLOVE_DIR/lib/eval-harness.sh"; }
     run bash "$MANGOLOVE_DIR/bin/mangolove" eval
     [ "$status" -eq 0 ]
     [[ "$output" == *"자가평가"* ]]
+}
+
+@test "eval: mangolove eval은 하네스의 회귀를 종료코드로 넘긴다" {
+    cp "$BATS_TEST_DIRNAME/../bin/mangolove" "$MANGOLOVE_DIR/bin/mangolove"
+    chmod +x "$MANGOLOVE_DIR/bin/mangolove"
+    printf '#!/usr/bin/env bash\nexit 1\n' > "$MANGOLOVE_DIR/lib/impact-score.sh"
+    run bash "$MANGOLOVE_DIR/bin/mangolove" eval
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"회귀 감지"* ]]
 }

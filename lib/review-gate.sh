@@ -290,7 +290,7 @@ GIT_PUSH_RE='(^|[^[:alnum:]_])git([[:space:]]+-[^[:space:]]+([[:space:]]+[^-][^[
 # 본문이 데이터인 소비자. 모르는 소비자는 벗기지 않는다(막는 쪽이 안전하다).
 HEREDOC_DATA_SINKS='(^|[^[:alnum:]_/])(cat|tee|python|python3|node|jq|sed|awk|perl|ruby|php|tr|sort|head|tail|grep|diff|patch)([ \t]|$)'
 _strip_heredocs() {
-    printf '%s\n' "$1" | awk -v sink="$2" '
+    printf '%s\n' "$1" | awk -v sink="$HEREDOC_DATA_SINKS" '
         {
             if (in_hd) {
                 line = $0
@@ -301,7 +301,7 @@ _strip_heredocs() {
             }
             # << 를 **따옴표 밖에서만** 찾는다. 텍스트만 보면 echo "see <<EOF" 의 <<EOF 를
             # 진짜 리다이렉션으로 오인하고, 닫는 마커가 영영 안 나오므로 그 뒤 명령이 통째로
-            # 사라진다(실증됨: 무해한 한 줄을 앞에 붙이면 두 훅이 모두 침묵했다).
+            # 사라진다(실증됨: 무해한 한 줄을 앞에 붙이면 게이트가 침묵했다).
             n = length($0); inq = ""; tok = ""
             for (i = 1; i <= n; i++) {
                 c = substr($0, i, 1)
@@ -430,7 +430,7 @@ EOF
 # LC_ALL=C: 바이트 단위로 돈다. UTF-8 로케일의 awk 는 잘못된 바이트열에서 멈춘다.
 PARSER_END="#MANGOLOVE_PARSER_END"
 _push_targets() {
-    _strip_heredocs "$1" "$HEREDOC_DATA_SINKS" \
+    _strip_heredocs "$1" \
         | LC_ALL=C awk -v cwd="$2" -v home="$HOME" -v push_re="$GIT_PUSH_RE" \
               -v sink="$HEREDOC_DATA_SINKS" -v endmark="$PARSER_END" '
         BEGIN { U = "\001?"; S = "\034"; DIR = cwd; DEPTH = 0; SEEN = 0 }

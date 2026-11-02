@@ -3,7 +3,7 @@
 # MangoLove: End-to-End A/B Harness  [Phase 4 / v2 skeleton]
 #
 # 질문: "방법론(mangolove)이 맨 claude보다 실제로 더 나은 결과를 내는가?"
-# 이 하니스는 그 비교를 위한 **측정 도구**다. 두 부분으로 나뉜다: 정직성이 핵심:
+# 이 하네스는 그 비교를 위한 **측정 도구**다. 두 부분으로 나뉜다: 정직성이 핵심:
 #
 #   ① 결과 채점 엔진: build/test, 트랙선언을 결정적으로 채점(impact-score, 체크 명령 재사용).
 #      여기 내장 arm 은 **demo(손수 작성)**: 엔진이 좋은/나쁜 결과를 구별하는지 *자체 검증*할 뿐,
@@ -72,8 +72,12 @@ ab_engine_selftest() {
     rm -rf "$rg" "$rb" 2>/dev/null
 }
 
+# 엔진이 좋은 결과는 전부 통과, 나쁜 결과는 전부 실패로 채점했는가. 아니면 회귀다:
+# 채점 엔진이 고장 나도 하네스가 성공으로 끝나면 그 위의 live 수치도 믿을 수 없다.
+_engine_ok() { [ "$ENG_GOOD" = "build:1 track:1" ] && [ "$ENG_BAD" = "build:0 track:0" ]; }
+
 report() {
-    echo "A/B 하니스 (Phase 4 v2, 방법론 vs 맨 claude)"
+    echo "A/B 하네스 (Phase 4 v2, 방법론 vs 맨 claude)"
     echo "[정직] ①은 채점 엔진 자체검증(demo arm, 실제 모델 출력 아님)."
     echo "       실모델 A/B 수치는 'mangolove ab live' 가 낸다(claude plugin eval: 과금, 비결정성, CI 미실행)."
     echo ""
@@ -86,6 +90,10 @@ report() {
 
     echo ""
     echo "이 보고서는 결정적 계층만 다룬다: 실모델 A/B 수치 없음. 내려면 'mangolove ab live' (과금)."
+    if ! _engine_ok; then
+        echo "결과: 회귀 감지, 채점 엔진이 기대(good[build:1 track:1] bad[build:0 track:0])와 다르게 채점했습니다."
+        return 1
+    fi
 }
 
 # ── ② live arm: claude plugin eval ──
@@ -121,6 +129,7 @@ main() {
         engine)
             ab_engine_selftest
             printf 'engine selftest: good[%s] bad[%s]\n' "$ENG_GOOD" "$ENG_BAD"
+            _engine_ok
             ;;
         *) echo "usage: ab-harness.sh {report|engine|live}" >&2; exit 2 ;;
     esac

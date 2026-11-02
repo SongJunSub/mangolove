@@ -158,10 +158,23 @@ _check_eval_cases() {
     [ "$n" -ge 1 ]
 }
 
+# ── teeth: 채점 엔진이 고장 나면 하네스가 잡는가 ──
+
+@test "ab: 채점 엔진이 고장 나면 회귀로 잡는다 (exit 1)" {
+    # impact-score가 판정을 내지 못하면 좋은 arm도 track:0이 된다
+    printf '#!/usr/bin/env bash\nexit 1\n' > "$MANGOLOVE_DIR/lib/impact-score.sh"
+    run bash "$(AB)" engine
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"good[build:1 track:0]"* ]]
+    run bash "$(AB)" report
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"회귀 감지"* ]]
+}
+
 @test "ab: mangolove ab dispatches to the harness" {
     cp "$BATS_TEST_DIRNAME/../bin/mangolove" "$MANGOLOVE_DIR/bin/mangolove"
     chmod +x "$MANGOLOVE_DIR/bin/mangolove"
     run bash "$MANGOLOVE_DIR/bin/mangolove" ab
     [ "$status" -eq 0 ]
-    [[ "$output" == *"A/B 하니스"* ]]
+    [[ "$output" == *"A/B 하네스"* ]]
 }

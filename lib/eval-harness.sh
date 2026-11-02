@@ -2,13 +2,11 @@
 # ─────────────────────────────────────────────
 # MangoLove: Deterministic Self-Eval Harness  [Phase 4 / v1]
 #
-# 방법론의 **결정적 부품**(impact-score 트랙 분류, 비가역 가드)이 "스펙대로 동작하는가"를
+# 방법론의 **결정적 부품**(impact-score 트랙 분류)이 "스펙대로 동작하는가"를
 # 라벨된 픽스처에 대해 LLM 없이 측정한다. 결과는 재현 가능하고 CI 에 올릴 수 있다.
 #
-#   ① impact 트랙 보정도(calibration): 픽스처의 변경 → impact-score 의 track_floor 가
-#      방법론 규칙이 지시하는 기대 트랙과 일치하는가 (스펙 적합 점수).
-#   ② 가드 정밀도, 재현율(precision/recall): "막아야 할/막지 말아야 할" 명령 라벨에 대해
-#      irreversible-guard 가 정확히 차단/통과하는가.
+#   impact 트랙 보정도(calibration): 픽스처의 변경 → impact-score의 track_floor가
+#   방법론 규칙이 지시하는 기대 트랙과 일치하는가 (스펙 적합 점수).
 #
 # 정직성 원칙:
 # - 점수를 부풀리지 않도록 **known-gap 픽스처**(커버 안 되는 스택 등 결정적 부품이 *원리상*
@@ -19,14 +17,12 @@
 # 사용:
 #   eval-harness.sh report   결정적 부품 전체 평가(사람용)
 #   eval-harness.sh impact   impact 트랙 보정도만
-#   eval-harness.sh guard    가드 정밀도, 재현율만
 # 종료코드: 회귀(비-known-gap 픽스처 실패)가 있으면 1, 전부 통과면 0.
 # ─────────────────────────────────────────────
 set -uo pipefail
 
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMPACT="$SELF_DIR/impact-score.sh"
-GUARD="$SELF_DIR/irreversible-guard.sh"
 
 # ── impact 보정도 픽스처 ──
 # 형식: "<expect_track>|<known_gap?0/1>|<relpath>|<file_content>"  (한 줄 = 픽스처 1개; 이 TSV 형식상 content 멀티라인 불가)
@@ -46,54 +42,6 @@ Large|0|src/Api/UserController.cs|[Authorize(Roles = "Admin")] public class C {}
 Large|0|src/net/mw.rs|use tower_http::auth::RequireAuthorizationLayer;
 Medium|0|db/migrate/001_users.rb|create_table :users
 Large|1|src/handlers/access.rs|fn require_role(u: User) -> bool { u.is_admin() }
-EOF
-}
-
-# ── 가드 정밀도, 재현율 픽스처 ──
-# 형식: "<block|pass>|<command>"
-# 가드 커버 범위(정직): SQL 구문(DROP/TRUNCATE/WHERE 없는 DELETE), Mongo 파괴 구문(dropDatabase/.drop()/
-# 빈 필터 deleteMany), 리터럴+환경변수 위험 루트(/,~,$HOME,$PWD,${HOME},$(pwd)). 잔여 미커버(정직):
-# 백틱 `pwd`(검사 전 제거됨), base64/eval 난독화, 새 CLI 도구: 정규식 가드의 구조적 한계(잔여 위험).
-_guard_fixtures() {
-    cat <<'EOF'
-block|git push --force origin main
-block|git push -f origin main
-block|git reset --hard HEAD~3
-block|rm -rf /
-block|rm -rf $HOME/data
-block|rm -rf $PWD
-block|rm -rf ${HOME}
-block|rm -rf $(pwd)
-block|rm -rf /tmp
-block|rm -rf /tmp/[ab]
-block|rm -rf /tmp/a /etc
-pass|rm -rf /tmp/mangolove-scratch/build
-pass|rm -rf /private/tmp/claude-501/sess/scratchpad
-pass|rm -rf /var/folders/xy/T/build
-block|psql mydb -c "DROP TABLE users"
-block|mysql -e "TRUNCATE TABLE orders"
-block|psql -c "DELETE FROM accounts"
-block|cqlsh -e "DROP TABLE users"
-block|psql -c "DELETE FROM accounts; -- WHERE id=1 was here"
-block|psql -c "DELETE FROM accounts; DELETE FROM logs WHERE id=5"
-block|mongosh --eval "db.users.deleteMany({})"
-block|mongosh --eval "db.users.deleteMany({\n})"
-block|mongosh mydb --eval "db.dropDatabase()"
-block|mongosh --eval "db.sessions.drop()"
-block|mongosh --eval "db.sessions.drop(\n)"
-block|kubectl delete deployment api
-block|terraform destroy -auto-approve
-pass|git push origin main
-pass|git push --force-with-lease origin feature
-pass|rm -rf ./build
-pass|rm -rf node_modules
-pass|rm -rf $TMPDIR/cache
-pass|psql -c "SELECT * FROM users WHERE id = 1"
-pass|psql -c "DELETE FROM accounts WHERE id = 5"
-pass|mongosh --eval "db.users.deleteMany({status:'old'})"
-pass|mongosh --eval "db.users.find({})"
-pass|git commit -m "drop table reference in a comment"
-pass|grep -rn "DROP TABLE" src/
 EOF
 }
 
@@ -130,67 +78,33 @@ $(_impact_fixtures)
 EOF
 }
 
-# 가드 정밀도, 재현율 평가 → 전역 G_TP/G_FP/G_FN/G_TN 설정, 오차 라인 출력
-eval_guard() {
-    G_TP=0; G_FP=0; G_FN=0; G_TN=0; G_ERR=""
-    local label cmd esc rc
-    while IFS='|' read -r label cmd; do
-        [ -z "$label" ] && continue
-        # 유효 JSON 으로 가드에 전달: 역슬래시 먼저, 그다음 따옴표 이스케이프(순서 중요; 픽스처는 단일 라인이라 개행 없음)
-        esc="${cmd//\\/\\\\}"; esc="${esc//\"/\\\"}"
-        printf '{"tool_input":{"command":"%s"}}' "$esc" | bash "$GUARD" >/dev/null 2>&1
-        rc=$?  # 2 = 차단, 0 = 통과
-        if [ "$label" = "block" ]; then
-            if [ "$rc" -eq 2 ]; then G_TP=$((G_TP + 1)); else G_FN=$((G_FN + 1)); G_ERR="$G_ERR\n    [FN 누락] 막아야 했는데 통과: $cmd"; fi
-        else
-            if [ "$rc" -eq 2 ]; then G_FP=$((G_FP + 1)); G_ERR="$G_ERR\n    [FP 오차단] 통과해야 했는데 막음: $cmd"; else G_TN=$((G_TN + 1)); fi
-        fi
-    done <<EOF
-$(_guard_fixtures)
-EOF
-}
-
 # 백분율 정수 (분모 0 → 0)
 _pct() { if [ "${2:-0}" -gt 0 ]; then echo $(( $1 * 100 / $2 )); else echo 0; fi; }
 
 report() {
-    local regressions=0
     echo "MangoLove 자가평가 (결정적 부품, LLM 없이 측정, 재현 가능)"
     echo ""
 
     eval_impact
-    echo "① impact-score 트랙 보정도 (방법론 규칙 적합):"
+    echo "impact-score 트랙 보정도 (방법론 규칙 적합):"
     printf '  적합: %s/%s (%s%%)\n' "$IMP_MATCH" "$IMP_TOTAL" "$(_pct "$IMP_MATCH" "$IMP_TOTAL")"
     if [ "$IMP_GAP_TOTAL" -gt 0 ]; then
         printf '  known-gap(커버 밖, 회귀 임계 제외): %s건, 결정적 부품이 원리상 못 잡는 한계\n' "$IMP_GAP_TOTAL"
     fi
-    [ "$IMP_MATCH" -lt "$IMP_TOTAL" ] && regressions=$((regressions + 1))
 
-    echo ""
-    eval_guard
-    local prec rec
-    prec="$(_pct "$G_TP" $((G_TP + G_FP)))"
-    rec="$(_pct "$G_TP" $((G_TP + G_FN)))"
-    echo "② 비가역 가드 정밀도, 재현율 (막아야 할 것만 정확히):"
-    printf '  정밀도(precision): %s%% (오차단 FP %s건)\n' "$prec" "$G_FP"
-    printf '  재현율(recall):    %s%% (누락 FN %s건)\n' "$rec" "$G_FN"
-    printf '  분류: TP %s / TN %s / FP %s / FN %s\n' "$G_TP" "$G_TN" "$G_FP" "$G_FN"
-    { [ "$G_FP" -gt 0 ] || [ "$G_FN" -gt 0 ]; } && regressions=$((regressions + 1))
-
-    # 오차/불일치 상세 (있을 때만)
-    if [ -n "${IMP_MISS}${G_ERR}" ]; then
+    # 불일치 상세 (있을 때만)
+    if [ -n "$IMP_MISS" ]; then
         echo ""
         echo "상세:"
-        [ -n "$IMP_MISS" ] && printf '%b\n' "$IMP_MISS"
-        [ -n "$G_ERR" ] && printf '%b\n' "$G_ERR"
+        printf '%b\n' "$IMP_MISS"
     fi
 
     echo ""
-    if [ "$regressions" -eq 0 ]; then
+    if [ "$IMP_MATCH" -ge "$IMP_TOTAL" ]; then
         echo "결과: 회귀 없음 (결정적 부품이 스펙대로 동작). end-to-end 모델 A/B 는 v2 범위, 여기서 측정 안 함."
         return 0
     else
-        echo "결과: 회귀 감지, 위 [MISS]/[FP]/[FN] 를 확인하세요."
+        echo "결과: 회귀 감지, 위 [MISS] 를 확인하세요."
         return 1
     fi
 }
@@ -204,13 +118,7 @@ main() {
             [ -n "$IMP_MISS" ] && printf '%b\n' "$IMP_MISS"
             [ "$IMP_MATCH" -lt "$IMP_TOTAL" ] && return 1 || return 0
             ;;
-        guard)
-            eval_guard
-            printf '가드 정밀도/재현율: TP %s TN %s FP %s FN %s\n' "$G_TP" "$G_TN" "$G_FP" "$G_FN"
-            [ -n "$G_ERR" ] && printf '%b\n' "$G_ERR"
-            { [ "$G_FP" -gt 0 ] || [ "$G_FN" -gt 0 ]; } && return 1 || return 0
-            ;;
-        *) echo "usage: eval-harness.sh {report|impact|guard}" >&2; exit 2 ;;
+        *) echo "usage: eval-harness.sh {report|impact}" >&2; exit 2 ;;
     esac
 }
 

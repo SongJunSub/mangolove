@@ -91,18 +91,18 @@ teardown() {
     local derived
     derived="$(grep -rhoE 'record-(block|skip) [a-z-]+' "$MANGOLOVE_DIR/lib" \
                | awk '{print $2}' | sort -u | tr '\n' ' ')"
-    [ "$derived" = "dod-gate gate guard review " ]
+    [ "$derived" = "dod-gate gate review " ]
 }
 
 @test "audit: 원장이 있으면 phase 별 차단 건수를 반영한다" {
     local r="$TEST_DIR/aud-ledger"; mkdir -p "$r"
     git -C "$r" init -q
     cd "$r"
-    bash "$MANGOLOVE_DIR/lib/efficacy-recorder.sh" record-block guard "rm -rf /"
-    bash "$MANGOLOVE_DIR/lib/efficacy-recorder.sh" record-block guard "git push --force"
+    bash "$MANGOLOVE_DIR/lib/efficacy-recorder.sh" record-block gate secret
+    bash "$MANGOLOVE_DIR/lib/efficacy-recorder.sh" record-block gate lint
     run env MANGOLOVE_METHODOLOGY_SRC="$FIX" bash "$AUD" report
     [ "$status" -eq 0 ]
-    printf '%s\n' "$output" | grep -qE '^  guard +2회'
+    printf '%s\n' "$output" | grep -qE '^  gate +2회'
     # '발동 0건' 을 '규칙이 무용' 으로 오독하지 않도록 기록 기간을 함께 낸다
     [[ "$output" == *"기록 기간:"* ]]
     [[ "$output" != *"원장 없음"* ]]

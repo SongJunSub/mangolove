@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # ─────────────────────────────────────────────
 # MangoLove: Efficacy Ledger (Phase 2 / D5)
-# 게이트/가드 차단이 실시간 기록되고, report 가 결정적 효능을 집계하는지 검증한다.
+# 게이트 차단이 실시간 기록되고, report가 결정적 효능을 집계하는지 검증한다.
 # ─────────────────────────────────────────────
 
 load test_helper
@@ -48,6 +48,20 @@ _git_repo() {
     [[ "$output" == *"리스크 분포"* ]]
 }
 
+# 비가역 명령 가드는 없앴다. 과거 원장에 남은 그 차단은 기타 차단에 섞지 않고 따로 보이고,
+# 그런 기록이 없는 원장에서는 그 줄 자체가 나오지 않는다.
+@test "efficacy: 과거 가드 차단은 있을 때만 따로 보인다" {
+    local r; r=$(_git_repo "eff-legacy-guard")
+    cd "$r"
+    bash "$(REC)" record-block gate secret
+    run bash "$(REC)" report
+    [[ "$output" != *"위험 명령 차단(과거)"* ]]
+    bash "$(REC)" record-block guard "git push --force"
+    run bash "$(REC)" report
+    [[ "$output" == *"위험 명령 차단(과거):    1"* ]]
+    [[ "$output" != *"기타 차단"* ]]
+}
+
 @test "efficacy: gate block is recorded (and gate still blocks)" {
     local r; r=$(_git_repo "eff-gate")
     cp "$MANGOLOVE_DIR/lib/quality-gate.sh" "$MANGOLOVE_DIR/lib/efficacy-recorder.sh" "$r/"
@@ -58,25 +72,6 @@ _git_repo() {
     [ -f "$MANGOLOVE_DIR/efficacy/eff-gate.jsonl" ]
     grep -q '"phase":"gate"' "$MANGOLOVE_DIR/efficacy/eff-gate.jsonl"
     grep -q '"kind":"lint"' "$MANGOLOVE_DIR/efficacy/eff-gate.jsonl"
-}
-
-@test "efficacy: guard block is recorded (and guard still blocks)" {
-    local r; r=$(_git_repo "eff-guard")
-    cp "$MANGOLOVE_DIR/lib/irreversible-guard.sh" "$MANGOLOVE_DIR/lib/efficacy-recorder.sh" "$r/"
-    cd "$r"
-    run bash "$r/irreversible-guard.sh" <<< '{"tool_input":{"command":"git push --force origin main"}}'
-    [ "$status" -eq 2 ]
-    [ -f "$MANGOLOVE_DIR/efficacy/eff-guard.jsonl" ]
-    grep -q '"phase":"guard"' "$MANGOLOVE_DIR/efficacy/eff-guard.jsonl"
-}
-
-@test "efficacy: recorder failure never breaks the guard (unwritable ledger dir)" {
-    local r; r=$(_git_repo "eff-robust")
-    cp "$MANGOLOVE_DIR/lib/irreversible-guard.sh" "$MANGOLOVE_DIR/lib/efficacy-recorder.sh" "$r/"
-    cd "$r"
-    # 기록 실패해도 가드는 정상 차단해야 함
-    run env MANGOLOVE_DIR=/proc/nonexistent/x bash "$r/irreversible-guard.sh" <<< '{"tool_input":{"command":"rm -rf /"}}'
-    [ "$status" -eq 2 ]
 }
 
 @test "efficacy: mangolove efficacy dispatches to a report" {
@@ -90,16 +85,6 @@ _git_repo() {
 }
 
 # ── 적대적 리뷰 회귀 (실설치 배선, cwd, 게이트 비차단, invariant, JSON) ──
-
-@test "efficacy: guard records to the project ledger using stdin cwd" {
-    local r; r=$(_git_repo "eff-guard-cwd")
-    cp "$MANGOLOVE_DIR/lib/irreversible-guard.sh" "$MANGOLOVE_DIR/lib/efficacy-recorder.sh" "$r/"
-    cd "$TEST_DIR"
-    run bash "$r/irreversible-guard.sh" <<< "{\"tool_input\":{\"command\":\"rm -rf /\"},\"cwd\":\"$r\"}"
-    [ "$status" -eq 2 ]
-    [ -f "$MANGOLOVE_DIR/efficacy/eff-guard-cwd.jsonl" ]
-    grep -q '"phase":"guard"' "$MANGOLOVE_DIR/efficacy/eff-guard-cwd.jsonl"
-}
 
 @test "efficacy: recorder failure never breaks the gate (exit codes preserved)" {
     local r; r=$(_git_repo "eff-gate-robust")

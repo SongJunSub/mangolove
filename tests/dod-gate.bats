@@ -569,16 +569,6 @@ _bg_agent='{"id":"ae20da554b5036ae5","type":"subagent","status":"running","descr
 }
 
 
-@test "boundary: review-gate 와 irreversible-guard 의 _strip_heredocs 가 바이트 동일하다" {
-    # 두 훅은 서로를 source 하지 않는다(한쪽이 깨져도 다른 쪽이 같이 죽지 않게 하는 기존
-    # 설계). 사본이 갈라지면 한쪽만 오탐을 내거나 한쪽만 진짜 명령을 놓친다.
-    local a b
-    a="$(awk '/^_strip_heredocs\(\) \{/,/^\}$/' "$BATS_TEST_DIRNAME/../lib/review-gate.sh")"
-    b="$(awk '/^_strip_heredocs\(\) \{/,/^\}$/' "$BATS_TEST_DIRNAME/../lib/irreversible-guard.sh")"
-    [ -n "$a" ]
-    [ "$a" = "$b" ]
-}
-
 # info/exclude 의 패턴은 글롭이다. 경로에 든 [ 같은 문자를 풀어 쓰지 않으면 패턴이 맞지 않아
 # 일시 파일이 untracked 로 드러난다.
 @test "seed: 경로에 글롭 문자가 있어도 info/exclude 패턴이 맞는다" {

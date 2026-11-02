@@ -2,10 +2,10 @@
 # ─────────────────────────────────────────────
 # MangoLove: Efficacy Ledger (Phase 2 / D5)
 #
-# 방법론(게이트, 가드, 트랙)이 "실제로 무엇을 잡았나"를 결정적 신호에만 앵커해
+# 방법론(게이트, 트랙)이 "실제로 무엇을 잡았나"를 결정적 신호에만 앵커해
 # 기록, 집계한다. cost/stats(노력, 부피)와 달리 효능(무엇을 막았나)을 측정.
 #
-#   record-block <phase> <kind>  게이트/가드 차단 시 실시간 append (결정적: 게이트 자신의 차단 결정)
+#   record-block <phase> <kind>  게이트 차단 시 실시간 append (결정적: 게이트 자신의 차단 결정)
 #   record-skip  <phase> <kind>  게이트가 강제하지 않고 넘긴 시점 (우회, 소유권, 해제 등)
 #   report                       차단 원장 + 넘긴 것 + 리스크 분포 + under-triage + revert 신호
 #
@@ -71,13 +71,15 @@ report() {
         rev_stale="$(grep -cE '"type":"block","phase":"review","kind":"stale"' "$lg" 2>/dev/null)"; rev_stale="${rev_stale:-0}"
         # 세션 예산 훅은 없어졌지만(사용자가 끊을 시점을 직접 판단한다) 과거 원장에는 그
         # 기록이 남아 있다. 그건 차단이 아니라 안내였으므로 계속 별도 버킷으로 빼고 차단
-        # 합계에서 제외한다. 여기 섞으면 시크릿/가드 차단과 한 숫자로 합쳐져 효능이 부푼다.
+        # 합계에서 제외한다. 여기 섞으면 시크릿 차단과 한 숫자로 합쳐져 효능이 부푼다.
         bud="$(grep -cE '"type":"block","phase":"budget"' "$lg" 2>/dev/null)"; bud="${bud:-0}"
         tot="$(grep -c '"type":"block"' "$lg" 2>/dev/null)"; tot="${tot:-0}"
         other=$((tot - sec - dng - lt - rev - bud)); [ "$other" -lt 0 ] && other=0
         hard=$((tot - bud)); [ "$hard" -lt 0 ] && hard=0
         printf '  시크릿 커밋 차단:        %s\n' "$sec"
-        printf '  위험/비가역 명령 차단:   %s\n' "$dng"
+        # 비가역 명령 가드는 없어졌지만(Claude Code 자체 검사에 맡긴다) 과거 원장에는 그 차단이
+        # 남아 있다. 기타 차단으로 섞이지 않게 따로 세고, 있을 때만 보인다.
+        [ "$dng" -gt 0 ] && printf '  위험 명령 차단(과거):    %s\n' "$dng"
         printf '  커밋 게이트(lint/test):  %s\n' "$lt"
         printf '  리뷰 미실행 push 차단:   %s\n' "$rev"
         if [ "$((rev_miss + rev_scope + rev_stale))" -gt 0 ]; then

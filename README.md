@@ -6,7 +6,7 @@
 
 **Claude Code를 제대로 쓰는 방법.** `claude` 대신 `mangolove`를 실행하면 모든 세션에 위험도 기반 품질 방법론과 결정적 안전망이 함께 따라옵니다.
 
-MangoLove는 Claude Code를 감쌉니다. 4-track 방법론을 시스템 프롬프트로 주입하고, 위험 명령과 시크릿 커밋을 실행 전에 차단하며, 실제로 무엇을 잡았는지 측정합니다. 그래서 품질이 *희망*이 아니라 *기본값이자 숫자*가 됩니다.
+MangoLove는 Claude Code를 감쌉니다. 4-track 방법론을 시스템 프롬프트로 주입하고, 시크릿 커밋을 실행 전에 차단하며, 실제로 무엇을 잡았는지 측정합니다. 그래서 품질이 *희망*이 아니라 *기본값이자 숫자*가 됩니다.
 
 ## `claude` vs `mangolove`
 
@@ -15,7 +15,6 @@ MangoLove는 Claude Code를 감쌉니다. 4-track 방법론을 시스템 프롬�
 | | `claude` (맨) | `mangolove` (bare, 대화형) |
 |---|---|---|
 | **방법론** | 없음: 프롬프트에 전적으로 의존 | `strict.md`(4-track Change Impact Score)에서 생성한 린 코어를 시스템 프롬프트로 주입 + 무거운 절차는 온디맨드 스킬 |
-| **위험 명령** | 그대로 실행 | **실행 전 차단**: force-push, `rm -rf /`/`$PWD`, SQL `DROP`/`TRUNCATE`/`WHERE` 없는 `DELETE`, Mongo `dropDatabase`/`deleteMany({})`, `kubectl delete`, `terraform destroy` (PreToolUse 가드, exit 2) |
 | **시크릿 커밋** | 미검사 | 커밋 시점에 시크릿 스캔 게이트로 **차단** |
 | **작업 분류** | 없음 | **Trivial / Small / Medium / Large** 자동 분류, 비례 워크플로우 |
 | **코드 리뷰** | 요청해야 수행 | Large 트랙에서 **find → verify** 탈상관 멀티에이전트 리뷰 |
@@ -37,7 +36,7 @@ MangoLove는 Claude Code를 감쌉니다. 4-track 방법론을 시스템 프롬�
 >
 > 리뷰 게이트는 품질 장치이지 보안 경계가 아닙니다. 자유 서술로 호출한 리뷰가 실제로 어느 파일까지 읽었는지는 훅이 알 수 없으므로, 그 경우 커버리지는 여전히 넓게(느슨하게) 잡힙니다. `git push --no-verify` 는 pre-push 훅을 건너뜁니다(에이전트 경로인 PreToolUse 는 git 훅이 아니라 영향받지 않습니다). 원장은 `PostToolUse(Skill)` 훅이 남기므로 "정말 스킬이 실행됐는가"는 결정적이지만, "그 스킬이 실제로 리뷰를 했는가"까지는 보장하지 않습니다. 프로젝트에 `simplify` 라는 이름의 빈 스킬을 두면 게이트는 통과합니다. 의도적 우회를 막는 장치가 아니라, 잊고 지나가는 것을 막는 장치입니다. 명시적 우회는 `MANGOLOVE_SKIP_REVIEW=1` 로 감사 가능하게 남기세요.
 
-> **정직한 경계**: 방법론은 *프롬프트*로 주입됩니다. 즉 모델에게 따르라고 *요청*하는 것입니다. **게이트, 가드는 결정적**(exit code로 실제 차단)이지만, 산문 규율은 확률적으로 지켜집니다. MangoLove는 그 규율을 기본값으로 만들고 단단한 결정적 안전망을 더하는 것이지, 모델을 무오류로 만들지는 않습니다. 실제로 무엇이 측정되고 무엇이 안 되는지는 `mangolove eval` 참조.
+> **정직한 경계**: 방법론은 *프롬프트*로 주입됩니다. 즉 모델에게 따르라고 *요청*하는 것입니다. **게이트는 결정적**(exit code로 실제 차단)이지만, 산문 규율은 확률적으로 지켜집니다. force-push나 파괴적 삭제 같은 위험 명령은 MangoLove가 따로 막지 않고 Claude Code 자체의 권한 검사에 맡깁니다. MangoLove는 그 규율을 기본값으로 만들고 단단한 결정적 안전망을 더하는 것이지, 모델을 무오류로 만들지는 않습니다. 실제로 무엇이 측정되고 무엇이 안 되는지는 `mangolove eval` 참조.
 
 ## Strict Mode: 위험도 기반 품질 워크플로우
 
@@ -116,9 +115,9 @@ mangolove sessions            # 저장된 세션 목록
 ### 측정, 자가평가
 ```bash
 mangolove impact [sha]        # 변경의 결정적 트랙/영향도 (워킹트리 또는 커밋)
-mangolove efficacy            # 게이트/가드가 막은 것 + 강제하지 않고 넘긴 것 + 트랙 under-triage
-mangolove eval                # 자가평가: impact-score 보정도 + 가드 정밀도/재현율 (정직한 known-gap 포함)
-mangolove ab                  # A/B 하니스 (방법론 vs 맨 claude): 게이트 보호 + 채점 엔진
+mangolove efficacy            # 게이트가 막은 것 + 강제하지 않고 넘긴 것 + 트랙 under-triage
+mangolove eval                # 자가평가: impact-score 보정도 (정직한 known-gap 포함)
+mangolove ab                  # A/B 하니스 (방법론 vs 맨 claude): 채점 엔진 자체검증
 mangolove ab live             # cc-plugin eval 을 플러그인 있는/없는 arm 으로 실세션 실행 (과금, 상한 $3)
 mangolove audit-methodology   # 방법론 파일 감사: 섹션별 부피, 강제표현 밀도, 발동 0건 (삭제 후보)
 ```
@@ -129,7 +128,6 @@ mangolove audit-methodology   # 방법론 파일 감사: 섹션별 부피, 강�
 ### 안전 게이트 (모든 `mangolove` 세션에서 활성)
 훅이 자동 동작합니다. 설정이나 설치는 필요 없습니다:
 - **커밋 게이트**: 스테이징된 변경에서 시크릿(+선택적 lint/test)을 스캔해 발견 시 **커밋을 차단**.
-- **비가역 명령 가드**: force-push, 위험 루트의 `rm -rf`, 파괴적 SQL/Mongo, `kubectl delete`, `terraform destroy` 를 실행 전 차단. 의도된 실행: `MANGOLOVE_ALLOW_DANGER=1`(감사 대상).
 - **DoD 게이트**(기본 on): Stop 훅이 완료 직전 `./.mangolove/dod.sh`(모델이 외부화한 실행형 DoD)를 검증해, **통과 전에는 턴을 끝내지 못하게** 차단. 자기채점이 아니라 코드로 닫는 검증 루프. DoD 를 외부화하지 않은 턴은 즉시 통과하므로 idle 비용이 없습니다. DoD 는 **처음 평가한 세션의 소유**라, 같은 프로젝트의 다른 세션은 남의 `dod.sh` 로 차단되지 않습니다(안내 한 줄 내고 통과). 같은 DoD 를 `MANGOLOVE_DOD_MAX_ATTEMPTS`(기본 3) 회, DoD 를 바꿔 가며 그 3배를 시도해도 미통과면 무한루프 방지로 해제되고, 해제 뒤에도 `dod.sh` 는 근거로 남습니다(재실행 없음). 새 DoD 를 쓰면 재무장합니다. 실행 중인 서브에이전트가 있는 턴은 결과를 기다리는 턴이라 평가를 미루고, 서브에이전트가 끝나 세션이 다시 깨어난 턴에 평가합니다(백그라운드 셸만 떠 있으면 미루지 않습니다). 끄기: `MANGOLOVE_DOD_GATE=off`.
 - **리뷰 게이트**(기본 on): `git push` 시점에 이 push 로 원격에 처음 가는 커밋이 더하는 변경의 `track_floor`를 코드로 계산해, **Medium 이상인데 트랙별 필수 리뷰가 그 내용을 보지 않았으면 push를 차단**. 실행 여부의 근거는 모델의 자기보고가 아니라 PostToolUse(Skill) 훅이 남긴 원장, 즉 도구 호출 사실입니다. Trivial/Small 은 아무 것도 요구하지 않아 사소한 작업에는 무비용. 리뷰 뒤에 고친 내용은 리뷰가 본 판본과의 차이만 따로 재서, 그 차이가 Trivial/Small 이면 다시 요구하지 않고 Medium 이상이면 그 변경만 담은 커밋을 알려 줍니다(그 커밋만 다시 리뷰). `simplify` 는 코드를 고치는 스킬이라 한 작업에서 한 번 본 파일의 이후 변경은 다시 요구하지 않고(그 변경은 `code-review` 가 봅니다), 그 뒤에 처음 손댄 파일만 따로 잽니다. 끄기: `MANGOLOVE_REVIEW_GATE=off`, 우회(감사됨): `MANGOLOVE_SKIP_REVIEW=1`.
 

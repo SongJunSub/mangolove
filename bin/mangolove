@@ -339,8 +339,8 @@ show_help() {
     echo "  mangolove efficacy            Methodology efficacy: what the gates caught, and what they let through"
     echo "  mangolove review              Review gate status for the current push range (what would block)"
     echo "  mangolove audit-methodology   Audit the methodology file: volume, dead rules, delete candidates"
-    echo "  mangolove eval                Self-eval: deterministic component scores (impact calibration, guard P/R)"
-    echo "  mangolove ab                  A/B harness (Phase 4 v2): methodology vs bare claude (gate protection + scorer)"
+    echo "  mangolove eval                Self-eval: deterministic component scores (impact calibration)"
+    echo "  mangolove ab                  A/B harness (Phase 4 v2): methodology vs bare claude (scorer self-test)"
     echo "  mangolove ab live             Run cc-plugin evals with and without the plugin (real sessions, billed)"
     echo "  mangolove switch <project>    Start a MangoLove session in that project directory"
     echo "  mangolove projects            List project profiles"
@@ -744,8 +744,8 @@ do_doctor() {
     fi
 
     # Session gates: bare mangolove 실행 시 자동 적용되는 게이트
-    if [ "$MANGOLOVE_SESSION_GATES" = "true" ] && [ -f "$MANGOLOVE_DIR/lib/quality-gate.sh" ] && [ -f "$MANGOLOVE_DIR/lib/irreversible-guard.sh" ]; then
-        echo -e "  \033[38;5;113m✓\033[0m Session gates: 시크릿 스캔 + 비가역 가드 (mangolove 실행 시 자동)"
+    if [ "$MANGOLOVE_SESSION_GATES" = "true" ] && [ -f "$MANGOLOVE_DIR/lib/quality-gate.sh" ]; then
+        echo -e "  \033[38;5;113m✓\033[0m Session gates: 시크릿 스캔 (mangolove 실행 시 자동)"
     else
         echo -e "  \033[38;5;220m△\033[0m Session gates: off (MANGOLOVE_SESSION_GATES)"
     fi
@@ -795,11 +795,6 @@ do_doctor() {
         echo ""
         echo -e "  \033[2mProject gate (cwd):\033[0m"
         echo -e "  \033[38;5;113m✓\033[0m Quality gate installed (.mangolove/hooks/)"
-        if [ -f "$(pwd)/.mangolove/hooks/irreversible-guard.sh" ]; then
-            echo -e "  \033[38;5;113m✓\033[0m Irreversible-command guard installed"
-        else
-            echo -e "  \033[38;5;220m△\033[0m irreversible-guard.sh missing: PreToolUse 가드가 fail-open(미차단)됩니다."
-        fi
         if git rev-parse --git-dir > /dev/null 2>&1; then
             if git ls-files --error-unmatch .mangolove/hooks/quality-gate.sh > /dev/null 2>&1; then
                 echo -e "  \033[38;5;113m✓\033[0m Gate is version-controlled (변조/누락이 diff 로 감사됨)"
@@ -1290,7 +1285,7 @@ ${resume_context}"
     [ -n "$MANGOLOVE_MODEL" ] && CLAUDE_ARGS+=(--model "$MANGOLOVE_MODEL")
     [ -n "$MANGOLOVE_EFFORT" ] && CLAUDE_ARGS+=(--effort "$MANGOLOVE_EFFORT")
 
-    # 세션 게이트: bare mangolove 에서도 시크릿 스캔 + 비가역 가드를 자동 적용 (init 불필요).
+    # 세션 게이트: bare mangolove 에서도 시크릿 스캔을 자동 적용 (init 불필요).
     # claude --settings 로 PreToolUse hook 을 병합 주입한다 (사용자/프로젝트 설정은 안 건드림).
     if [ "$MANGOLOVE_SESSION_GATES" = "true" ] && [ -f "${MANGOLOVE_DIR}/lib/quality-gate.sh" ]; then
         local session_settings="$MANGOLOVE_DIR/session-settings.json"
@@ -1302,11 +1297,10 @@ ${resume_context}"
     _ml_launch "$@"
 }
 
-# 세션 게이트 설정 파일을 생성한다: bare mangolove 에서도 시크릿 게이트 + 비가역 가드를
+# 세션 게이트 설정 파일을 생성한다: bare mangolove 에서도 시크릿 게이트를
 # claude --settings 로 주입(init/프로젝트 셋업 불필요). $1=출력 파일 경로.
 generate_session_settings() {
     local out="$1"
-    local guard="${MANGOLOVE_DIR}/lib/irreversible-guard.sh"
     local gate="${MANGOLOVE_DIR}/lib/quality-gate.sh"
     local dod="${MANGOLOVE_DIR}/lib/dod-gate.sh"
     local statusline="${MANGOLOVE_DIR}/lib/statusline.sh"
@@ -1411,7 +1405,6 @@ ${statusline_block}
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "bash \\"${guard}\\"" },
           { "type": "command", "command": "GATE_SECRET=block bash \\"${gate}\\" pretooluse" }${review_pre}
         ]
       }

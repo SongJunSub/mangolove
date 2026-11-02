@@ -174,8 +174,10 @@ teardown() {
     [ -f "$out" ]
     python3 -c "import json; json.load(open('$out'))"
     grep -q "PreToolUse" "$out"
-    grep -q "irreversible-guard.sh" "$out"
     grep -q "quality-gate.sh" "$out"
+    # 비가역 명령 가드는 없앴다(Claude Code 자체 검사에 맡긴다). 다시 실리면 정상 삭제가 또 막힌다.
+    run grep -q "irreversible-guard" "$out"
+    [ "$status" -eq 1 ]
 }
 
 # 컨텍스트가 커졌다는 이유로 턴을 붙잡아 "이어갈지 /compact 할지 /clear 할지"를 묻게 하던
@@ -867,8 +869,8 @@ _run_auto_update() {
 
 # ─────────────────────────────────────────────
 # switch: 다른 프로젝트로 건너가도 MangoLove 세션이어야 한다
-# 예전에는 프로젝트 폴더로 옮긴 뒤 claude 를 아무 인자 없이 띄웠다. 방법론도, 시크릿 스캔과
-# 비가역 가드도, 리뷰 게이트도 없는 맨 claude 인데 겉으로는 구분되지 않았다(resume 과 같은 결함).
+# 예전에는 프로젝트 폴더로 옮긴 뒤 claude를 아무 인자 없이 띄웠다. 방법론도, 시크릿 스캔도,
+# 리뷰 게이트도 없는 맨 claude인데 겉으로는 구분되지 않았다(resume과 같은 결함).
 # ─────────────────────────────────────────────
 
 # 받은 인자와 실행된 폴더를 기록하는 가짜 claude

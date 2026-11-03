@@ -1,5 +1,13 @@
 # User data (created after install, not part of repo)
-logs/repo/
+# 설치 클론이 곧 공개 레포라 `git add -A` 한 번에 개인, 회사 정보가 올라간다.
+logs/
+sessions/
+state/
+work/
+backups/
+projects/*
+!projects/.gitkeep
+!projects/README.md
 config.sh
 .version
 .last_update_check

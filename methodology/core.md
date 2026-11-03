@@ -201,7 +201,7 @@ mangolove impact            # 워킹트리의 결정적 트랙(track_floor)
 
 ### 커밋 트레일러: Change-Track (효능 측정 연동)
 
-판정해서 **실제로 따른** 트랙을 커밋에 영구 기록한다. 커밋 메시지 footer 에 다음 트레일러를 추가:
+판정해서 **실제로 따른** 트랙을 커밋에 영구 기록한다. 개인 레포(origin 이 `github.com/SongJunSub/` 이거나 origin 이 없는 레포)에서는 커밋 메시지 footer 에 다음 트레일러를 추가:
 
 ```
 Change-Track: <Trivial|Small|Medium|Large>
@@ -212,7 +212,17 @@ Change-Track: <Trivial|Small|Medium|Large>
 - 미기재 시 측정에서 제외될 뿐(거짓 통과로 세지 않음), 동작, 게이트에는 영향 없다.
 - Conventional Commits footer 규칙과 동일 위치. 값은 한 단어.
 - **메시지의 마지막 문단에 둔다. 앞에 빈 줄로 끊긴 트레일러는 인식되지 않는다.** `git interpret-trailers` 는 **마지막 문단만** 트레일러로 보므로, 본문과 빈 줄로 떨어져 있어도 그 문단이 마지막이면 인식되지만, 트레일러 뒤에 또 다른 문단이 오면 `Change-Track:` 이 조용히 측정에서 빠진다. 에러도 경고도 없고 커밋은 정상 생성되므로 알아채기 어렵다. 확인: `mangolove impact triage-commit <sha>` 가 `undeclared` 로 나오면 이 경우다.
+- **팀 레포에는 트레일러를 넣지 않는다.** 팀원은 MangoLove 를 모르고, squash 메시지가 커밋 메시지를 이어 붙이는 레포에서는 그대로 `main` 에 남는다. 커밋 뒤 `git notes --ref=change-track add -f -m <트랙> HEAD` 로 로컬에 남긴다. notes 는 `git push` 기본 대상이 아니라 팀에 안 보이고, `declared-track` 은 트레일러가 없으면 notes 를 읽는다.
 - **AI 저작 표기를 트레일러로 붙이지 않는다.** `Co-Authored-By:` 로 에이전트를 공저자로 넣거나 세션 링크를 남기지 않는다. 사용자 지침이며 `.githooks/commit-msg` 가 강제한다.
+
+### 팀 레포 산출물에는 개인 도구 흔적을 남기지 않는다
+
+MangoLove, 개인 셸 함수와 별칭, 개인 SSH 별칭, 홈 디렉터리 경로는 사용자 머신에만 있다. 팀 레포의 파일, 커밋 메시지, PR 본문과 코멘트, 티켓, 슬랙에 쓰지 않는다. 팀원은 그 명령을 그대로 실행할 수 없고 모르는 도구의 절차를 업무 맥락으로 오해한다.
+
+- 접속과 실행 예시는 표준 도구(`mysql`, `aws`, `gimme-aws-creds`, `kubectl`)로 쓰고 호스트와 계정은 `<reader 호스트>` 처럼 자리만 둔다
+- 개인 작업 파일의 무시 규칙은 팀 `.gitignore` 가 아니라 `.git/info/exclude` 에 둔다
+- MangoLove 의 판정(트랙, 리뷰 게이트, DoD)은 대화에서만 말한다. 팀 산출물에는 그 결과로 한 일만 적는다
+- 팀 레포에 커밋하거나 PR, 티켓에 올리기 전에 이 표기가 들어갔는지 직접 본다
 
 ## 트랙 내 단계 스킵 금지
 
@@ -369,7 +379,7 @@ context 가 차면 성능이 떨어지고 앞선 지시가 잊힌다. 규칙을 
 
 ### commit message와의 관계
 - commit message에는 "왜" + 변경 요지만 (Conventional Commits)
-- footer 에 `Change-Track: <트랙>` 트레일러 기재 (효능 측정 연동, 위 "커밋 트레일러" 절)
+- 개인 레포는 footer 에 `Change-Track: <트랙>` 트레일러, 팀 레포는 `git notes --ref=change-track` 로 기재 (효능 측정 연동, 위 "커밋 트레일러" 절)
 - `.progress.md`에는 "어디까지/다음에 무엇을/왜 멈췄는지"
 - 둘은 보완 관계: commit log만 봐서는 작업의 현재 위치를 즉시 파악하기 어렵다
 

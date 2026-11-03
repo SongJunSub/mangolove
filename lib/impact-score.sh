@@ -203,7 +203,7 @@ triage() {
     printf '{"predicted":"%s","track_floor":"%s","verdict":"%s"}\n' "$predicted" "$floor" "$verdict"
 }
 
-# declared-track <ref> → 커밋 메시지의 Change-Track: trailer 를 정규화해 출력(없으면 빈 문자열).
+# declared-track <ref> → 커밋 메시지의 Change-Track: trailer 를 정규화해 출력(없으면 notes, 둘 다 없으면 빈 문자열).
 # git interpret-trailers --parse 로 **footer 트레일러 블록만** 파싱: 본문(prose) 속
 # "Change-Track: ..." 라인을 트레일러로 오인하지 않는다(FP 차단). 마지막 트레일러 우선,
 # 값의 첫 토큰만, 유효하지 않으면 undeclared 취급(빈 출력). --working/--staged 는 메시지가 없어 빈 출력.
@@ -218,6 +218,8 @@ declared_track() {
         | grep -iE '^Change-Track:' | tail -1 \
         | sed -E 's/^[Cc]hange-[Tt]rack:[[:space:]]*//' \
         | awk '{print $1}')"
+    # 팀 레포는 트레일러 대신 로컬 git notes(refs/notes/change-track)에 남긴다. push 기본 대상이 아니라 팀에 안 보인다.
+    [ -z "$raw" ] && raw="$(git notes --ref=change-track show "$ref" 2>/dev/null | awk 'NF {print $1; exit}')"
     [ -z "$raw" ] && return 0
     norm="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
     case "$norm" in

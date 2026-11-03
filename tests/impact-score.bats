@@ -484,6 +484,25 @@ _mkcommit_track() {
     [ "$output" = "Large" ]
 }
 
+@test "impact declared-track: falls back to git notes --ref=change-track when no trailer" {
+    local r; r=$(_repo "dt-notes")
+    echo x > "$r/a.txt"; local sha; sha=$(_mkcommit "$r" "fix: team repo commit")
+    git -C "$r" -c user.email=t@t.com -c user.name=t notes --ref=change-track add -m "Medium" "$sha"
+    cd "$r"
+    run bash "$(IMPACT)" declared-track "$sha"
+    [ "$status" -eq 0 ]
+    [ "$output" = "Medium" ]
+}
+
+@test "impact declared-track: trailer wins over git notes" {
+    local r; r=$(_repo "dt-notes-trailer")
+    echo x > "$r/a.txt"; local sha; sha=$(_mkcommit_track "$r" "feat: x" "Large")
+    git -C "$r" -c user.email=t@t.com -c user.name=t notes --ref=change-track add -m "Small" "$sha"
+    cd "$r"
+    run bash "$(IMPACT)" declared-track "$sha"
+    [ "$output" = "Large" ]
+}
+
 @test "impact triage-commit: no trailer -> verdict undeclared (declared null)" {
     local r; r=$(_repo "tc-undecl")
     echo x > "$r/a.txt"; local sha; sha=$(_mkcommit "$r" "x")

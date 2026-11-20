@@ -295,13 +295,15 @@ _write_state() {
 # 명령은 JSON 이스케이프된 채 한 줄에 실린다. 그래서 줄바꿈(역슬래시 n)과 2>&1 의 & 에서 끊는다.
 # 50MB 트랜스크립트도 고정 문자열 grep 한 번으로 후보를 좁히므로 수십 ms 안에 끝난다.
 _wrote_dod() {
-    local tp="$1" cand
+    local tp="$1" cand fp
     [ -n "$tp" ] && [ -f "$tp" ] && [ -r "$tp" ] || return 2
     cand="$(grep -F '"type":"tool_use"' "$tp" 2>/dev/null | grep -F 'dod.sh')" || return 1
-    printf '%s\n' "$cand" | grep -E '"file_path":"[^"]*dod\.sh"' \
-        | grep -Eq '"name":"(Write|Edit|MultiEdit)"' && return 0
-    printf '%s\n' "$cand" \
-        | grep -Eq '(>|(tee|cp|mv|install)[[:space:]]|sed[[:space:]]+-i)([^|;&\\]|\\")*dod\.sh' && return 0
+    # grep -q 앞에 파이프를 두지 않는다. -q 가 먼저 끝나면 앞 단계가 SIGPIPE 로 죽고, 이 파일의
+    # pipefail 이 그것을 "일치 없음"으로 바꾼다(실측: 후보 129KB 인 세션이 자기 DoD 를 건너뛰었다).
+    fp="$(grep -E '"file_path":"[^"]*dod\.sh"' <<< "$cand")" \
+        && grep -Eq '"name":"(Write|Edit|MultiEdit)"' <<< "$fp" && return 0
+    grep -Eq '(>|(tee|cp|mv|install)[[:space:]]|sed[[:space:]]+-i)([^|;&\\]|\\")*dod\.sh' <<< "$cand" \
+        && return 0
     return 1
 }
 

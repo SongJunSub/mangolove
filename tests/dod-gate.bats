@@ -929,3 +929,23 @@ run_gate_tx() {   # $1 = 세션, $2 = 트랜스크립트, $3 = cwd
     [[ "$output" == *"출력 없이 실패"* ]]
     [[ "$output" == *"종료 코드 1"* ]]
 }
+
+@test "작성자: 쓴 기록 뒤에 dod.sh 를 언급한 호출이 많아도(파이프 버퍼 초과) 작성으로 본다" {
+    # set -o pipefail 아래에서 printf | grep -q 는 grep 이 먼저 끝나 printf 가 SIGPIPE 로 죽고,
+    # 그 실패가 "쓴 기록 없음"으로 읽혔다. 실측: 후보 129KB 인 세션이 자기 DoD 를 남의 것으로 보고 건너뛰었다.
+    local tx="$PROJ.ml/big.jsonl" pad i; mkdir -p "$PROJ.ml"
+    write_failing_dod
+    _tx_tool "$tx" Bash "{\"command\":\"cat > .mangolove/dod.sh <<'EOF'\\\\nexit 1\\\\nEOF\"}"
+    pad="$(head -c 4000 /dev/zero | tr '\0' 'x')"
+    for i in $(seq 1 60); do
+        _tx_tool "$tx" Bash "{\"command\":\"bash .mangolove/dod.sh # $pad\"}"
+    done
+    _tx_tool "$tx" Write "{\"file_path\":\"$PROJ/.mangolove/dod.sh\",\"content\":\"$pad\"}"
+    for i in $(seq 1 60); do
+        _tx_tool "$tx" Read "{\"file_path\":\"$PROJ/.mangolove/dod.sh\",\"x\":\"$pad\"}"
+    done
+
+    run run_gate_tx SESSION-A "$tx"
+    [ "$status" -eq 2 ]
+    [ "$(state_field 3)" = "SESSION-A" ]
+}

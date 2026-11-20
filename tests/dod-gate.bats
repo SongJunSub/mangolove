@@ -13,6 +13,9 @@ setup() {
     # 게이트는 차단과 우회를 효능 원장(${MANGOLOVE_DIR:-~/.mangolove}/efficacy)에 남긴다. 격리하지
     # 않으면 테스트를 돌릴 때마다 개발자의 실제 원장에 기록이 쌓여 mangolove efficacy 수치가 부푼다.
     export MANGOLOVE_DIR="$PROJ.ml"
+    # 게이트는 cwd 에 dod.sh 가 없으면 이 값(세션을 띄운 프로젝트 루트)에서 찾는다. 바깥 값이
+    # 새어 들어오면 테스트가 개발자의 실제 프로젝트를 보게 되므로 지운다.
+    unset CLAUDE_PROJECT_DIR
     JSON="{\"hook_event_name\":\"Stop\",\"cwd\":\"$PROJ\"}"
     export GATE JSON
 }
@@ -810,4 +813,119 @@ _write_marker_script() {
         [ -n "$a" ] || { echo "missing: $fn"; false; }
         [ "$a" = "$b" ] || { echo "diverged: $fn"; false; }
     done
+}
+
+# ── 작성자와 위치 ─────────────────────────────────────────────
+# 실측 사고(CRS, 2026-11-20): 세션 A 가 셸의 현재 폴더를 메모리 폴더에 둔 채 dod.sh 를 프로젝트
+# 루트에 절대 경로로 썼다. 게이트가 현재 폴더 기준으로만 찾아 A 는 자기 DoD 를 한 번도 평가하지
+# 못했고, 두 시간 뒤 루트로 돌아온 무관한 세션 B 가 "처음 평가한 세션"으로 소유자가 되어 3번 막혔다.
+
+# 트랜스크립트 한 줄. 실제 jsonl 의 tool_use 줄 모양을 따른다(명령은 JSON 이스케이프된 채 실린다).
+_tx_tool() {   # $1 = 파일, $2 = 도구 이름, $3 = input JSON
+    printf '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t","name":"%s","input":%s}]}}\n' \
+        "$2" "$3" >> "$1"
+}
+
+# cwd, session_id, transcript_path 를 실은 Stop payload. CLAUDE_PROJECT_DIR 은 호출 쪽이 정한다.
+run_gate_tx() {   # $1 = 세션, $2 = 트랜스크립트, $3 = cwd
+    printf '{"hook_event_name":"Stop","session_id":"%s","transcript_path":"%s","cwd":"%s"}' \
+        "$1" "$2" "${3:-$PROJ}" | "$GATE"
+}
+
+@test "작성자: 현재 폴더가 프로젝트 밖이어도 루트의 dod.sh 를 쓴 세션이 평가하고 소유한다 (실측 사고)" {
+    local away tx="$PROJ.ml/a.jsonl"; away="$(mktemp -d)"; mkdir -p "$PROJ.ml"
+    write_failing_dod "FAIL: 예약 상태"
+    _tx_tool "$tx" Bash "{\"command\":\"cat > $PROJ/.mangolove/dod.sh <<'EOF'\\\\n#!/usr/bin/env bash\\\\nEOF\"}"
+
+    CLAUDE_PROJECT_DIR="$PROJ" run run_gate_tx SESSION-A "$tx" "$away"
+    rm -rf "$away"
+    [ "$status" -eq 2 ]
+    [ -f "$PROJ/ran" ]
+    [ "$(state_field 3)" = "SESSION-A" ]
+}
+
+@test "작성자: 쓴 기록이 없는 세션은 처음 평가하더라도 소유하지도 실행하지도 않는다 (실측 사고)" {
+    local tx="$PROJ.ml/b.jsonl"; mkdir -p "$PROJ.ml"
+    write_failing_dod
+    _tx_tool "$tx" Bash '{"command":"git status"}'
+
+    CLAUDE_PROJECT_DIR="$PROJ" run run_gate_tx SESSION-B "$tx"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"쓴 기록이 없는"* ]]
+    [ ! -e "$PROJ/ran" ]
+    [ ! -e "$PROJ/.mangolove/.dod-gate-attempts" ]    # 소유권을 찍지 않아 작성자가 나중에 가져갈 수 있다
+    [ -f "$PROJ/.mangolove/dod.sh" ]
+}
+
+@test "작성자: 남의 dod.sh 를 읽고 돌려 본 것은 쓴 기록으로 치지 않는다" {
+    local tx="$PROJ.ml/b.jsonl"; mkdir -p "$PROJ.ml"
+    write_failing_dod
+    _tx_tool "$tx" Bash '{"command":"ls -la .mangolove/ 2>&1; cat .mangolove/dod.sh 2>&1 | head"}'
+    _tx_tool "$tx" Bash '{"command":"zsh -x .mangolove/dod.sh 2>&1 | tail -8; echo \"exit=$?\""}'
+    _tx_tool "$tx" Bash '{"command":"echo x > out.txt\\nbash .mangolove/dod.sh"}'
+    _tx_tool "$tx" Read "{\"file_path\":\"$PROJ/.mangolove/dod.sh\"}"
+
+    run run_gate_tx SESSION-B "$tx"
+    [ "$status" -eq 0 ]
+    [ ! -e "$PROJ/ran" ]
+}
+
+@test "작성자: Write, Edit, tee, mv 로 쓴 기록은 모두 작성으로 본다" {
+    local tx="$PROJ.ml/w.jsonl" input; mkdir -p "$PROJ.ml"
+    for input in \
+        "Write|{\"file_path\":\"$PROJ/.mangolove/dod.sh\",\"content\":\"x\"}" \
+        "Edit|{\"file_path\":\".mangolove/dod.sh\",\"old_string\":\"a\",\"new_string\":\"b\"}" \
+        'Bash|{"command":"printf x | tee .mangolove/dod.sh >/dev/null"}' \
+        'Bash|{"command":"mv /tmp/d.sh \"$P/.mangolove/dod.sh\""}'; do
+        rm -f "$tx" "$PROJ/.mangolove/.dod-gate-attempts" "$PROJ/ran"
+        write_failing_dod
+        _tx_tool "$tx" "${input%%|*}" "${input#*|}"
+        run run_gate_tx SESSION-A "$tx"
+        [ "$status" -eq 2 ] || { echo "not author: $input"; false; }
+    done
+}
+
+@test "작성자: 트랜스크립트를 읽을 수 없으면 예전처럼 처음 평가한 세션이 소유한다" {
+    write_failing_dod
+    run run_gate_tx SESSION-A "$PROJ.ml/none.jsonl"
+    [ "$status" -eq 2 ]
+    [ "$(state_field 3)" = "SESSION-A" ]
+}
+
+@test "위치: 현재 폴더에 dod.sh 가 있으면 프로젝트 루트보다 그것을 본다 (워크트리에서 쓴 DoD)" {
+    local wt; wt="$(mktemp -d)"; mkdir -p "$wt/.mangolove"
+    printf '#!/usr/bin/env bash\ntouch "%s/wt-ran"\nexit 0\n' "$PROJ" > "$wt/.mangolove/dod.sh"
+    write_failing_dod
+    CLAUDE_PROJECT_DIR="$PROJ" run run_gate_tx S "$PROJ.ml/none.jsonl" "$wt"
+    rm -rf "$wt"
+    [ "$status" -eq 0 ]
+    [ -f "$PROJ/wt-ran" ]
+    [ ! -e "$PROJ/ran" ]
+}
+
+# ── 실행 ─────────────────────────────────────────────────────
+
+@test "실행: dod.sh 는 셔뱅에 적힌 인터프리터로 실행한다 (zsh 함수를 쓰는 DoD)" {
+    printf '#!/usr/bin/env bash\ntouch "%s/interp-ran"\nexec bash "$@"\n' "$PROJ" > "$PROJ/interp"
+    chmod +x "$PROJ/interp"
+    printf '#!%s\nexit 0\n' "$PROJ/interp" > "$PROJ/.mangolove/dod.sh"
+    run run_gate
+    [ "$status" -eq 0 ]
+    [ -f "$PROJ/interp-ran" ]
+    [ ! -f "$PROJ/.mangolove/dod.sh" ]
+}
+
+@test "실행: 셔뱅의 인터프리터를 찾을 수 없으면 bash 로 실행한다" {
+    printf '#!/nonexistent/zsh\ntouch "%s/ran"\nexit 0\n' "$PROJ" > "$PROJ/.mangolove/dod.sh"
+    run run_gate
+    [ "$status" -eq 0 ]
+    [ -f "$PROJ/ran" ]
+}
+
+@test "실행: 출력 없이 실패하면 종료 코드와 함께 실패한 검사를 알 수 없다고 알린다" {
+    printf '#!/usr/bin/env bash\nset -e\n[[ a == b ]]\n' > "$PROJ/.mangolove/dod.sh"
+    run run_gate
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"출력 없이 실패"* ]]
+    [[ "$output" == *"종료 코드 1"* ]]
 }
